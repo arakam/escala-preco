@@ -30,10 +30,18 @@ export async function GET(request: NextRequest) {
   }
 
   const cookieState = request.cookies.get("ml_oauth_state")?.value;
+  const codeVerifier = request.cookies.get("ml_oauth_code_verifier")?.value;
   if (!cookieState) {
     console.error("[ML callback] cookie state ausente");
     return failRedirect(
       "Sessão expirada ou cookie bloqueado. Conecte novamente (não feche a aba antes de autorizar).",
+      "cookie_missing"
+    );
+  }
+  if (!codeVerifier) {
+    console.error("[ML callback] code_verifier (PKCE) ausente");
+    return failRedirect(
+      "Sessão PKCE expirada. O Mercado Livre exige PKCE; conecte novamente (não feche a aba antes de autorizar).",
       "cookie_missing"
     );
   }
@@ -65,6 +73,7 @@ export async function GET(request: NextRequest) {
     client_secret: clientSecret,
     code,
     redirect_uri: redirectUri,
+    code_verifier: codeVerifier,
   });
 
   let tokenRes: Response;
@@ -186,5 +195,6 @@ export async function GET(request: NextRequest) {
 
   const res = NextResponse.redirect(`${appUrl}/app/mercadolivre?connected=1`, { status: 302 });
   res.cookies.delete("ml_oauth_state");
+  res.cookies.delete("ml_oauth_code_verifier");
   return res;
 }
