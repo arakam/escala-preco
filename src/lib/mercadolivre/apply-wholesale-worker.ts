@@ -72,7 +72,7 @@ export async function runApplyWholesaleJob(jobId: string, accountId: string): Pr
       .from("ml_items")
       .select("item_id, has_variations")
       .eq("account_id", accountId)
-      .in("item_id", [...new Set(drafts.map((d) => d.item_id))]);
+      .in("item_id", Array.from(new Set(drafts.map((d) => d.item_id))));
     const hasVariationsByItem = new Map<string, boolean>();
     for (const row of itemsRows ?? []) {
       const r = row as { item_id: string; has_variations: boolean };
