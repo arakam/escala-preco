@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
       "title",
       "price_atual",
       ...Array.from({ length: 5 }, (_, i) => [`tier${i + 1}_min_qty`, `tier${i + 1}_price`]).flat(),
-    ].join(",");
+    ].join(";");
     return new NextResponse(headers + "\n", {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
@@ -108,8 +108,9 @@ export async function GET(request: NextRequest) {
     return escapeCsv(item.seller_custom_field ?? "");
   }
 
+  const SEP = ";";
   function escapeCsv(v: string): string {
-    if (v.includes(",") || v.includes('"') || v.includes("\n")) {
+    if (v.includes(SEP) || v.includes('"') || v.includes("\n")) {
       return `"${v.replace(/"/g, '""')}"`;
     }
     return v;
@@ -170,7 +171,7 @@ export async function GET(request: NextRequest) {
   if (filter === "com_rascunho") filtered = dataRows.filter((r) => r.hasDraft);
   else if (filter === "sem_rascunho") filtered = dataRows.filter((r) => !r.hasDraft);
 
-  const csvContent = [headers.join(","), ...filtered.map((r) => r.values.join(","))].join("\n");
+  const csvContent = [headers.join(SEP), ...filtered.map((r) => r.values.join(SEP))].join("\n");
   const bom = "\uFEFF";
 
   return new NextResponse(bom + csvContent, {
