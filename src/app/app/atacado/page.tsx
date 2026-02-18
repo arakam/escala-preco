@@ -1,7 +1,28 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { Tier } from "@/lib/atacado";
+
+interface ImportPreviewRow {
+  row: number;
+  item_id: string;
+  variation_id: string;
+  sku: string;
+  title: string;
+  price_atual: string;
+  tiers: Tier[];
+  valid: boolean;
+  error?: string;
+}
+
+interface ImportResult {
+  ok: boolean;
+  total_rows: number;
+  valid_rows: number;
+  error_rows: number;
+  errors: { row: number; field?: string; message: string }[];
+  preview: ImportPreviewRow[];
+}
 
 interface MLAccount {
   id: string;
@@ -49,6 +70,12 @@ export default function AtacadoPage() {
   const [filter, setFilter] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importConfirming, setImportConfirming] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
 
@@ -229,6 +256,70 @@ export default function AtacadoPage() {
     setMessage({ type: "success", text: "Exportação iniciada." });
   };
 
+  const openImportCsv = () => {
+    setImportResult(null);
+    setImportFile(null);
+    fileInputRef.current?.click();
+  };
+
+  const onImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImportLoading(true);
+    setImportResult(null);
+    setImportFile(file);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/atacado/import", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error ?? "Erro ao processar CSV." });
+        setImportFile(null);
+        return;
+      }
+      setImportResult(data);
+      if (data.ok === false && (data.errors?.length || data.headerError)) {
+        setMessage({ type: "error", text: data.errors?.[0]?.message ?? data.headerError ?? "Erro no CSV." });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Erro de conexão." });
+      setImportFile(null);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!importFile || !accountId) return;
+    setImportConfirming(true);
+    try {
+      const form = new FormData();
+      form.append("file", importFile);
+      form.append("accountId", accountId);
+      const res = await fetch("/api/atacado/import/confirm", { method: "POST", body: form });
+      const data = await res.json();
+      if (data.ok) {
+        setMessage({ type: "success", text: `${data.saved_count ?? 0} linha(s) importada(s).` });
+        setImportResult(null);
+        setImportFile(null);
+        loadRows();
+      } else {
+        setMessage({ type: "error", text: data.error ?? "Erro ao confirmar importação." });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Erro de conexão." });
+    } finally {
+      setImportConfirming(false);
+    }
+  };
+
+  const cancelImport = () => {
+    setImportResult(null);
+    setImportFile(null);
+  };
+
   useEffect(() => {
     if (!message) return;
     const t = setTimeout(() => setMessage(null), 4000);
@@ -335,10 +426,118 @@ export default function AtacadoPage() {
         >
           Exportar CSV modelo
         </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv"
+          className="hidden"
+          onChange={onImportFileChange}
+        />
+        <button
+          type="button"
+          onClick={openImportCsv}
+          disabled={importLoading}
+          className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          {importLoading ? "Processando…" : "Importar CSV"}
+        </button>
         {editedCount > 0 && (
           <span className="text-sm text-amber-700">{editedCount} linha(s) alterada(s)</span>
         )}
       </div>
+
+      {importResult && (
+        <div className="mb-6 rounded-lg border-2 border-gray-300 bg-gray-50 p-4">
+          <h2 className="mb-3 text-lg font-semibold">Preview da importação</h2>
+          <div className="mb-3 flex flex-wrap gap-4 text-sm">
+            <span className="font-medium">Total de linhas: {importResult.total_rows}</span>
+            <span className="text-green-700">Válidas: {importResult.valid_rows}</span>
+            <span className="text-red-700">Com erro: {importResult.error_rows}</span>
+          </div>
+          {importResult.preview.length > 0 && (
+            <div className="mb-4 max-h-80 overflow-auto rounded border border-gray-200 bg-white">
+              <table className="min-w-full text-left text-sm">
+                <thead className="sticky top-0 bg-gray-100">
+                  <tr>
+                    <th className="p-2 font-medium">Linha</th>
+                    <th className="p-2 font-medium">item_id</th>
+                    <th className="p-2 font-medium">variation_id</th>
+                    <th className="p-2 font-medium">sku</th>
+                    <th className="max-w-[120px] truncate p-2 font-medium">title</th>
+                    <th className="p-2 font-medium">price_atual</th>
+                    <th className="p-2 font-medium">Tiers</th>
+                    <th className="p-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importResult.preview.map((pr) => (
+                    <tr
+                      key={pr.row}
+                      className={`border-t border-gray-100 ${pr.valid ? "bg-white" : "bg-red-50"}`}
+                    >
+                      <td className="p-2">{pr.row}</td>
+                      <td className="p-2 font-mono text-gray-700">{pr.item_id || "—"}</td>
+                      <td className="p-2">{pr.variation_id || "—"}</td>
+                      <td className="max-w-[80px] truncate p-2">{pr.sku || "—"}</td>
+                      <td className="max-w-[120px] truncate p-2" title={pr.title}>
+                        {pr.title || "—"}
+                      </td>
+                      <td className="p-2">{pr.price_atual || "—"}</td>
+                      <td className="p-2">
+                        {pr.tiers.length > 0
+                          ? pr.tiers.map((t) => `${t.min_qty}→${t.price}`).join(", ")
+                          : "—"}
+                      </td>
+                      <td className="p-2">
+                        {pr.valid ? (
+                          <span className="rounded bg-green-200 px-2 py-0.5 text-green-800">OK</span>
+                        ) : (
+                          <span className="rounded bg-red-200 px-2 py-0.5 text-red-800" title={pr.error}>
+                            Erro
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {importResult.errors.length > 0 && (
+            <div className="mb-4 max-h-40 overflow-auto rounded border border-red-200 bg-red-50 p-2 text-sm">
+              <p className="mb-2 font-medium text-red-800">Erros por linha:</p>
+              <ul className="list-inside list-disc space-y-1 text-red-700">
+                {importResult.errors.slice(0, 50).map((err, idx) => (
+                  <li key={idx}>
+                    Linha {err.row}{err.field ? ` (${err.field})` : ""}: {err.message}
+                  </li>
+                ))}
+                {importResult.errors.length > 50 && (
+                  <li>… e mais {importResult.errors.length - 50} erros.</li>
+                )}
+              </ul>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={confirmImport}
+              disabled={importConfirming || importResult.valid_rows === 0}
+              className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+            >
+              {importConfirming ? "Importando…" : "Confirmar Importação"}
+            </button>
+            <button
+              type="button"
+              onClick={cancelImport}
+              disabled={importConfirming}
+              className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className="text-gray-500">Carregando…</p>
