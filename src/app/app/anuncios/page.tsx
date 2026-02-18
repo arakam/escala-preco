@@ -301,6 +301,16 @@ export default function AnunciosPage() {
                   <th className="p-2 font-medium text-gray-700">Título</th>
                   <th className="p-2 font-medium text-gray-700">Status</th>
                   <th className="p-2 font-medium text-gray-700">Preço</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 1</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Quantidade Mínimo Atacado 1</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 2</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Quantidade Mínimo Atacado 2</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 3</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Quantidade Mínimo Atacado 3</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 4</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Quantidade Mínimo Atacado 4</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 5</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Quantidade Mínimo Atacado 5</th>
                   <th className="p-2 font-medium text-gray-700">Variações</th>
                   <th className="p-2 font-medium text-gray-700">Atualizado</th>
                   <th className="p-2 font-medium text-gray-700">Link</th>
@@ -320,7 +330,16 @@ export default function AnunciosPage() {
                         <span className="text-gray-400">—</span>
                       )}
                     </td>
-                    <td className="p-2 font-mono text-gray-600">{item.item_id}</td>
+                    <td
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => navigator.clipboard.writeText(item.item_id)}
+                      onKeyDown={(e) => e.key === "Enter" && navigator.clipboard.writeText(item.item_id)}
+                      title="Clique para copiar"
+                      className="cursor-pointer select-none font-mono text-gray-600 hover:bg-gray-100 p-2 rounded"
+                    >
+                      {item.item_id}
+                    </td>
                     <td className="max-w-[240px] truncate p-2" title={item.title ?? ""}>
                       {item.title ?? "—"}
                     </td>
@@ -339,6 +358,81 @@ export default function AnunciosPage() {
                     </td>
                     <td className="p-2 font-medium">
                       {item.price != null ? `R$ ${Number(item.price).toFixed(2)}` : "—"}
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="text"
+                        placeholder="0,00"
+                        className="w-20 rounded border border-gray-200 px-2 py-1 text-sm"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="number"
+                        placeholder="1"
+                        min={1}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 text-sm"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="text"
+                        placeholder="0,00"
+                        className="w-20 rounded border border-gray-200 px-2 py-1 text-sm"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="number"
+                        placeholder=""
+                        min={1}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 text-sm"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="text"
+                        placeholder="0,00"
+                        className="w-20 rounded border border-gray-200 px-2 py-1 text-sm"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="number"
+                        placeholder=""
+                        min={1}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 text-sm"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="text"
+                        placeholder="0,00"
+                        className="w-20 rounded border border-gray-200 px-2 py-1 text-sm"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="number"
+                        placeholder=""
+                        min={1}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 text-sm"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="text"
+                        placeholder="0,00"
+                        className="w-20 rounded border border-gray-200 px-2 py-1 text-sm"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="number"
+                        placeholder=""
+                        min={1}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 text-sm"
+                      />
                     </td>
                     <td className="p-2">{item.has_variations ? "Sim" : "Não"}</td>
                     <td className="p-2 text-gray-500">
