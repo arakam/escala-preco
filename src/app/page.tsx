@@ -1,20 +1,28 @@
 import Link from "next/link";
+import Image from "next/image";
 
 export default function HomePage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
-      <h1 className="text-2xl font-bold">EscalaPreço</h1>
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-gray-50 p-8">
+      <Image
+        src="/logo.png"
+        alt="Escala Preço"
+        width={320}
+        height={90}
+        className="h-20 w-auto object-contain sm:h-24"
+        priority
+      />
       <p className="text-gray-600">Integração com Mercado Livre</p>
       <div className="flex gap-4">
         <Link
           href="/auth/login"
-          className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          className="rounded bg-brand-blue px-4 py-2 font-medium text-white transition hover:bg-brand-blue-dark"
         >
           Entrar
         </Link>
         <Link
           href="/auth/register"
-          className="rounded border border-gray-300 px-4 py-2 hover:bg-gray-100"
+          className="rounded border border-brand-blue bg-white px-4 py-2 font-medium text-brand-blue transition hover:bg-brand-blue hover:text-white"
         >
           Cadastrar
         </Link>

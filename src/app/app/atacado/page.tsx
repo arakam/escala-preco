@@ -324,7 +324,7 @@ export default function AtacadoPage() {
           type="button"
           onClick={saveAll}
           disabled={saving || editedCount === 0}
-          className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
         >
           {saving ? "Salvando…" : "Salvar alterações"}
         </button>
@@ -345,7 +345,7 @@ export default function AtacadoPage() {
       ) : rows.length === 0 ? (
         <p className="text-gray-500">
           Nenhum item encontrado. Sincronize anúncios em{" "}
-          <a href="/app/anuncios" className="text-blue-600 hover:underline">
+          <a href="/app/anuncios" className="text-brand-blue hover:underline">
             Anúncios
           </a>
           .
@@ -438,7 +438,7 @@ export default function AtacadoPage() {
                           type="button"
                           onClick={() => saveRow(r)}
                           disabled={saving}
-                          className="mr-1 text-blue-600 hover:underline disabled:opacity-50"
+                          className="mr-1 text-brand-blue hover:underline disabled:opacity-50"
                         >
                           Salvar
                         </button>

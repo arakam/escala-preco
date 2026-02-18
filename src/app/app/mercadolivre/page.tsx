@@ -220,7 +220,7 @@ function MercadoLivreContent() {
                         type="button"
                         onClick={() => handleSync(acc.id)}
                         disabled={isSyncing}
-                        className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                        className="rounded bg-brand-blue px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
                       >
                         {isSyncing ? "Sincronizando…" : "Sincronizar anúncios"}
                       </button>
@@ -293,7 +293,7 @@ function MercadoLivreContent() {
           </ul>
           <a
             href="/api/mercadolivre/auth"
-            className="inline-block text-sm text-blue-600 hover:underline"
+            className="inline-block text-sm text-brand-blue hover:underline"
           >
             + Conectar outra conta
           </a>

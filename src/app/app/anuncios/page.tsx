@@ -195,7 +195,7 @@ export default function AnunciosPage() {
           type="button"
           onClick={handleSyncAll}
           disabled={syncing}
-          className="rounded bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="rounded bg-brand-blue px-4 py-2 font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
         >
           {syncing ? "Sincronizando…" : "Importar / Sincronizar todos"}
         </button>
@@ -444,7 +444,7 @@ export default function AnunciosPage() {
                           href={item.permalink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline"
+                          className="text-brand-blue hover:underline"
                         >
                           ML
                         </a>

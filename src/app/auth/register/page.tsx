@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 
 export default function RegisterPage() {
@@ -32,9 +33,19 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-4">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-gray-50 p-4">
       <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <h1 className="mb-4 text-xl font-semibold">Cadastrar</h1>
+        <div className="mb-6 flex justify-center">
+          <Image
+            src="/logo.png"
+            alt="Escala Preço"
+            width={280}
+            height={78}
+            className="h-16 w-auto object-contain sm:h-20"
+            priority
+          />
+        </div>
+        <h1 className="mb-4 text-xl font-semibold text-gray-900">Cadastrar</h1>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-gray-700">
@@ -46,7 +57,7 @@ export default function RegisterPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
               placeholder="seu@email.com"
             />
           </div>
@@ -61,7 +72,7 @@ export default function RegisterPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
             />
           </div>
           {error && (
@@ -70,14 +81,14 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="mt-2 w-full rounded bg-brand-blue py-2 font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
           >
             {loading ? "Cadastrando…" : "Cadastrar"}
           </button>
         </form>
         <p className="mt-4 text-center text-sm text-gray-600">
           Já tem conta?{" "}
-          <Link href="/auth/login" className="text-blue-600 hover:underline">
+          <Link href="/auth/login" className="font-medium text-brand-blue hover:text-brand-blue-dark hover:underline">
             Entrar
           </Link>
         </p>

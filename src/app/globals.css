@@ -1,3 +1,12 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --brand-blue: #1e3a8a;
+  --brand-blue-light: #2563eb;
+  --brand-blue-dark: #1e40af;
+  --brand-orange: #ea580c;
+  --brand-orange-light: #f97316;
+  --brand-orange-dark: #c2410c;
+}
