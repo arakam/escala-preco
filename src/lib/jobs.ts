@@ -5,7 +5,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type JobStatus = "queued" | "running" | "success" | "failed" | "partial";
-export type JobType = "sync_items";
+export type JobType = "sync_items" | "apply_wholesale_prices";
 
 export interface JobRow {
   id: string;
@@ -99,11 +99,20 @@ export async function addJobLog(
   if (error) throw error;
 }
 
+export interface JobLogEntry {
+  item_id: string | null;
+  variation_id: number | null;
+  status: string;
+  message: string | null;
+  created_at: string;
+  response_json?: unknown;
+}
+
 export async function getJobWithLogs(
   supabase: SupabaseClient,
   jobId: string,
   logsLimit = 50
-): Promise<{ job: JobRow | null; logs: Array<{ item_id: string | null; variation_id: number | null; status: string; message: string | null; created_at: string }> }> {
+): Promise<{ job: JobRow | null; logs: JobLogEntry[] }> {
   const { data: job } = await supabase
     .from("ml_jobs")
     .select("*")
@@ -111,12 +120,12 @@ export async function getJobWithLogs(
     .single();
   const { data: logs } = await supabase
     .from("ml_job_logs")
-    .select("item_id, variation_id, status, message, created_at")
+    .select("item_id, variation_id, status, message, created_at, response_json")
     .eq("job_id", jobId)
     .order("created_at", { ascending: false })
     .limit(logsLimit);
   return {
     job: job as JobRow | null,
-    logs: (logs ?? []) as Array<{ item_id: string | null; variation_id: number | null; status: string; message: string | null; created_at: string }>,
+    logs: (logs ?? []) as JobLogEntry[],
   };
 }

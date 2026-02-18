@@ -63,7 +63,7 @@ async function fetchWithTimeout(
 async function fetchWithRetry(
   url: string,
   accessToken: string,
-  options: { timeout?: number } = {}
+  options: { timeout?: number; method?: string; body?: string; headers?: Record<string, string> } = {}
 ): Promise<Response> {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
   let lastError: unknown;
@@ -72,7 +72,13 @@ async function fetchWithRetry(
       const res = await fetchWithTimeout(
         url,
         {
-          headers: { Authorization: `Bearer ${accessToken}` },
+          method: options.method ?? "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            ...(options.body ? { "Content-Type": "application/json" } : {}),
+            ...options.headers,
+          },
+          body: options.body,
           timeout,
         }
       );
@@ -138,6 +144,79 @@ export async function fetchItemDetail(
     throw new Error(`items/${itemId} failed: ${res.status} ${text}`);
   }
   return (await res.json()) as MLItemDetail;
+}
+
+/**
+ * PUT em /items/{itemId} com body JSON.
+ */
+export async function putItem(
+  itemId: string,
+  accessToken: string,
+  body: Record<string, unknown>,
+  options: { timeout?: number } = {}
+): Promise<{ ok: true; data?: unknown } | { ok: false; status: number; body: string; json?: unknown }> {
+  const url = `https://api.mercadolibre.com/items/${itemId}`;
+  const res = await fetchWithRetry(url, accessToken, {
+    method: "PUT",
+    body: JSON.stringify(body),
+    timeout: options.timeout ?? DEFAULT_TIMEOUT_MS,
+  });
+  const text = await res.text();
+  let json: unknown;
+  try {
+    json = text ? JSON.parse(text) : undefined;
+  } catch {
+    json = undefined;
+  }
+  if (res.ok) {
+    return { ok: true, data: json };
+  }
+  return { ok: false, status: res.status, body: text, json };
+}
+
+/**
+ * GET /items/{itemId}/prices — lista preços do item (inclui preço por quantidade com show-all-prices).
+ */
+export async function getItemPrices(
+  itemId: string,
+  accessToken: string,
+  options: { showAllPrices?: boolean } = {}
+): Promise<{ id: string; prices: Array<{ id: string; type?: string; amount?: number; conditions?: { min_purchase_unit?: number } }> } | null> {
+  const url = `https://api.mercadolibre.com/items/${itemId}/prices`;
+  const res = await fetchWithRetry(url, accessToken, {
+    headers: options.showAllPrices ? { "show-all-prices": "true" } : undefined,
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as { id: string; prices: Array<{ id: string; type?: string; amount?: number; conditions?: { min_purchase_unit?: number } }> };
+}
+
+/**
+ * POST em /items/{itemId}/prices/standard/quantity — preços por quantidade (atacado).
+ * Documentação: https://developers.mercadolivre.com.br/pt_br/precos-por-quantidade
+ */
+export async function postItemPricesQuantity(
+  itemId: string,
+  accessToken: string,
+  body: { prices: Array<Record<string, unknown>> },
+  options: { timeout?: number } = {}
+): Promise<{ ok: true; data?: unknown } | { ok: false; status: number; body: string; json?: unknown }> {
+  const url = `https://api.mercadolibre.com/items/${itemId}/prices/standard/quantity`;
+  const res = await fetchWithRetry(url, accessToken, {
+    method: "POST",
+    body: JSON.stringify(body),
+    timeout: options.timeout ?? DEFAULT_TIMEOUT_MS,
+  });
+  const text = await res.text();
+  let json: unknown;
+  try {
+    json = text ? JSON.parse(text) : undefined;
+  } catch {
+    json = undefined;
+  }
+  if (res.ok) {
+    return { ok: true, data: json };
+  }
+  return { ok: false, status: res.status, body: text, json };
 }
 
 /**

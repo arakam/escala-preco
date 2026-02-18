@@ -77,6 +77,13 @@ export default function AtacadoPage() {
   const [importConfirming, setImportConfirming] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [applyJobId, setApplyJobId] = useState<string | null>(null);
+  const [applyJob, setApplyJob] = useState<{
+    job: { id: string; status: string; total: number; processed: number; ok: number; errors: number };
+    logs: Array<{ item_id: string | null; variation_id: number | null; status: string; message: string | null; response_json?: unknown }>;
+  } | null>(null);
+  const [applyLoading, setApplyLoading] = useState(false);
+
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
 
   const loadAccounts = useCallback(async () => {
@@ -326,6 +333,45 @@ export default function AtacadoPage() {
     return () => clearTimeout(t);
   }, [message]);
 
+  const fetchApplyJob = useCallback(async (jobId: string) => {
+    const res = await fetch(`/api/jobs/${jobId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    setApplyJob({ job: data.job, logs: data.logs ?? [] });
+  }, []);
+
+  const startApply = async () => {
+    if (!accountId) return;
+    setApplyLoading(true);
+    try {
+      const res = await fetch("/api/atacado/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error ?? "Erro ao iniciar aplicação." });
+        return;
+      }
+      setApplyJobId(data.job_id);
+      await fetchApplyJob(data.job_id);
+    } catch {
+      setMessage({ type: "error", text: "Erro de conexão." });
+    } finally {
+      setApplyLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!applyJobId) return;
+    const status = applyJob?.job?.status;
+    if (status === "queued" || status === "running") {
+      const interval = setInterval(() => fetchApplyJob(applyJobId), 2500);
+      return () => clearInterval(interval);
+    }
+  }, [applyJobId, applyJob?.job?.status, fetchApplyJob]);
+
   const totalPages = Math.ceil(total / limit) || 1;
 
   if (loading && accounts.length === 0) {
@@ -441,10 +487,68 @@ export default function AtacadoPage() {
         >
           {importLoading ? "Processando…" : "Importar CSV"}
         </button>
+        <button
+          type="button"
+          onClick={startApply}
+          disabled={applyLoading || !accountId}
+          className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {applyLoading ? "Iniciando…" : "Aplicar Preços no Mercado Livre"}
+        </button>
         {editedCount > 0 && (
           <span className="text-sm text-amber-700">{editedCount} linha(s) alterada(s)</span>
         )}
       </div>
+
+      {applyJob && (
+        <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <h2 className="mb-3 text-lg font-semibold">Aplicação de preços no ML</h2>
+          <div className="mb-3 flex flex-wrap items-center gap-4 text-sm">
+            <span className="font-medium">Status: {applyJob.job.status}</span>
+            <span>
+              Progresso: {applyJob.job.processed}/{applyJob.job.total}
+            </span>
+            <span className="text-green-700">OK: {applyJob.job.ok}</span>
+            <span className="text-red-700">Erros: {applyJob.job.errors}</span>
+            <button
+              type="button"
+              onClick={() => {
+                const id = applyJobId ?? applyJob?.job?.id;
+                if (id) fetchApplyJob(id);
+              }}
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-100"
+            >
+              Atualizar
+            </button>
+            <button
+              type="button"
+              onClick={() => { setApplyJob(null); setApplyJobId(null); }}
+              className="rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-100"
+            >
+              Fechar
+            </button>
+          </div>
+          {applyJob.logs.filter((l) => l.status === "error").length > 0 && (
+            <div className="max-h-48 overflow-auto rounded border border-red-200 bg-red-50 p-2 text-sm">
+              <p className="mb-2 font-medium text-red-800">Erros:</p>
+              <ul className="space-y-1">
+                {applyJob.logs
+                  .filter((l) => l.status === "error")
+                  .slice(0, 20)
+                  .map((log, idx) => (
+                    <li key={idx} className="text-red-700">
+                      {log.item_id ?? ""}
+                      {log.variation_id != null ? ` (var ${log.variation_id})` : ""}: {log.message ?? "—"}
+                    </li>
+                  ))}
+                {applyJob.logs.filter((l) => l.status === "error").length > 20 && (
+                  <li className="text-red-600">… e mais erros (veja logs no servidor)</li>
+                )}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {importResult && (
         <div className="mb-6 rounded-lg border-2 border-gray-300 bg-gray-50 p-4">
