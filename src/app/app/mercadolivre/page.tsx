@@ -69,8 +69,24 @@ function MercadoLivreContent() {
         .finally(() => setLoading(false));
     }
     if (error) {
+      const reason = searchParams.get("reason");
+      const defaultMessages: Record<string, string> = {
+        cookie_missing:
+          "Cookie de sessão não encontrado. Ao autorizar no Mercado Livre, não feche a aba do EscalaPreço e volte na mesma aba. Em produção, use a mesma URL (ex.: https://escalapreco.unityerp.app) em todo o fluxo.",
+        state_invalid: "Segurança: state inválido. Tente conectar novamente.",
+        redirect_uri_or_code:
+          "A Redirect URI do seu app no Mercado Livre deve ser EXATAMENTE: " +
+          (typeof window !== "undefined" ? `${window.location.origin}/api/mercadolivre/callback` : "sua URL + /api/mercadolivre/callback") +
+          " — sem barra no final. Verifique no painel developers.mercadolivre.com.br.",
+        token_exchange: "Falha ao trocar o código por token. Verifique Client ID, Secret e Redirect URI no .env e no app ML.",
+        env_missing: "Configuração do servidor incompleta (variáveis de ambiente).",
+        network: "Erro de rede. Tente novamente.",
+        me_failed: "Não foi possível obter seus dados do Mercado Livre. Tente de novo.",
+        db_error: "Erro ao salvar no banco. Verifique permissões (RLS) no Supabase.",
+      };
+      const text = message || defaultMessages[reason || ""] || "Falha ao conectar com o Mercado Livre. Verifique: 1) Redirect URI no app ML = sua URL + /api/mercadolivre/callback; 2) Não fechar a aba antes de autorizar.";
       window.history.replaceState({}, "", "/app/mercadolivre");
-      alert(message || "Falha ao conectar com o Mercado Livre. Tente novamente.");
+      alert(text);
     }
   }, [searchParams]);
 

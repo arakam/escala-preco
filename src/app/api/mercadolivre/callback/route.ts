@@ -11,28 +11,36 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get("state");
   const errorParam = searchParams.get("error");
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const redirectFail = `${appUrl}/app/mercadolivre?error=oauth_failed`;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
+  function failRedirect(message: string, reason?: string) {
+    const params = new URLSearchParams({ error: "oauth_failed", message });
+    if (reason) params.set("reason", reason);
+    return NextResponse.redirect(`${appUrl}/app/mercadolivre?${params.toString()}`);
+  }
 
   if (errorParam) {
-    console.error("[ML callback] OAuth error:", errorParam, searchParams.get("error_description"));
-    return NextResponse.redirect(`${redirectFail}&message=${encodeURIComponent(errorParam)}`);
+    const desc = searchParams.get("error_description") || errorParam;
+    console.error("[ML callback] OAuth error:", errorParam, desc);
+    return failRedirect(desc);
   }
 
   if (!code || !state) {
     console.error("[ML callback] code ou state ausentes");
-    return NextResponse.redirect(redirectFail);
+    return failRedirect("Resposta do Mercado Livre sem code ou state. Tente conectar de novo.", "no_code_state");
   }
 
   const cookieState = request.cookies.get("ml_oauth_state")?.value;
   if (!cookieState) {
     console.error("[ML callback] cookie state ausente");
-    return NextResponse.redirect(redirectFail);
+    return failRedirect(
+      "Sessão expirada ou cookie bloqueado. Conecte novamente (não feche a aba antes de autorizar).",
+      "cookie_missing"
+    );
   }
   const expectedState = createHash("sha256").update(cookieState).digest("hex");
   if (state !== expectedState) {
     console.error("[ML callback] state inválido");
-    return NextResponse.redirect(redirectFail);
+    return failRedirect("Segurança: state inválido. Tente conectar novamente.", "state_invalid");
   }
 
   const supabase = await createClient();
@@ -48,7 +56,7 @@ export async function GET(request: NextRequest) {
   const redirectUri = process.env.MERCADOLIVRE_REDIRECT_URI;
   if (!clientId || !clientSecret || !redirectUri) {
     console.error("[ML callback] env vars ausentes");
-    return NextResponse.redirect(redirectFail);
+    return failRedirect("Configuração do servidor incompleta (Client ID/Secret/Redirect URI).", "env_missing");
   }
 
   const body = new URLSearchParams({
@@ -68,13 +76,25 @@ export async function GET(request: NextRequest) {
     });
   } catch (e) {
     console.error("[ML callback] fetch token error:", e);
-    return NextResponse.redirect(redirectFail);
+    return failRedirect("Erro de rede ao trocar o código. Tente novamente.", "network");
   }
 
   if (!tokenRes.ok) {
     const errBody = await tokenRes.text();
     console.error("[ML callback] token response not ok:", tokenRes.status, errBody);
-    return NextResponse.redirect(redirectFail);
+    let msg = "Falha ao obter token do Mercado Livre.";
+    let reason = "token_exchange";
+    try {
+      const j = JSON.parse(errBody) as { message?: string; error_description?: string };
+      if (j.message) msg = j.message;
+      else if (j.error_description) msg = j.error_description;
+    } catch {
+      if (tokenRes.status === 400) {
+        msg = "Redirect URI não confere com a cadastrada no app do Mercado Livre, ou código já usado. Verifique a URL de redirecionamento no painel do ML.";
+        reason = "redirect_uri_or_code";
+      } else if (tokenRes.status === 401) msg = "Client ID ou Secret incorretos. Verifique o .env.";
+    }
+    return failRedirect(msg, reason);
   }
 
   const tokenData = (await tokenRes.json()) as {
@@ -93,12 +113,12 @@ export async function GET(request: NextRequest) {
     });
   } catch (e) {
     console.error("[ML callback] fetch me error:", e);
-    return NextResponse.redirect(redirectFail);
+    return failRedirect("Erro ao buscar dados da conta no Mercado Livre.", "network");
   }
 
   if (!meRes.ok) {
     console.error("[ML callback] me response not ok:", meRes.status);
-    return NextResponse.redirect(redirectFail);
+    return failRedirect("Não foi possível obter seus dados do Mercado Livre. Tente de novo.", "me_failed");
   }
 
   const meData = (await meRes.json()) as { id: number; nickname: string; site_id?: string };
@@ -134,7 +154,7 @@ export async function GET(request: NextRequest) {
       );
     if (tokErr) {
       console.error("[ML callback] update tokens error:", tokErr);
-      return NextResponse.redirect(redirectFail);
+      return failRedirect("Erro ao salvar tokens. Tente novamente.", "db_error");
     }
   } else {
     const { data: newAccount, error: accErr } = await supabase
@@ -149,7 +169,7 @@ export async function GET(request: NextRequest) {
       .single();
     if (accErr) {
       console.error("[ML callback] insert account error:", accErr);
-      return NextResponse.redirect(redirectFail);
+      return failRedirect("Erro ao criar conta no banco. Verifique as permissões (RLS/Supabase).", "db_error");
     }
     accountId = newAccount!.id;
     const { error: tokErr } = await supabase.from("ml_tokens").insert({
@@ -160,7 +180,7 @@ export async function GET(request: NextRequest) {
     });
     if (tokErr) {
       console.error("[ML callback] insert tokens error:", tokErr);
-      return NextResponse.redirect(redirectFail);
+      return failRedirect("Erro ao salvar tokens. Tente novamente.", "db_error");
     }
   }
 

@@ -19,7 +19,7 @@ export async function GET() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.redirect(new URL("/auth/login?redirect=/app/mercadolivre", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"));
+    return NextResponse.redirect(new URL("/auth/login?redirect=/app/mercadolivre", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"));
   }
   const state = randomBytes(24).toString("hex");
   const stateHash = createHash("sha256").update(state).digest("hex");
