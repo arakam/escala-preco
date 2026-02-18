@@ -184,3 +184,58 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     });
   }
 }
+
+/** Sincroniza um único item por MLB (ex.: MLB123456789). Retorna erro ou sucesso. */
+export async function syncSingleItem(
+  accountId: string,
+  itemId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = createServiceClient();
+  const itemIdClean = String(itemId).trim().toUpperCase();
+  if (!itemIdClean.startsWith("MLB")) {
+    return { ok: false, error: "ID deve começar com MLB (ex.: MLB123456789)" };
+  }
+
+  const { data: tokenData } = await supabase
+    .from("ml_tokens")
+    .select("access_token, refresh_token, expires_at")
+    .eq("account_id", accountId)
+    .single();
+  const tokenRow = tokenData as { access_token: string; refresh_token: string; expires_at: string } | null;
+  if (!tokenRow) {
+    return { ok: false, error: "Token não encontrado" };
+  }
+
+  const accessToken = await getValidAccessToken(
+    accountId,
+    tokenRow.access_token,
+    tokenRow.refresh_token,
+    tokenRow.expires_at,
+    supabase
+  );
+  if (!accessToken) {
+    return { ok: false, error: "Falha ao obter access token" };
+  }
+
+  try {
+    const item = await fetchItemDetail(itemIdClean, accessToken);
+    const row = mapItemToRow(accountId, item);
+    const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
+      onConflict: "account_id,item_id",
+    });
+    if (itemErr) throw itemErr;
+
+    if (Array.isArray(item.variations) && item.variations.length > 0) {
+      for (const v of item.variations) {
+        const vRow = mapVariationToRow(accountId, item.id, v);
+        await (supabase as any).from("ml_variations").upsert(vRow, {
+          onConflict: "account_id,item_id,variation_id",
+        });
+      }
+    }
+    return { ok: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+}

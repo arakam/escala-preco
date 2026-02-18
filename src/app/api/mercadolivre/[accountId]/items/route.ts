@@ -36,19 +36,23 @@ export async function GET(
 
   const { searchParams } = new URL(request.url);
   const search = searchParams.get("search")?.trim() ?? "";
+  const statusFilter = searchParams.get("status")?.trim() ?? "";
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 
   let query = supabase
     .from("ml_items")
-    .select("item_id, title, status, price, has_variations, updated_at", { count: "exact" })
+    .select("item_id, title, status, price, has_variations, thumbnail, permalink, updated_at", { count: "exact" })
     .eq("account_id", accountId)
     .order("updated_at", { ascending: false })
     .range(from, to);
 
   if (search) {
     query = query.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
+  }
+  if (statusFilter) {
+    query = query.eq("status", statusFilter);
   }
 
   const { data: items, error, count } = await query;

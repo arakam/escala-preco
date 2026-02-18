@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   function failRedirect(message: string, reason?: string) {
     const params = new URLSearchParams({ error: "oauth_failed", message });
     if (reason) params.set("reason", reason);
-    return NextResponse.redirect(`${appUrl}/app/mercadolivre?${params.toString()}`);
+    return NextResponse.redirect(`${appUrl}/app/configuracao?${params.toString()}`);
   }
 
   if (errorParam) {
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.redirect(`${appUrl}/auth/login?redirect=/app/mercadolivre`);
+    return NextResponse.redirect(`${appUrl}/auth/login?redirect=/app/configuracao`);
   }
 
   const clientId = process.env.MERCADOLIVRE_CLIENT_ID;
@@ -166,6 +166,15 @@ export async function GET(request: NextRequest) {
       return failRedirect("Erro ao salvar tokens. Tente novamente.", "db_error");
     }
   } else {
+    const { data: anyAccount } = await supabase
+      .from("ml_accounts")
+      .select("id")
+      .eq("user_id", user.id)
+      .limit(1)
+      .maybeSingle();
+    if (anyAccount) {
+      return failRedirect("Apenas uma conta do Mercado Livre é permitida por login.", "already_connected");
+    }
     const { data: newAccount, error: accErr } = await supabase
       .from("ml_accounts")
       .insert({
@@ -193,7 +202,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const res = NextResponse.redirect(`${appUrl}/app/mercadolivre?connected=1`, { status: 302 });
+  const res = NextResponse.redirect(`${appUrl}/app/configuracao?connected=1`, { status: 302 });
   res.cookies.delete("ml_oauth_state");
   res.cookies.delete("ml_oauth_code_verifier");
   return res;

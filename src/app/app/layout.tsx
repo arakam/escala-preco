@@ -16,8 +16,11 @@ export default function AppLayout({
             <Link href="/app" className="text-gray-600 hover:text-gray-900">
               Início
             </Link>
-            <Link href="/app/mercadolivre" className="text-gray-600 hover:text-gray-900">
-              Mercado Livre
+            <Link href="/app/anuncios" className="text-gray-600 hover:text-gray-900">
+              Anúncios
+            </Link>
+            <Link href="/app/configuracao" className="text-gray-600 hover:text-gray-900">
+              Configuração
             </Link>
             <form action="/api/auth/logout" method="post">
               <button type="submit" className="text-gray-600 hover:text-gray-900">

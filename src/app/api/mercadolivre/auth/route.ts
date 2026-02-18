@@ -26,7 +26,17 @@ export async function GET() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.redirect(new URL("/auth/login?redirect=/app/mercadolivre", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"));
+    return NextResponse.redirect(new URL("/auth/login?redirect=/app/configuracao", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001"));
+  }
+  const { data: existing } = await supabase
+    .from("ml_accounts")
+    .select("id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+  if (existing) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3001";
+    return NextResponse.redirect(`${appUrl}/app/configuracao?error=oauth_failed&message=${encodeURIComponent("Apenas uma conta do Mercado Livre é permitida por login.")}&reason=already_connected`);
   }
   const state = randomBytes(24).toString("hex");
   const stateHash = createHash("sha256").update(state).digest("hex");
