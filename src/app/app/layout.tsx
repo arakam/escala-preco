@@ -19,6 +19,9 @@ export default function AppLayout({
             <Link href="/app/anuncios" className="text-gray-600 hover:text-gray-900">
               Anúncios
             </Link>
+            <Link href="/app/atacado" className="text-gray-600 hover:text-gray-900">
+              Atacado
+            </Link>
             <Link href="/app/configuracao" className="text-gray-600 hover:text-gray-900">
               Configuração
             </Link>
