@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
 
   let itemsQuery = supabase
     .from("ml_items")
-    .select("item_id, title, has_variations, price, seller_custom_field")
+    .select("item_id, title, has_variations, price, seller_custom_field, raw_json")
     .eq("account_id", accountId)
     .order("updated_at", { ascending: false });
 
@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
 
   const { data: variations } = await supabase
     .from("ml_variations")
-    .select("item_id, variation_id, price, seller_custom_field, attributes_json")
+    .select("item_id, variation_id, price, seller_custom_field, attributes_json, raw_json")
     .eq("account_id", accountId)
     .in("item_id", itemIds);
 
@@ -90,15 +90,45 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  function getSku(item: { seller_custom_field?: string | null }, variation?: { seller_custom_field?: string | null; attributes_json?: unknown } | null): string | null {
-    const vSku = variation?.seller_custom_field;
-    if (vSku) return vSku;
-    const attr = variation?.attributes_json;
-    if (Array.isArray(attr)) {
-      const skuAttr = attr.find((a: { id?: string }) => a?.id === "SKU" || a?.id === "CUSTOM_SKU");
-      if (skuAttr && typeof skuAttr === "object" && "value_name" in skuAttr) return String((skuAttr as { value_name?: string }).value_name ?? "");
+  function extractSkuFromAttributes(attributes: unknown): string | null {
+    if (!Array.isArray(attributes)) return null;
+    const skuAttr = attributes.find(
+      (a: { id?: string }) => a?.id === "SELLER_SKU" || a?.id === "SKU" || a?.id === "CUSTOM_SKU"
+    );
+    if (skuAttr && typeof skuAttr === "object" && "value_name" in skuAttr) {
+      const v = (skuAttr as { value_name?: string }).value_name;
+      return v ? String(v) : null;
     }
-    return item.seller_custom_field ?? null;
+    return null;
+  }
+
+  function getSku(
+    item: { seller_custom_field?: string | null; raw_json?: unknown },
+    variation?: { seller_custom_field?: string | null; attributes_json?: unknown; raw_json?: unknown } | null
+  ): string | null {
+    if (variation) {
+      const vSku = variation.seller_custom_field;
+      if (vSku) return vSku;
+      const raw = variation.raw_json as Record<string, unknown> | null;
+      if (raw) {
+        const fromAttrs = extractSkuFromAttributes(raw.attributes);
+        if (fromAttrs) return fromAttrs;
+        if (raw.seller_custom_field) return String(raw.seller_custom_field);
+      }
+      const attr = variation.attributes_json;
+      if (Array.isArray(attr)) {
+        const skuAttr = attr.find((a: { id?: string }) => a?.id === "SELLER_SKU" || a?.id === "SKU" || a?.id === "CUSTOM_SKU");
+        if (skuAttr && typeof skuAttr === "object" && "value_name" in skuAttr) return String((skuAttr as { value_name?: string }).value_name ?? "");
+      }
+    }
+    if (item.seller_custom_field) return item.seller_custom_field;
+    const raw = item.raw_json as Record<string, unknown> | null;
+    if (raw) {
+      const fromAttrs = extractSkuFromAttributes(raw.attributes);
+      if (fromAttrs) return fromAttrs;
+      if (raw.seller_custom_field) return String(raw.seller_custom_field);
+    }
+    return null;
   }
 
   const rows: Array<{

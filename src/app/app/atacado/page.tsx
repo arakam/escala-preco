@@ -362,7 +362,9 @@ export default function AtacadoPage() {
                   <th className="whitespace-nowrap p-2 font-medium">MLB</th>
                   <th className="p-2 font-medium">Título</th>
                   <th className="p-2 font-medium">Var.</th>
-                  <th className="p-2 font-medium">SKU</th>
+                  <th className="p-2 font-medium" title="SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.">
+                    SKU
+                  </th>
                   <th className="p-2 font-medium">Preço</th>
                   {[1, 2, 3, 4, 5].map((i) => (
                     <th key={i} colSpan={2} className="whitespace-nowrap p-2 font-medium text-center">
@@ -389,7 +391,25 @@ export default function AtacadoPage() {
                         {r.title ?? "—"}
                       </td>
                       <td className="p-2">{r.variation_id ?? "—"}</td>
-                      <td className="p-2 text-gray-600">{r.sku ?? "—"}</td>
+                      <td
+                        className="p-2 text-gray-600"
+                        title={
+                          r.sku
+                            ? undefined
+                            : "Configure o atributo SELLER_SKU no Mercado Livre: itens sem variação em Atributos do produto; itens com variação em cada variação (atributo SKU). Depois sincronize os anúncios."
+                        }
+                      >
+                        {r.sku ? (
+                          r.sku
+                        ) : (
+                          <span
+                            className="cursor-help text-amber-600"
+                            title="Configure o atributo SELLER_SKU no Mercado Livre: itens sem variação em Atributos do produto; itens com variação em cada variação (atributo SKU). Depois sincronize os anúncios."
+                          >
+                            Não configurado
+                          </span>
+                        )}
+                      </td>
                       <td className="p-2">
                         {r.current_price != null ? `R$ ${Number(r.current_price).toFixed(2)}` : "—"}
                       </td>
