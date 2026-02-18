@@ -89,13 +89,18 @@ export async function runApplyWholesaleJob(jobId: string, accountId: string): Pr
     }
 
     const toProcess: Array<{ item_id: string; variation_id: number | null; tiers: { min_qty: number; price: number }[]; hasVariations: boolean }> = [];
-    for (const [itemId, itemDrafts] of draftsByItem) {
+    const entries = Array.from(draftsByItem.entries());
+    for (let e = 0; e < entries.length; e++) {
+      const itemId = entries[e][0];
+      const itemDrafts = entries[e][1];
       const hasVariations = hasVariationsByItem.get(itemId) ?? false;
       const allTiers: { min_qty: number; price: number }[] = [];
       const seenMinQty = new Set<number>();
-      for (const d of itemDrafts) {
+      for (let i = 0; i < itemDrafts.length; i++) {
+        const d = itemDrafts[i];
         const tiersArr = Array.isArray(d.tiers_json) ? d.tiers_json : [];
-        for (const t of tiersArr) {
+        for (let j = 0; j < tiersArr.length; j++) {
+          const t = tiersArr[j];
           if (t && typeof t === "object" && "min_qty" in t && "price" in t) {
             const minQty = Number((t as { min_qty: number }).min_qty);
             const price = Number((t as { price: number }).price);
