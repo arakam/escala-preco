@@ -233,7 +233,8 @@ export default function AtacadoPage() {
     }
   };
 
-  const saveAll = async () => {
+  /** Salva alterações pendentes nos drafts. Retorna true se salvou (ou não havia nada) e false se deu erro. */
+  const savePendingEdits = async (): Promise<boolean> => {
     const toSave = rows.filter((r) => getEditState(r).status === "edited");
     const valid: AtacadoRow[] = [];
     const invalid: { r: AtacadoRow; err: string }[] = [];
@@ -248,13 +249,9 @@ export default function AtacadoPage() {
         setEdits((prev) => ({ ...prev, [key]: { ...getEditState(r), status: "error", error: err } }));
       }
       setMessage({ type: "error", text: `${invalid.length} linha(s) com erro. Corrija e tente novamente.` });
-      return;
+      return false;
     }
-    if (valid.length === 0) {
-      setMessage({ type: "success", text: "Nenhuma alteração pendente." });
-      return;
-    }
-    setSaving(true);
+    if (valid.length === 0) return true;
     try {
       const payload = {
         accountId,
@@ -272,12 +269,25 @@ export default function AtacadoPage() {
       const data = await res.json();
       if (data.ok !== false) {
         setMessage({ type: "success", text: `${data.saved_count ?? 0} linha(s) salva(s).` });
-        loadRows();
-      } else {
-        setMessage({ type: "error", text: data.errors?.[0]?.message ?? "Erro ao salvar." });
+        await loadRows();
+        return true;
       }
+      setMessage({ type: "error", text: data.errors?.[0]?.message ?? "Erro ao salvar." });
+      return false;
     } catch {
       setMessage({ type: "error", text: "Erro de conexão." });
+      return false;
+    }
+  };
+
+  const saveAll = async () => {
+    if (editedCount === 0) {
+      setMessage({ type: "success", text: "Nenhuma alteração pendente." });
+      return;
+    }
+    setSaving(true);
+    try {
+      await savePendingEdits();
     } finally {
       setSaving(false);
     }
@@ -371,7 +381,16 @@ export default function AtacadoPage() {
   const startApply = async () => {
     if (!accountId) return;
     setApplyLoading(true);
+    setMessage(null);
     try {
+      if (editedCount > 0) {
+        setMessage({ type: "success", text: "Salvando alterações antes de aplicar…" });
+        const saved = await savePendingEdits();
+        if (!saved) {
+          setApplyLoading(false);
+          return;
+        }
+      }
       const res = await fetch("/api/atacado/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -518,11 +537,14 @@ export default function AtacadoPage() {
         <button
           type="button"
           onClick={startApply}
-          disabled={applyLoading || !accountId}
+          disabled={applyLoading || saving || !accountId}
           className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
         >
-          {applyLoading ? "Iniciando…" : "Aplicar Preços no Mercado Livre"}
+          {applyLoading ? (editedCount > 0 ? "Salvando e aplicando…" : "Aplicando…") : "Aplicar Preços no Mercado Livre"}
         </button>
+        <span className="text-sm text-gray-500">
+          Aplicar envia os preços de atacado salvos para o Mercado Livre. Alterações não salvas serão salvas automaticamente ao clicar.
+        </span>
         {editedCount > 0 && (
           <span className="text-sm text-amber-700">{editedCount} linha(s) alterada(s)</span>
         )}
