@@ -43,7 +43,7 @@ export async function GET(
 
   let query = supabase
     .from("ml_items")
-    .select("item_id, title, status, price, has_variations, thumbnail, permalink, updated_at", { count: "exact" })
+    .select("item_id, title, status, price, has_variations, thumbnail, permalink, updated_at, wholesale_prices_json", { count: "exact" })
     .eq("account_id", accountId)
     .order("updated_at", { ascending: false })
     .range(from, to);

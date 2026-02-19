@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, Fragment } from "react";
 import { AppTable } from "@/components/AppTable";
 
 interface MLAccount {
   id: string;
   ml_nickname: string | null;
+}
+
+interface WholesaleTier {
+  min_purchase_unit: number;
+  amount: number;
 }
 
 interface ItemRow {
@@ -17,6 +22,7 @@ interface ItemRow {
   thumbnail: string | null;
   permalink: string | null;
   updated_at: string;
+  wholesale_prices_json?: WholesaleTier[] | null;
 }
 
 interface JobState {
@@ -359,81 +365,32 @@ export default function AnunciosPage() {
                     <td className="p-2 font-medium">
                       {item.price != null ? Number(item.price).toFixed(2) : "—"}
                     </td>
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        placeholder="0,00"
-                        className="w-20 rounded border border-gray-200 px-2 py-1 text-sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="number"
-                        placeholder="1"
-                        min={1}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 text-sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        placeholder="0,00"
-                        className="w-20 rounded border border-gray-200 px-2 py-1 text-sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="number"
-                        placeholder=""
-                        min={1}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 text-sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        placeholder="0,00"
-                        className="w-20 rounded border border-gray-200 px-2 py-1 text-sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="number"
-                        placeholder=""
-                        min={1}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 text-sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        placeholder="0,00"
-                        className="w-20 rounded border border-gray-200 px-2 py-1 text-sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="number"
-                        placeholder=""
-                        min={1}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 text-sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        placeholder="0,00"
-                        className="w-20 rounded border border-gray-200 px-2 py-1 text-sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="number"
-                        placeholder=""
-                        min={1}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 text-sm"
-                      />
-                    </td>
+                    {[0, 1, 2, 3, 4].map((i) => {
+                      const tier = item.wholesale_prices_json?.[i];
+                      return (
+                        <Fragment key={`atacado-${i}`}>
+                          <td className="p-2">
+                            <input
+                              type="text"
+                              placeholder="0,00"
+                              readOnly
+                              className="w-20 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-sm"
+                              value={tier?.amount != null ? Number(tier.amount).toFixed(2) : ""}
+                            />
+                          </td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              placeholder={i === 0 ? "1" : ""}
+                              min={1}
+                              readOnly
+                              className="w-16 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-sm"
+                              value={tier?.min_purchase_unit ?? ""}
+                            />
+                          </td>
+                        </Fragment>
+                      );
+                    })}
                     <td className="p-2">{item.has_variations ? "Sim" : "Não"}</td>
                     <td className="p-2 text-gray-500">
                       {item.updated_at ? new Date(item.updated_at).toLocaleString() : "—"}

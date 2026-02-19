@@ -3,7 +3,7 @@
  * Roda em background (setImmediate). Usa createServiceClient() para acessar banco.
  */
 import type { MLItemDetail } from "./client";
-import { fetchAllItemIds, fetchItemDetail, runWithConcurrency } from "./client";
+import { fetchAllItemIds, fetchItemDetail, getItemPrices, runWithConcurrency } from "./client";
 import { getValidAccessToken } from "./refresh";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
@@ -36,6 +36,21 @@ function mapItemToRow(accountId: string, item: MLItemDetail) {
     raw_json: item as unknown as object,
     updated_at: new Date().toISOString(),
   };
+}
+
+/** Extrai tiers de preço por quantidade (atacado) da resposta GET /items/{id}/prices (show-all-prices). */
+function buildWholesaleTiers(
+  pricesResponse: { prices?: Array<{ amount?: number; conditions?: { min_purchase_unit?: number } }> } | null
+): Array<{ min_purchase_unit: number; amount: number }> {
+  if (!pricesResponse?.prices?.length) return [];
+  const tiers = pricesResponse.prices
+    .filter((p) => p.conditions?.min_purchase_unit != null && p.amount != null)
+    .map((p) => ({
+      min_purchase_unit: Number(p.conditions!.min_purchase_unit),
+      amount: Number(p.amount),
+    }))
+    .sort((a, b) => a.min_purchase_unit - b.min_purchase_unit);
+  return tiers;
 }
 
 function mapVariationToRow(
@@ -137,6 +152,14 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
           throw itemErr;
         }
 
+        const pricesResponse = await getItemPrices(itemId, accessToken, { showAllPrices: true });
+        const wholesaleTiers = buildWholesaleTiers(pricesResponse);
+        await (supabase as any)
+          .from("ml_items")
+          .update({ wholesale_prices_json: wholesaleTiers })
+          .eq("account_id", accountId)
+          .eq("item_id", itemId);
+
         if (Array.isArray(item.variations) && item.variations.length > 0) {
           for (const v of item.variations) {
             const vRow = mapVariationToRow(accountId, item.id, v);
@@ -224,6 +247,14 @@ export async function syncSingleItem(
       onConflict: "account_id,item_id",
     });
     if (itemErr) throw itemErr;
+
+    const pricesResponse = await getItemPrices(itemIdClean, accessToken, { showAllPrices: true });
+    const wholesaleTiers = buildWholesaleTiers(pricesResponse);
+    await (supabase as any)
+      .from("ml_items")
+      .update({ wholesale_prices_json: wholesaleTiers })
+      .eq("account_id", accountId)
+      .eq("item_id", itemIdClean);
 
     if (Array.isArray(item.variations) && item.variations.length > 0) {
       for (const v of item.variations) {
