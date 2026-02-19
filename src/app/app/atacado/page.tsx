@@ -748,7 +748,7 @@ export default function AtacadoPage() {
                         const priceDisplay =
                           editingPrice[priceInputKey] !== undefined
                             ? editingPrice[priceInputKey]
-                            : tiers5[i]?.price != null && tiers5[i].price !== ""
+                            : tiers5[i]?.price != null
                               ? formatPriceDisplay(tiers5[i].price)
                               : "";
                         return (
