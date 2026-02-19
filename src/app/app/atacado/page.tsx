@@ -85,7 +85,12 @@ export default function AtacadoPage() {
   } | null>(null);
   const [applyLoading, setApplyLoading] = useState(false);
 
+  /** Texto digitado no campo de preço (por linha e tier) para permitir decimais com vírgula enquanto digita */
+  const [editingPrice, setEditingPrice] = useState<Record<string, string>>({});
+
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
+
+  const formatPriceDisplay = (n: number): string => (n == null || Number.isNaN(n) ? "" : Number(n).toFixed(2).replace(".", ","));
 
   const loadAccounts = useCallback(async () => {
     const res = await fetch("/api/mercadolivre/accounts");
@@ -129,6 +134,25 @@ export default function AtacadoPage() {
     return edits[key] ?? { tiers: r.tiers, status: "saved" };
   };
 
+  const parsePriceInput = (raw: string): number => {
+    if (typeof raw !== "string") return raw || 0;
+    const trimmed = raw.trim();
+    if (!trimmed) return 0;
+    // Remove espaços e quaisquer caracteres que não sejam dígitos, vírgula, ponto ou sinal de menos
+    const cleaned = trimmed.replace(/[^\d,.-]/g, "");
+    // Se tiver vírgula e ponto, assumimos ponto como separador de milhar e vírgula como decimal
+    if (cleaned.includes(",") && cleaned.includes(".")) {
+      const noThousands = cleaned.replace(/\./g, "");
+      return parseFloat(noThousands.replace(",", ".")) || 0;
+    }
+    // Apenas vírgula: tratamos como separador decimal
+    if (cleaned.includes(",")) {
+      return parseFloat(cleaned.replace(",", ".")) || 0;
+    }
+    // Caso geral: número simples com ponto ou só dígitos
+    return parseFloat(cleaned) || 0;
+  };
+
   const updateTier = (r: AtacadoRow, tierIdx: number, field: "min_qty" | "price", value: string | number) => {
     const key = rowKey(r);
     const cur = getEditState(r);
@@ -138,8 +162,11 @@ export default function AtacadoPage() {
       newTiers[tierIdx] = { min_qty: 2, price: 0 };
     }
     const t = { ...newTiers[tierIdx]! };
-    if (field === "min_qty") t.min_qty = typeof value === "string" ? parseInt(value, 10) || 0 : value;
-    else t.price = typeof value === "string" ? parseFloat(value.replace(",", ".")) || 0 : value;
+    if (field === "min_qty") {
+      t.min_qty = typeof value === "string" ? parseInt(value, 10) || 0 : value;
+    } else {
+      t.price = typeof value === "string" ? parsePriceInput(value) : value;
+    }
     newTiers[tierIdx] = t;
     const toKeep = newTiers.filter((x): x is Tier => x != null && x.min_qty >= 2);
     const sorted = [...toKeep].sort((a, b) => a.min_qty - b.min_qty);
@@ -716,33 +743,56 @@ export default function AtacadoPage() {
                       <td className="p-2">
                         {r.current_price != null ? Number(r.current_price).toFixed(2) : "—"}
                       </td>
-                      {[0, 1, 2, 3, 4].map((i) => (
-                        <React.Fragment key={i}>
-                          <td className="p-2">
-                            <input
-                              type="number"
-                              min={2}
-                              placeholder={i === 0 ? "2" : ""}
-                              value={tiers5[i]?.min_qty ?? ""}
-                              onChange={(e) => updateTier(r, i, "min_qty", e.target.value)}
-                              className={`w-16 rounded border px-1 py-0.5 text-sm ${
-                                isInvalid ? "border-red-500" : "border-gray-200"
-                              }`}
-                            />
-                          </td>
-                          <td className="p-2">
-                            <input
-                              type="text"
-                              placeholder="0,00"
-                              value={tiers5[i]?.price ? String(tiers5[i].price) : ""}
-                              onChange={(e) => updateTier(r, i, "price", e.target.value)}
-                              className={`w-20 rounded border px-1 py-0.5 text-sm ${
-                                isInvalid ? "border-red-500" : "border-gray-200"
-                              }`}
-                            />
-                          </td>
-                        </React.Fragment>
-                      ))}
+                      {[0, 1, 2, 3, 4].map((i) => {
+                        const priceInputKey = `${rowKey(r)}-${i}`;
+                        const priceDisplay =
+                          editingPrice[priceInputKey] !== undefined
+                            ? editingPrice[priceInputKey]
+                            : tiers5[i]?.price != null && tiers5[i].price !== ""
+                              ? formatPriceDisplay(tiers5[i].price)
+                              : "";
+                        return (
+                          <React.Fragment key={i}>
+                            <td className="p-2">
+                              <input
+                                type="number"
+                                min={2}
+                                step={1}
+                                placeholder={i === 0 ? "2" : ""}
+                                value={tiers5[i]?.min_qty ?? ""}
+                                onChange={(e) => updateTier(r, i, "min_qty", e.target.value)}
+                                className={`w-16 rounded border px-1 py-0.5 text-sm ${
+                                  isInvalid ? "border-red-500" : "border-gray-200"
+                                }`}
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0,00"
+                                value={priceDisplay}
+                                onChange={(e) =>
+                                  setEditingPrice((prev) => ({ ...prev, [priceInputKey]: e.target.value }))
+                                }
+                                onBlur={(e) => {
+                                  const raw = e.target.value.trim();
+                                  const parsed = raw !== "" ? parsePriceInput(raw) : tiers5[i]?.price ?? 0;
+                                  updateTier(r, i, "price", parsed);
+                                  setEditingPrice((prev) => {
+                                    const next = { ...prev };
+                                    delete next[priceInputKey];
+                                    return next;
+                                  });
+                                }}
+                                className={`w-20 rounded border px-1 py-0.5 text-sm ${
+                                  isInvalid ? "border-red-500" : "border-gray-200"
+                                }`}
+                              />
+                            </td>
+                          </React.Fragment>
+                        );
+                      })}
                       <td className="p-2">
                         <span
                           className={`rounded px-2 py-0.5 text-xs ${
