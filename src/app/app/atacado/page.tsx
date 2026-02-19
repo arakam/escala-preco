@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AppTable } from "@/components/AppTable";
 import type { Tier } from "@/lib/atacado";
 
 interface ImportPreviewRow {
@@ -559,16 +560,16 @@ export default function AtacadoPage() {
             <span className="text-red-700">Com erro: {importResult.error_rows}</span>
           </div>
           {importResult.preview.length > 0 && (
-            <div className="mb-4 max-h-80 overflow-auto rounded border border-gray-200 bg-white">
-              <table className="min-w-full text-left text-sm">
-                <thead className="sticky top-0 bg-gray-100">
+            <div className="mb-4">
+              <AppTable summary={`Preview: ${importResult.valid_rows} válidas, ${importResult.error_rows} com erro`} maxHeight="20rem">
+                <thead>
                   <tr>
                     <th className="p-2 font-medium">Linha</th>
                     <th className="p-2 font-medium">item_id</th>
                     <th className="p-2 font-medium">variation_id</th>
                     <th className="p-2 font-medium">sku</th>
                     <th className="max-w-[120px] truncate p-2 font-medium">title</th>
-                    <th className="p-2 font-medium">price_atual</th>
+                    <th className="p-2 font-medium">Preço atual R$</th>
                     <th className="p-2 font-medium">Tiers</th>
                     <th className="p-2 font-medium">Status</th>
                   </tr>
@@ -604,7 +605,7 @@ export default function AtacadoPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </AppTable>
             </div>
           )}
           {importResult.errors.length > 0 && (
@@ -655,20 +656,19 @@ export default function AtacadoPage() {
         </p>
       ) : (
         <>
-          <p className="mb-4 text-sm text-gray-600">
-            {total} linha(s) — página {page} de {totalPages}
-          </p>
-          <div className="overflow-x-auto rounded border border-gray-200">
-            <table className="min-w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="whitespace-nowrap p-2 font-medium">MLB</th>
+          <AppTable
+            summary={`${total} linha(s) — página ${page} de ${totalPages}`}
+            maxHeight="70vh"
+          >
+            <thead>
+              <tr>
+                <th className="whitespace-nowrap p-2 font-medium">MLB</th>
                   <th className="p-2 font-medium">Título</th>
                   <th className="p-2 font-medium">Var.</th>
                   <th className="p-2 font-medium" title="SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.">
                     SKU
                   </th>
-                  <th className="p-2 font-medium">Preço</th>
+                  <th className="p-2 font-medium">Preço R$</th>
                   {[1, 2, 3, 4, 5].map((i) => (
                     <th key={i} colSpan={2} className="whitespace-nowrap p-2 font-medium text-center">
                       T{i}
@@ -714,7 +714,7 @@ export default function AtacadoPage() {
                         )}
                       </td>
                       <td className="p-2">
-                        {r.current_price != null ? `R$ ${Number(r.current_price).toFixed(2)}` : "—"}
+                        {r.current_price != null ? Number(r.current_price).toFixed(2) : "—"}
                       </td>
                       {[0, 1, 2, 3, 4].map((i) => (
                         <React.Fragment key={i}>
@@ -773,8 +773,7 @@ export default function AtacadoPage() {
                   );
                 })}
               </tbody>
-            </table>
-          </div>
+          </AppTable>
 
           {totalPages > 1 && (
             <div className="mt-4 flex justify-center gap-2">

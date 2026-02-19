@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { AppTable } from "@/components/AppTable";
 
 interface MLAccount {
   id: string;
@@ -289,27 +290,26 @@ export default function AnunciosPage() {
         </p>
       ) : (
         <>
-          <p className="mb-4 text-sm text-gray-600">
-            {total} anúncio(s) — página {page} de {totalPages || 1}
-          </p>
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="min-w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="p-2 font-medium text-gray-700">Imagem</th>
+          <AppTable
+            summary={`${total} anúncio(s) — página ${page} de ${totalPages || 1}`}
+            maxHeight="70vh"
+          >
+            <thead>
+              <tr>
+                <th className="p-2 font-medium text-gray-700">Imagem</th>
                   <th className="p-2 font-medium text-gray-700">MLB</th>
                   <th className="p-2 font-medium text-gray-700">Título</th>
                   <th className="p-2 font-medium text-gray-700">Status</th>
-                  <th className="p-2 font-medium text-gray-700">Preço</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 1</th>
+                  <th className="p-2 font-medium text-gray-700">Preço R$</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 1 R$</th>
                   <th className="whitespace-nowrap p-2 font-medium text-gray-700">Quantidade Mínimo Atacado 1</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 2</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 2 R$</th>
                   <th className="whitespace-nowrap p-2 font-medium text-gray-700">Quantidade Mínimo Atacado 2</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 3</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 3 R$</th>
                   <th className="whitespace-nowrap p-2 font-medium text-gray-700">Quantidade Mínimo Atacado 3</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 4</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 4 R$</th>
                   <th className="whitespace-nowrap p-2 font-medium text-gray-700">Quantidade Mínimo Atacado 4</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 5</th>
+                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Preço Atacado 5 R$</th>
                   <th className="whitespace-nowrap p-2 font-medium text-gray-700">Quantidade Mínimo Atacado 5</th>
                   <th className="p-2 font-medium text-gray-700">Variações</th>
                   <th className="p-2 font-medium text-gray-700">Atualizado</th>
@@ -357,7 +357,7 @@ export default function AnunciosPage() {
                       </span>
                     </td>
                     <td className="p-2 font-medium">
-                      {item.price != null ? `R$ ${Number(item.price).toFixed(2)}` : "—"}
+                      {item.price != null ? Number(item.price).toFixed(2) : "—"}
                     </td>
                     <td className="p-2">
                       <input
@@ -455,8 +455,7 @@ export default function AnunciosPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
+          </AppTable>
 
           {/* Paginação */}
           {totalPages > 1 && (

@@ -10,3 +10,41 @@
   --brand-orange-light: #f97316;
   --brand-orange-dark: #c2410c;
 }
+
+/* Tabela padrão do app: cabeçalho fixo ao rolar, suporta 15+ colunas */
+.app-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgb(241 245 249);
+  box-shadow: 0 1px 0 0 rgb(226 232 240);
+}
+.app-table thead tr {
+  border-bottom: 1px solid rgb(226 232 240);
+}
+.app-table thead th {
+  white-space: nowrap;
+  font-weight: 500;
+  color: rgb(51 65 85);
+  padding: 0.375rem 0.625rem;
+  font-size: 0.75rem;
+}
+.app-table tbody tr {
+  border-bottom: 1px solid rgb(241 245 249);
+}
+.app-table tbody tr:nth-child(odd) {
+  background-color: rgb(255 255 255);
+}
+.app-table tbody tr:nth-child(even) {
+  background-color: rgb(248 250 252);
+}
+.app-table tbody tr:hover {
+  background-color: rgb(241 245 249);
+}
+.app-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.app-table td {
+  padding: 0.375rem 0.625rem;
+  font-size: 0.75rem;
+}

@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { AppTable } from "@/components/AppTable";
 
 interface MLAccountRow {
   id: string;
@@ -248,30 +249,33 @@ function MercadoLivreContent() {
                     </div>
                   )}
                   {expandedAccount === acc.id && (
-                    <div className="mt-2 overflow-x-auto rounded border border-gray-200">
+                    <div className="mt-2">
                       {itemsLoading[acc.id] ? (
                         <p className="p-4 text-gray-500">Carregando itens…</p>
                       ) : (itemsByAccount[acc.id]?.length ?? 0) > 0 ? (
-                        <table className="min-w-full text-left text-sm">
+                        <AppTable
+                          summary={`${itemsByAccount[acc.id]?.length ?? 0} itens`}
+                          maxHeight="40vh"
+                        >
                           <thead>
-                            <tr className="border-b border-gray-200 bg-gray-50">
+                            <tr>
                               <th className="p-2 font-medium">ID</th>
                               <th className="p-2 font-medium">Título</th>
                               <th className="p-2 font-medium">Status</th>
-                              <th className="p-2 font-medium">Preço</th>
+                              <th className="p-2 font-medium">Preço R$</th>
                               <th className="p-2 font-medium">Variações</th>
                               <th className="p-2 font-medium">Atualizado</th>
                             </tr>
                           </thead>
                           <tbody>
                             {itemsByAccount[acc.id].map((item) => (
-                              <tr key={item.item_id} className="border-b border-gray-100">
+                              <tr key={item.item_id}>
                                 <td className="p-2 font-mono text-gray-600">{item.item_id}</td>
                                 <td className="max-w-[200px] truncate p-2" title={item.title ?? ""}>
                                   {item.title ?? "—"}
                                 </td>
                                 <td className="p-2">{item.status ?? "—"}</td>
-                                <td className="p-2">{item.price != null ? `R$ ${item.price}` : "—"}</td>
+                                <td className="p-2">{item.price != null ? Number(item.price).toFixed(2) : "—"}</td>
                                 <td className="p-2">{item.has_variations ? "Sim" : "Não"}</td>
                                 <td className="p-2 text-gray-500">
                                   {item.updated_at ? new Date(item.updated_at).toLocaleString() : "—"}
@@ -279,7 +283,7 @@ function MercadoLivreContent() {
                               </tr>
                             ))}
                           </tbody>
-                        </table>
+                        </AppTable>
                       ) : (
                         <p className="p-4 text-gray-500">
                           Nenhum item sincronizado. Clique em &quot;Sincronizar anúncios&quot;.
