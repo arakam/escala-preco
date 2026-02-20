@@ -73,18 +73,32 @@ function splitLine(line: string): string[] {
   return line.split(SEP).map((c) => c.trim());
 }
 
+/** Remove aspas duplas ao redor do valor (Excel/CSV colocam em campos com vírgula). */
+function unquoteCsvCell(s: string): string {
+  const t = s.trim();
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+    return t.slice(1, -1).replace(/""/g, '"');
+  }
+  return t;
+}
+
 /**
- * Converte string de preço para número aceitando formato BR (vírgula decimal e ponto milhar).
- * Ex: "10,50" -> 10.5, "1.234,56" -> 1234.56, "10.50" -> 10.5
+ * Converte string de preço para número aceitando:
+ * - BR: 394,85 ou 1.234,56
+ * - US: 394.85
+ * - Inteiro: 394
  */
 function parsePriceBr(value: string): number {
-  const s = value.trim().replace(/\s/g, "");
+  const raw = unquoteCsvCell(value).trim().replace(/\s/g, "");
+  if (raw === "") return Number.NaN;
+  const s = raw.replace(/^["']|["']$/g, "");
   if (s === "") return Number.NaN;
   if (s.includes(",")) {
     const br = s.replace(/\./g, "").replace(",", ".");
     return parseFloat(br);
   }
-  return parseFloat(s);
+  const n = parseFloat(s);
+  return Number.isNaN(n) ? Number.NaN : n;
 }
 
 /**
@@ -185,8 +199,8 @@ export function parseWholesaleCsv(buffer: ArrayBuffer): ImportParseResult {
     const tiers: Tier[] = [];
     for (let t = 0; t < 5; t++) {
       const base = 5 + t * 2;
-      const minQtyStr = (cols[base] ?? "").trim();
-      const priceStr = (cols[base + 1] ?? "").trim();
+      const minQtyStr = unquoteCsvCell(cols[base] ?? "");
+      const priceStr = unquoteCsvCell(cols[base + 1] ?? "");
       if (minQtyStr === "" && priceStr === "") continue;
       const minQty = parseInt(minQtyStr, 10);
       const price = parsePriceBr(priceStr);

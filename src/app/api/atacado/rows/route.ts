@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { NextRequest, NextResponse } from "next/server";
 
 const PAGE_SIZE = 50;
@@ -69,25 +70,55 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  const itemIdsUpper = [...new Set(itemIds.map((id) => String(id).trim().toUpperCase()))];
+
   const { data: variations } = await supabase
     .from("ml_variations")
     .select("item_id, variation_id, price, seller_custom_field, attributes_json, raw_json")
     .eq("account_id", accountId)
     .in("item_id", itemIds);
 
-  const { data: drafts } = await supabase
-    .from("wholesale_drafts")
-    .select("item_id, variation_id, tiers_json, updated_at")
-    .eq("account_id", accountId)
-    .in("item_id", itemIds);
+  let drafts: unknown[] | null = null;
+  try {
+    const serviceSupabase = createServiceClient();
+    const result = await serviceSupabase
+      .from("wholesale_drafts")
+      .select("item_id, variation_id, tiers_json, updated_at")
+      .eq("account_id", accountId)
+      .in("item_id", itemIdsUpper);
+    drafts = result.data ?? null;
+    if (result.error) console.error("[atacado/rows] drafts error:", result.error);
+  } catch {
+    const result = await supabase
+      .from("wholesale_drafts")
+      .select("item_id, variation_id, tiers_json, updated_at")
+      .eq("account_id", accountId)
+      .in("item_id", itemIdsUpper);
+    drafts = result.data ?? null;
+  }
 
   const draftsByKey = new Map<string, { tiers: unknown[]; updated_at: string }>();
+  const itemKey = (itemId: string, variationId: number | null) =>
+    `${String(itemId ?? "").trim().toUpperCase()}:${variationId ?? "item"}`;
   for (const d of drafts ?? []) {
-    const key = `${d.item_id}:${d.variation_id ?? "item"}`;
+    const key = itemKey(d.item_id, d.variation_id ?? null);
     draftsByKey.set(key, {
       tiers: (d.tiers_json as unknown[]) ?? [],
       updated_at: d.updated_at ?? "",
     });
+  }
+
+  function getDraftForKey(
+    itemId: string,
+    variationId: number | null
+  ): { tiers: unknown[]; updated_at: string } | undefined {
+    const exact = draftsByKey.get(itemKey(itemId, variationId));
+    if (exact) return exact;
+    const prefix = itemKey(itemId, null).replace(/:item$/, ":");
+    for (const [k, v] of draftsByKey) {
+      if (k.startsWith(prefix)) return v;
+    }
+    return undefined;
   }
 
   function extractSkuFromAttributes(attributes: unknown): string | null {
@@ -148,8 +179,7 @@ export async function GET(request: NextRequest) {
 
     if (item.has_variations && itemVariations.length > 0) {
       for (const v of itemVariations) {
-        const key = `${item.item_id}:${v.variation_id}`;
-        const draft = draftsByKey.get(key);
+        const draft = getDraftForKey(item.item_id, v.variation_id);
         const tiers = Array.isArray(draft?.tiers)
           ? (draft!.tiers as { min_qty: number; price: number }[]).filter(
               (t) => typeof t?.min_qty === "number" && typeof t?.price === "number"
@@ -168,8 +198,7 @@ export async function GET(request: NextRequest) {
         });
       }
     } else {
-      const key = `${item.item_id}:item`;
-      const draft = draftsByKey.get(key);
+      const draft = getDraftForKey(item.item_id, null);
       const tiers = Array.isArray(draft?.tiers)
         ? (draft!.tiers as { min_qty: number; price: number }[]).filter(
             (t) => typeof t?.min_qty === "number" && typeof t?.price === "number"
