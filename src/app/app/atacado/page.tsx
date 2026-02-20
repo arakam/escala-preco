@@ -95,7 +95,18 @@ export default function AtacadoPage() {
   /** Texto digitado no campo de preço (por linha e tier) para permitir decimais com vírgula enquanto digita */
   const [editingPrice, setEditingPrice] = useState<Record<string, string>>({});
 
+  /** Célula que acabou de ser copiada (ex: "mlb:MLB123:item") para mostrar "Copiado!" */
+  const [copiedCell, setCopiedCell] = useState<string | null>(null);
+
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
+
+  const copyToClipboard = useCallback((text: string, cellId: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedCell(cellId);
+      setTimeout(() => setCopiedCell(null), 1800);
+    });
+  }, []);
 
   const formatPriceDisplay = (n: number): string => (n == null || Number.isNaN(n) ? "" : Number(n).toFixed(2).replace(".", ","));
 
@@ -786,7 +797,20 @@ export default function AtacadoPage() {
                       key={rowKey(r)}
                       className={`border-b border-gray-100 ${isInvalid ? "bg-red-50" : ""} hover:bg-gray-50`}
                     >
-                      <td className="p-2 font-mono text-gray-600">{r.item_id}</td>
+                      <td className="p-2">
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)}
+                          title="Clique para copiar"
+                          className="font-mono text-gray-600 hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer"
+                        >
+                          {copiedCell === `${rowKey(r)}-mlb` ? (
+                            <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
+                          ) : (
+                            r.item_id
+                          )}
+                        </button>
+                      </td>
                       <td className="max-w-[180px] truncate p-2" title={r.title ?? ""}>
                         {r.title ?? "—"}
                       </td>
@@ -795,12 +819,22 @@ export default function AtacadoPage() {
                         className="p-2 text-gray-600"
                         title={
                           r.sku
-                            ? undefined
+                            ? "Clique para copiar"
                             : "Configure o atributo SELLER_SKU no Mercado Livre: itens sem variação em Atributos do produto; itens com variação em cada variação (atributo SKU). Depois sincronize os anúncios."
                         }
                       >
                         {r.sku ? (
-                          r.sku
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(r.sku, `${rowKey(r)}-sku`)}
+                            className="hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer max-w-full truncate block"
+                          >
+                            {copiedCell === `${rowKey(r)}-sku` ? (
+                              <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
+                            ) : (
+                              r.sku
+                            )}
+                          </button>
                         ) : (
                           <span
                             className="cursor-help text-amber-600"

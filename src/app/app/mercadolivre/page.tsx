@@ -40,7 +40,15 @@ function MercadoLivreContent() {
   const [itemsByAccount, setItemsByAccount] = useState<Record<string, ItemRow[]>>({});
   const [itemsLoading, setItemsLoading] = useState<Record<string, boolean>>({});
   const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
+  const [copiedItemId, setCopiedItemId] = useState<string | null>(null);
   const searchParams = useSearchParams();
+
+  const copyItemId = useCallback((id: string) => {
+    navigator.clipboard.writeText(id).then(() => {
+      setCopiedItemId(id);
+      setTimeout(() => setCopiedItemId(null), 1800);
+    });
+  }, []);
 
   const loadAccounts = useCallback(async () => {
     const res = await fetch("/api/mercadolivre/accounts");
@@ -270,7 +278,20 @@ function MercadoLivreContent() {
                           <tbody>
                             {itemsByAccount[acc.id].map((item) => (
                               <tr key={item.item_id}>
-                                <td className="p-2 font-mono text-gray-600">{item.item_id}</td>
+                                <td className="p-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => copyItemId(item.item_id)}
+                                    title="Clique para copiar"
+                                    className="font-mono text-gray-600 hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 cursor-pointer"
+                                  >
+                                    {copiedItemId === item.item_id ? (
+                                      <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
+                                    ) : (
+                                      item.item_id
+                                    )}
+                                  </button>
+                                </td>
                                 <td className="max-w-[200px] truncate p-2" title={item.title ?? ""}>
                                   {item.title ?? "—"}
                                 </td>

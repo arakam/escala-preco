@@ -50,6 +50,14 @@ export default function AnunciosPage() {
   const [singleMlb, setSingleMlb] = useState("");
   const [singleSyncing, setSingleSyncing] = useState(false);
   const [singleError, setSingleError] = useState<string | null>(null);
+  const [copiedMlb, setCopiedMlb] = useState<string | null>(null);
+
+  const copyMlb = useCallback((itemId: string) => {
+    navigator.clipboard.writeText(itemId).then(() => {
+      setCopiedMlb(itemId);
+      setTimeout(() => setCopiedMlb(null), 1800);
+    });
+  }, []);
 
   const loadAccount = useCallback(async () => {
     const res = await fetch("/api/mercadolivre/accounts");
@@ -339,12 +347,16 @@ export default function AnunciosPage() {
                     <td
                       role="button"
                       tabIndex={0}
-                      onClick={() => navigator.clipboard.writeText(item.item_id)}
-                      onKeyDown={(e) => e.key === "Enter" && navigator.clipboard.writeText(item.item_id)}
+                      onClick={() => copyMlb(item.item_id)}
+                      onKeyDown={(e) => e.key === "Enter" && copyMlb(item.item_id)}
                       title="Clique para copiar"
                       className="cursor-pointer select-none font-mono text-gray-600 hover:bg-gray-100 p-2 rounded"
                     >
-                      {item.item_id}
+                      {copiedMlb === item.item_id ? (
+                        <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
+                      ) : (
+                        item.item_id
+                      )}
                     </td>
                     <td className="max-w-[240px] truncate p-2" title={item.title ?? ""}>
                       {item.title ?? "—"}
