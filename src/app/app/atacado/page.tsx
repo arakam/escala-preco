@@ -16,6 +16,12 @@ interface ImportPreviewRow {
   error?: string;
 }
 
+interface ValidItemForConfirm {
+  item_id: string;
+  variation_id: number | null;
+  tiers: Tier[];
+}
+
 interface ImportResult {
   ok: boolean;
   total_rows: number;
@@ -23,6 +29,7 @@ interface ImportResult {
   error_rows: number;
   errors: { row: number; field?: string; message: string }[];
   preview: ImportPreviewRow[];
+  valid_items?: ValidItemForConfirm[];
 }
 
 interface MLAccount {
@@ -103,12 +110,13 @@ export default function AtacadoPage() {
     setLoading(false);
   }, [accountId]);
 
-  const loadRows = useCallback(async () => {
+  const loadRows = useCallback(async (forceRefresh = false) => {
     if (!accountId) return;
     setLoading(true);
     const params = new URLSearchParams({ accountId, page: String(page), limit: String(limit) });
     if (search) params.set("search", search);
     if (filter) params.set("filter", filter);
+    if (forceRefresh) params.set("_", String(Date.now()));
     const res = await fetch(`/api/atacado/rows?${params}`);
     if (res.ok) {
       const data = await res.json();
@@ -337,24 +345,64 @@ export default function AtacadoPage() {
   };
 
   const confirmImport = async () => {
-    if (!importFile || !accountId) return;
+    if (!accountId || !importResult) {
+      setMessage({ type: "error", text: "Conta ou resultado da importação não encontrado. Refaça a importação do CSV." });
+      return;
+    }
+    const items = importResult.valid_items;
+    const hasItems = Array.isArray(items) && items.length > 0;
+    if (!hasItems && !importFile) {
+      setMessage({ type: "error", text: "Nada a confirmar (sem itens no preview). Refaça a importação do CSV." });
+      return;
+    }
+    if (!hasItems && importFile) {
+      console.log("[Confirmar Importação] Preview sem valid_items; usando arquivo (refaça a importação para usar o novo fluxo).");
+    }
     setImportConfirming(true);
+    setMessage(null);
     try {
-      const form = new FormData();
-      form.append("file", importFile);
-      form.append("accountId", accountId);
-      const res = await fetch("/api/atacado/import/confirm", { method: "POST", body: form });
-      const data = await res.json();
+      let res: Response;
+      if (hasItems) {
+        const body = { accountId, items };
+        console.log("[Confirmar Importação] Enviando", items.length, "itens");
+        res = await fetch("/api/atacado/import/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      } else {
+        console.log("[Confirmar Importação] Enviando arquivo CSV");
+        const form = new FormData();
+        form.append("file", importFile!);
+        form.append("accountId", accountId);
+        res = await fetch("/api/atacado/import/confirm", { method: "POST", body: form });
+      }
+      const text = await res.text();
+      let data: { ok?: boolean; saved_count?: number; error?: string; warning?: string; details?: string[] };
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        console.error("[Confirmar Importação] Resposta não é JSON:", res.status, text.slice(0, 200));
+        setMessage({ type: "error", text: `Erro do servidor (${res.status}). Veja o console (F12).` });
+        return;
+      }
+      console.log("[Confirmar Importação] Resposta:", res.status, data);
       if (data.ok) {
-        setMessage({ type: "success", text: `${data.saved_count ?? 0} linha(s) importada(s).` });
+        const msg = data.warning
+          ? `${data.saved_count ?? 0} linha(s) importada(s). ${data.warning}`
+          : `${data.saved_count ?? 0} linha(s) importada(s).`;
+        setMessage({ type: "success", text: msg });
+        if (data.details?.length) console.warn("[Confirmar Importação] Detalhes:", data.details);
         setImportResult(null);
         setImportFile(null);
-        loadRows();
+        await loadRows(true);
       } else {
-        setMessage({ type: "error", text: data.error ?? "Erro ao confirmar importação." });
+        const detail = data.details?.length ? ` — ${data.details[0]}` : "";
+        setMessage({ type: "error", text: (data.error ?? "Erro ao confirmar importação.") + detail });
       }
-    } catch {
-      setMessage({ type: "error", text: "Erro de conexão." });
+    } catch (e) {
+      console.error("[Confirmar Importação] Erro:", e);
+      setMessage({ type: "error", text: "Erro de conexão. Veja o console (F12)." });
     } finally {
       setImportConfirming(false);
     }

@@ -199,10 +199,8 @@ export async function GET(request: NextRequest) {
   const total = filtered.length;
   const paginated = filtered.slice(from, from + limit);
 
-  return NextResponse.json({
-    rows: paginated,
-    total,
-    page,
-    limit,
-  });
+  return NextResponse.json(
+    { rows: paginated, total, page, limit },
+    { headers: { "Cache-Control": "no-store, max-age=0" } }
+  );
 }

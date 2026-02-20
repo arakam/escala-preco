@@ -74,6 +74,20 @@ function splitLine(line: string): string[] {
 }
 
 /**
+ * Converte string de preço para número aceitando formato BR (vírgula decimal e ponto milhar).
+ * Ex: "10,50" -> 10.5, "1.234,56" -> 1234.56, "10.50" -> 10.5
+ */
+function parsePriceBr(value: string): number {
+  const s = value.trim().replace(/\s/g, "");
+  if (s === "") return Number.NaN;
+  if (s.includes(",")) {
+    const br = s.replace(/\./g, "").replace(",", ".");
+    return parseFloat(br);
+  }
+  return parseFloat(s);
+}
+
+/**
  * Verifica se o arquivo parece usar vírgula como separador.
  */
 function looksLikeCommaSeparated(headerLine: string): boolean {
@@ -175,9 +189,9 @@ export function parseWholesaleCsv(buffer: ArrayBuffer): ImportParseResult {
       const priceStr = (cols[base + 1] ?? "").trim();
       if (minQtyStr === "" && priceStr === "") continue;
       const minQty = parseInt(minQtyStr, 10);
-      const price = parseFloat(priceStr.replace(",", "."));
+      const price = parsePriceBr(priceStr);
       if (Number.isNaN(minQty) || Number.isNaN(price)) {
-        errors.push({ row: rowNum, field: `tier${t + 1}`, message: `Tier ${t + 1}: min_qty e price devem ser números` });
+        errors.push({ row: rowNum, field: `tier${t + 1}`, message: `Tier ${t + 1}: min_qty e price devem ser números (use vírgula para decimais, ex: 10,50)` });
         break;
       }
       tiers.push({ min_qty: minQty, price });

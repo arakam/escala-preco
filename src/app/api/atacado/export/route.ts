@@ -142,6 +142,11 @@ export async function GET(request: NextRequest) {
     }
     return v;
   }
+  /** Formata número para CSV no padrão BR: vírgula como decimal (ex: 10,50). */
+  function formatPriceCsv(n: number | null | undefined): string {
+    if (n == null || Number.isNaN(n)) return "";
+    return Number(n).toFixed(2).replace(".", ",");
+  }
 
   const headers = [
     "item_id",
@@ -168,10 +173,10 @@ export async function GET(request: NextRequest) {
           String(v.variation_id),
           getSku(item, v),
           escapeCsv(item.title ?? ""),
-          price != null ? String(price) : "",
+          formatPriceCsv(price ?? undefined),
           ...Array.from({ length: 5 }, (_, i) => {
             const t = tiers[i];
-            return t ? [String(t.min_qty), String(t.price)] : ["", ""];
+            return t ? [String(t.min_qty), formatPriceCsv(t.price)] : ["", ""];
           }).flat(),
         ];
         dataRows.push({ values, hasDraft: tiers.length > 0 });
@@ -184,10 +189,10 @@ export async function GET(request: NextRequest) {
         "",
         getSku(item, null),
         escapeCsv(item.title ?? ""),
-        item.price != null ? String(Number(item.price)) : "",
+        formatPriceCsv(item.price ?? undefined),
         ...Array.from({ length: 5 }, (_, i) => {
           const t = tiers[i];
-          return t ? [String(t.min_qty), String(t.price)] : ["", ""];
+          return t ? [String(t.min_qty), formatPriceCsv(t.price)] : ["", ""];
         }).flat(),
       ];
       dataRows.push({ values, hasDraft: tiers.length > 0 });

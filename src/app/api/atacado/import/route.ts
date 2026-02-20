@@ -50,5 +50,6 @@ export async function POST(request: NextRequest) {
     error_rows: result.error_rows,
     errors: result.errors,
     preview: result.preview,
+    valid_items: result.valid_items,
   });
 }
