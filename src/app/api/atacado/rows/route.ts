@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
 
   let itemsQuery = supabase
     .from("ml_items")
-    .select("item_id, title, has_variations, price, seller_custom_field, raw_json")
+    .select("item_id, title, has_variations, price, listing_type_id, category_id, seller_custom_field, raw_json")
     .eq("account_id", accountId)
     .order("updated_at", { ascending: false });
 
@@ -177,6 +177,8 @@ export async function GET(request: NextRequest) {
     sku: string | null;
     title: string | null;
     current_price: number | null;
+    listing_type_id: string | null;
+    category_id: string | null;
     tiers: { min_qty: number; price: number }[];
     has_draft: boolean;
     has_variations: boolean;
@@ -200,6 +202,8 @@ export async function GET(request: NextRequest) {
           sku: getSku(item, v),
           title: item.title ?? null,
           current_price: v.price != null ? Number(v.price) : null,
+          listing_type_id: item.listing_type_id ?? null,
+          category_id: item.category_id ?? null,
           tiers,
           has_draft: !!draft,
           has_variations: true,
@@ -219,6 +223,8 @@ export async function GET(request: NextRequest) {
         sku: getSku(item, null),
         title: item.title ?? null,
         current_price: item.price != null ? Number(item.price) : null,
+        listing_type_id: item.listing_type_id ?? null,
+        category_id: item.category_id ?? null,
         tiers,
         has_draft: !!draft,
         has_variations: false,

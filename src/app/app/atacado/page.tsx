@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AppTable } from "@/components/AppTable";
+import { ReceivableModal } from "@/components/ReceivableModal";
 import type { Tier } from "@/lib/atacado";
 
 interface ImportPreviewRow {
@@ -43,6 +44,8 @@ interface AtacadoRow {
   sku: string | null;
   title: string | null;
   current_price: number | null;
+  listing_type_id?: string | null;
+  category_id?: string | null;
   tiers: Tier[];
   has_draft: boolean;
   has_variations: boolean;
@@ -97,6 +100,9 @@ export default function AtacadoPage() {
 
   /** Célula que acabou de ser copiada (ex: "mlb:MLB123:item") para mostrar "Copiado!" */
   const [copiedCell, setCopiedCell] = useState<string | null>(null);
+
+  /** Linha cujo modal "Ver recebível" está aberto (rowKey ou null) */
+  const [receivableRowKey, setReceivableRowKey] = useState<string | null>(null);
 
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
 
@@ -919,8 +925,16 @@ export default function AtacadoPage() {
                         >
                           Salvar
                         </button>
-                        <button type="button" onClick={() => revertRow(r)} className="text-gray-600 hover:underline">
+                        <button type="button" onClick={() => revertRow(r)} className="mr-1 text-gray-600 hover:underline">
                           Reverter
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReceivableRowKey(rowKey(r))}
+                          title="Ver recebível"
+                          className="text-gray-600 hover:underline"
+                        >
+                          Ver recebível
                         </button>
                       </td>
                     </tr>
@@ -954,6 +968,47 @@ export default function AtacadoPage() {
           )}
         </>
       )}
+
+      {receivableRowKey && (() => {
+        const r = rows.find((x) => rowKey(x) === receivableRowKey);
+        if (!r) return null;
+        const cur = getEditState(r);
+        const scenarios: { label: string; unitPrice: number }[] = [];
+        const basePrice = r.current_price != null ? Number(r.current_price) : 0;
+        if (basePrice > 0) scenarios.push({ label: "Base", unitPrice: basePrice });
+        (cur.tiers ?? []).forEach((t, i) => {
+          if (t && typeof t.min_qty === "number" && typeof t.price === "number" && t.price > 0) {
+            scenarios.push({ label: `Tier ${i + 1} (${t.min_qty}+)`, unitPrice: t.price });
+          }
+        });
+        return (
+          <ReceivableModal
+            open={true}
+            onClose={() => setReceivableRowKey(null)}
+            accountId={accountId}
+            listingTypeId={r.listing_type_id ?? null}
+            categoryId={r.category_id ?? null}
+            scenarios={scenarios}
+            onFetchFees={async (prices) => {
+              const res = await fetch("/api/atacado/fees/simulate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  accountId,
+                  item_id: r.item_id,
+                  variation_id: r.variation_id,
+                  listing_type_id: r.listing_type_id,
+                  category_id: r.category_id ?? undefined,
+                  prices,
+                }),
+              });
+              const data = await res.json();
+              if (!res.ok || !data.ok || !Array.isArray(data.results)) return null;
+              return data.results as { price: number; fee: number; net: number }[];
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
