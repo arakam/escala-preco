@@ -832,7 +832,7 @@ export default function AtacadoPage() {
                         {r.sku ? (
                           <button
                             type="button"
-                            onClick={() => copyToClipboard(r.sku, `${rowKey(r)}-sku`)}
+                            onClick={() => copyToClipboard(r.sku ?? "", `${rowKey(r)}-sku`)}
                             className="hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer max-w-full truncate block"
                           >
                             {copiedCell === `${rowKey(r)}-sku` ? (
