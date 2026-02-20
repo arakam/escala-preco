@@ -4,6 +4,13 @@ import { NextRequest, NextResponse } from "next/server";
 
 const PAGE_SIZE = 50;
 
+type DraftRow = {
+  item_id: string;
+  variation_id: number | null;
+  tiers_json: unknown;
+  updated_at: string;
+};
+
 /**
  * GET /api/atacado/rows?accountId=...&search=...&filter=...&page=...&limit=...
  * Retorna linhas achatadas (item/variação) combinadas com drafts.
@@ -78,7 +85,7 @@ export async function GET(request: NextRequest) {
     .eq("account_id", accountId)
     .in("item_id", itemIds);
 
-  let drafts: unknown[] | null = null;
+  let drafts: DraftRow[] | null = null;
   try {
     const serviceSupabase = createServiceClient();
     const result = await serviceSupabase
@@ -86,7 +93,7 @@ export async function GET(request: NextRequest) {
       .select("item_id, variation_id, tiers_json, updated_at")
       .eq("account_id", accountId)
       .in("item_id", itemIdsUpper);
-    drafts = result.data ?? null;
+    drafts = (result.data ?? null) as DraftRow[] | null;
     if (result.error) console.error("[atacado/rows] drafts error:", result.error);
   } catch {
     const result = await supabase
@@ -94,7 +101,7 @@ export async function GET(request: NextRequest) {
       .select("item_id, variation_id, tiers_json, updated_at")
       .eq("account_id", accountId)
       .in("item_id", itemIdsUpper);
-    drafts = result.data ?? null;
+    drafts = (result.data ?? null) as DraftRow[] | null;
   }
 
   const draftsByKey = new Map<string, { tiers: unknown[]; updated_at: string }>();
