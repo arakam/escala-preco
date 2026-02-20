@@ -39,12 +39,13 @@ export function AppTable({ children, summary, maxHeight = "70vh", className = ""
 }
 
 /**
- * Cabeçalho da tabela com estilo padrão (fundo cinza, borda, sticky).
+ * Cabeçalho da tabela com estilo padrão (degradê azul, borda, sticky).
  * Use dentro de <table><thead><AppTableHead>...</AppTableHead></thead></table>
+ * Estilo do header vem de .app-table thead em globals.css
  */
 export function AppTableHead({ children, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
   return (
-    <thead className="sticky top-0 z-10 border-b border-gray-200 bg-gray-50" {...props}>
+    <thead className="sticky top-0 z-10" {...props}>
       {children}
     </thead>
   );
@@ -54,11 +55,7 @@ export function AppTableHead({ children, ...props }: React.HTMLAttributes<HTMLTa
  * Linha de cabeçalho padrão.
  */
 export function AppTableHeadRow({ children, ...props }: React.HTMLAttributes<HTMLTableRowElement>) {
-  return (
-    <tr className="border-b border-gray-200 bg-gray-50" {...props}>
-      {children}
-    </tr>
-  );
+  return <tr {...props}>{children}</tr>;
 }
 
 /**
@@ -71,7 +68,7 @@ export function AppTableTh({
 }: React.ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
-      className={`whitespace-nowrap p-2 font-medium text-gray-700 ${className}`}
+      className={`whitespace-nowrap p-2 font-medium ${className}`}
       {...props}
     >
       {children}

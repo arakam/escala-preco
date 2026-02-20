@@ -35,13 +35,13 @@ export default function RegisterPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-gray-50 p-4">
       <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="mb-6 flex justify-center">
+        <div className="mb-8 flex justify-center">
           <Image
             src="/logo.png"
             alt="Escala Preço"
-            width={280}
-            height={78}
-            className="h-16 w-auto object-contain sm:h-20"
+            width={400}
+            height={112}
+            className="h-32 w-auto object-contain sm:h-40"
             priority
           />
         </div>

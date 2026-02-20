@@ -7,9 +7,9 @@ export default function HomePage() {
       <Image
         src="/logo.png"
         alt="Escala Preço"
-        width={320}
-        height={90}
-        className="h-20 w-auto object-contain sm:h-24"
+        width={400}
+        height={112}
+        className="h-28 w-auto object-contain sm:h-36"
         priority
       />
       <p className="text-gray-600">Integração com Mercado Livre</p>
