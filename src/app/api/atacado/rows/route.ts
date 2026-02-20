@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const itemIdsUpper = [...new Set(itemIds.map((id) => String(id).trim().toUpperCase()))];
+  const itemIdsUpper = Array.from(new Set(itemIds.map((id) => String(id).trim().toUpperCase())));
 
   const { data: variations } = await supabase
     .from("ml_variations")
