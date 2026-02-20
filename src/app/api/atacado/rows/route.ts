@@ -122,7 +122,9 @@ export async function GET(request: NextRequest) {
     const exact = draftsByKey.get(itemKey(itemId, variationId));
     if (exact) return exact;
     const prefix = itemKey(itemId, null).replace(/:item$/, ":");
-    for (const [k, v] of draftsByKey) {
+    const entries = Array.from(draftsByKey.entries());
+    for (let i = 0; i < entries.length; i++) {
+      const [k, v] = entries[i];
       if (k.startsWith(prefix)) return v;
     }
     return undefined;
