@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 interface ActivityItem {
@@ -52,7 +52,7 @@ function activityStatusLabel(status: ActivityItem["status"]): string {
   return labels[status] ?? status;
 }
 
-export default function HistoricoPage() {
+function HistoricoContent() {
   const searchParams = useSearchParams();
   const accountIdParam = searchParams.get("accountId")?.trim() ?? "";
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
@@ -173,5 +173,19 @@ export default function HistoricoPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function HistoricoPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="rounded-lg border border-gray-200 bg-white p-6">
+          <p className="text-gray-500">Carregando…</p>
+        </div>
+      }
+    >
+      <HistoricoContent />
+    </Suspense>
   );
 }

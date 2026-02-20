@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
@@ -73,7 +73,7 @@ function activityStatusLabel(status: ActivityItem["status"]): string {
   return labels[status] ?? status;
 }
 
-export default function AppHomePage() {
+function AppHomeContent() {
   const searchParams = useSearchParams();
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
   const [accountId, setAccountId] = useState<string>("");
@@ -358,5 +358,19 @@ export default function AppHomePage() {
         </div>
       </section>
     </div>
+  );
+}
+
+export default function AppHomePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="rounded-lg border border-gray-200 bg-white p-6">
+          <p className="text-gray-500">Carregando…</p>
+        </div>
+      }
+    >
+      <AppHomeContent />
+    </Suspense>
   );
 }
