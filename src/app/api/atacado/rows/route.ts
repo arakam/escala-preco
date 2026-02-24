@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
   // para que apareçam juntos na tabela (um abaixo do outro) e possam ser editados
   let items = itemsFirst ?? [];
   if (items.length > 0) {
-    const familyIdsFromMatch = [...new Set(items.map((i) => (i as { family_id?: string | null }).family_id).filter(Boolean))] as string[];
+    const familyIdsFromMatch = Array.from(new Set(items.map((i) => (i as { family_id?: string | null }).family_id).filter(Boolean))) as string[];
     if (familyIdsFromMatch.length > 0) {
       const { data: familySiblings } = await supabase
         .from("ml_items")
@@ -114,7 +114,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Mapa family_id -> item_id[] para "variações da família" (itens da mesma família)
-  const familyIds = [...new Set((items ?? []).map((i) => (i as { family_id?: string | null }).family_id).filter(Boolean))] as string[];
+  const familyIds = Array.from(new Set((items ?? []).map((i) => (i as { family_id?: string | null }).family_id).filter(Boolean))) as string[];
   const familyToItemIds = new Map<string, string[]>();
   if (familyIds.length > 0) {
     const { data: familyItems } = await supabase
