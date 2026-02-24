@@ -30,6 +30,7 @@ export interface MLItemDetail {
   condition: string;
   shipping: unknown;
   seller_custom_field: string | null;
+  /** Modelo clássico: array de variações. Modelo User Product (MLBU): não existe; cada item é uma "variação". */
   variations?: Array<{
     id: number;
     price: number;
@@ -37,6 +38,12 @@ export interface MLItemDetail {
     attribute_combinations?: Array<{ id: string; value_name: string }>;
     seller_custom_field?: string;
   }>;
+  /** User Product (UP) / MLBU: ID do produto no modelo Price per Variation. */
+  user_product_id?: string | null;
+  /** User Product: ID da família que agrupa vários UPs. */
+  family_id?: string | null;
+  /** User Product: nome genérico do produto (família). */
+  family_name?: string | null;
   [key: string]: unknown;
 }
 

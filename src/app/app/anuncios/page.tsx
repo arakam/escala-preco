@@ -23,6 +23,9 @@ interface ItemRow {
   permalink: string | null;
   updated_at: string;
   wholesale_prices_json?: WholesaleTier[] | null;
+  user_product_id?: string | null;
+  family_id?: string | null;
+  family_name?: string | null;
 }
 
 interface JobState {
@@ -45,6 +48,11 @@ export default function AnunciosPage() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [mlbuOnly, setMlbuOnly] = useState(false);
+  const [mlbuCodeInput, setMlbuCodeInput] = useState("");
+  const [familyModal, setFamilyModal] = useState<{ familyId: string; familyName: string } | null>(null);
+  const [familyItems, setFamilyItems] = useState<ItemRow[]>([]);
+  const [familyItemsLoading, setFamilyItemsLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [job, setJob] = useState<JobState | null>(null);
   const [singleMlb, setSingleMlb] = useState("");
@@ -75,6 +83,8 @@ export default function AnunciosPage() {
     const params = new URLSearchParams({ page: String(page) });
     if (search) params.set("search", search);
     if (statusFilter) params.set("status", statusFilter);
+    if (mlbuOnly) params.set("mlbu", "1");
+    if (mlbuCodeInput.trim()) params.set("mlbu_code", mlbuCodeInput.trim());
     const res = await fetch(`/api/mercadolivre/${account.id}/items?${params}`);
     if (res.ok) {
       const data = await res.json();
@@ -82,7 +92,7 @@ export default function AnunciosPage() {
       setTotal(data.total ?? 0);
     }
     setItemsLoading(false);
-  }, [account, page, search, statusFilter]);
+  }, [account, page, search, statusFilter, mlbuOnly, mlbuCodeInput]);
 
   useEffect(() => {
     loadAccount();
@@ -91,6 +101,19 @@ export default function AnunciosPage() {
   useEffect(() => {
     if (account) loadItems();
   }, [account, loadItems]);
+
+  useEffect(() => {
+    if (!familyModal || !account?.id) {
+      setFamilyItems([]);
+      return;
+    }
+    setFamilyItemsLoading(true);
+    fetch(`/api/mercadolivre/${account.id}/items?family_id=${encodeURIComponent(familyModal.familyId)}&limit=100`)
+      .then((res) => (res.ok ? res.json() : { items: [] }))
+      .then((data) => setFamilyItems(data.items ?? []))
+      .catch(() => setFamilyItems([]))
+      .finally(() => setFamilyItemsLoading(false));
+  }, [familyModal, account?.id]);
 
   const pollJob = useCallback(async () => {
     if (!account || !job?.id) return;
@@ -256,7 +279,7 @@ export default function AnunciosPage() {
           type="text"
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Buscar por título ou MLB…"
+          placeholder="Buscar por título, MLB ou família…"
           className="rounded border border-gray-300 px-3 py-2 text-sm"
         />
         <button
@@ -278,13 +301,38 @@ export default function AnunciosPage() {
           <option value="paused">Pausado</option>
           <option value="closed">Fechado</option>
         </select>
-        {(search || statusFilter) && (
+        <label className="flex items-center gap-2 rounded border border-gray-300 bg-white px-3 py-2 text-sm">
+          <input
+            type="checkbox"
+            checked={mlbuOnly}
+            onChange={(e) => {
+              setMlbuOnly(e.target.checked);
+              setPage(1);
+            }}
+            className="rounded border-gray-300"
+          />
+          <span>Só MLBU</span>
+        </label>
+        <div className="flex items-center gap-1">
+          <label className="text-sm text-gray-600">Cód. MLBU:</label>
+          <input
+            type="text"
+            value={mlbuCodeInput}
+            onChange={(e) => setMlbuCodeInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), setPage(1))}
+            placeholder="ex: MLAU123"
+            className="w-28 rounded border border-gray-300 px-2 py-1 text-sm font-mono"
+          />
+        </div>
+        {(search || statusFilter || mlbuOnly || mlbuCodeInput) && (
           <button
             type="button"
             onClick={() => {
               setSearch("");
               setSearchInput("");
               setStatusFilter("");
+              setMlbuOnly(false);
+              setMlbuCodeInput("");
               setPage(1);
             }}
             className="text-sm text-gray-600 underline hover:text-gray-900"
@@ -313,6 +361,9 @@ export default function AnunciosPage() {
                 <th className="p-2 font-medium text-gray-700">Imagem</th>
                   <th className="p-2 font-medium text-gray-700">MLB</th>
                   <th className="p-2 font-medium text-gray-700">Título</th>
+                  <th className="p-2 font-medium text-gray-700" title="MLBU = User Product. Família = agrupamento no modelo MLBU.">
+                    Modelo / Família
+                  </th>
                   <th className="p-2 font-medium text-gray-700">Status</th>
                   <th className="p-2 font-medium text-gray-700">Preço R$</th>
                   <th className="whitespace-nowrap p-2 font-medium text-gray-700">R$ Atac. 1</th>
@@ -360,6 +411,43 @@ export default function AnunciosPage() {
                     </td>
                     <td className="max-w-[240px] truncate p-2" title={item.title ?? ""}>
                       {item.title ?? "—"}
+                    </td>
+                    <td className="p-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {item.user_product_id && (
+                          <span
+                            className="inline-flex items-center rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-800"
+                            title="User Product (MLBU)"
+                          >
+                            MLBU
+                          </span>
+                        )}
+                        {item.user_product_id && (
+                          <span className="font-mono text-xs text-gray-600" title="Código MLBU">
+                            {item.user_product_id}
+                          </span>
+                        )}
+                        {item.family_name && (
+                          <span
+                            className="max-w-[100px] truncate inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700"
+                            title={`Família: ${item.family_name}`}
+                          >
+                            {item.family_name}
+                          </span>
+                        )}
+                        {item.family_id && (
+                          <button
+                            type="button"
+                            onClick={() => setFamilyModal({ familyId: item.family_id!, familyName: item.family_name ?? "" })}
+                            className="text-xs text-brand-blue hover:underline"
+                          >
+                            Ver família
+                          </button>
+                        )}
+                        {!item.user_product_id && !item.family_name && (
+                          <span className="text-gray-400 text-xs">—</span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-2">
                       <span
@@ -451,6 +539,66 @@ export default function AnunciosPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Modal: itens da família */}
+      {familyModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setFamilyModal(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Itens da família"
+        >
+          <div
+            className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 p-4">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Família: {familyModal.familyName || familyModal.familyId}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setFamilyModal(null)}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Fechar"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="max-h-[60vh] overflow-auto p-4">
+              {familyItemsLoading ? (
+                <p className="text-gray-500">Carregando itens da família…</p>
+              ) : familyItems.length === 0 ? (
+                <p className="text-gray-500">Nenhum item encontrado nesta família.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-left">
+                      <th className="p-2 font-medium">MLB</th>
+                      <th className="p-2 font-medium">Título</th>
+                      <th className="p-2 font-medium">Preço R$</th>
+                      <th className="p-2 font-medium">Cód. MLBU</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {familyItems.map((it) => (
+                      <tr key={it.item_id} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="font-mono p-2">{it.item_id}</td>
+                        <td className="max-w-[280px] truncate p-2" title={it.title ?? ""}>
+                          {it.title ?? "—"}
+                        </td>
+                        <td className="p-2">{it.price != null ? Number(it.price).toFixed(2) : "—"}</td>
+                        <td className="font-mono text-gray-600 p-2">{it.user_product_id ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

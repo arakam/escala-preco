@@ -78,6 +78,7 @@ function AppHomeContent() {
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
   const [accountId, setAccountId] = useState<string>("");
   const [summary, setSummary] = useState<{ account: { id: string; ml_user_id: number; ml_nickname: string | null }; cards: SummaryCards } | null>(null);
+  const [priceHighCount, setPriceHighCount] = useState<number | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -136,6 +137,21 @@ function AppHomeContent() {
     }
   }, [accountId]);
 
+  const loadPriceRefStatus = useCallback(async () => {
+    if (!accountId) return;
+    try {
+      const res = await fetch(`/api/price-references/status?accountId=${encodeURIComponent(accountId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPriceHighCount(data.high ?? 0);
+      } else {
+        setPriceHighCount(null);
+      }
+    } catch {
+      setPriceHighCount(null);
+    }
+  }, [accountId]);
+
   const loadActivity = useCallback(async () => {
     if (!accountId) return;
     setActivityLoading(true);
@@ -160,7 +176,8 @@ function AppHomeContent() {
     if (!accountId) return;
     loadSummary();
     loadActivity();
-  }, [accountId, loadSummary, loadActivity]);
+    loadPriceRefStatus();
+  }, [accountId, loadSummary, loadActivity, loadPriceRefStatus]);
 
   useEffect(() => {
     if (accounts.length > 0 && accountId && !accounts.find((a) => a.id === accountId)) {
@@ -270,6 +287,14 @@ function AppHomeContent() {
                 {summary.cards.errors_or_pending_count}
               </p>
             </div>
+            <Link
+              href={`/app/atacado?accountId=${encodeURIComponent(accountId)}&filter=price_high`}
+              className="rounded-lg border border-amber-200 bg-amber-50 p-5 shadow-sm transition hover:border-amber-300 hover:bg-amber-100"
+            >
+              <p className="text-sm font-medium text-amber-800">Anúncios com preço acima da referência</p>
+              <p className="mt-1 text-2xl font-semibold text-amber-900">{priceHighCount ?? 0}</p>
+              <p className="mt-1 text-xs text-amber-700">Clique para ver lista</p>
+            </Link>
           </div>
         ) : (
           <div className="rounded-lg border border-gray-200 bg-white p-6">

@@ -1,9 +1,22 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
 import { ReceivableModal } from "@/components/ReceivableModal";
 import type { Tier } from "@/lib/atacado";
+
+type PriceReferenceStatus = "competitive" | "attention" | "high" | "none";
+
+interface ReferenceSummary {
+  suggested_price: number | null;
+  min_reference_price: number | null;
+  max_reference_price: number | null;
+  status: string;
+  explanation: string;
+  updated_at: string | null;
+}
 
 interface ImportPreviewRow {
   row: number;
@@ -50,6 +63,17 @@ interface AtacadoRow {
   has_draft: boolean;
   has_variations: boolean;
   draft_updated_at: string | null;
+  price_reference_status?: PriceReferenceStatus;
+  reference_summary?: ReferenceSummary | null;
+  /** Nome da família (modelo User Product); null para itens clássicos */
+  family_name?: string | null;
+  /** true = anúncio do modelo User Product (MLBU) */
+  is_user_product?: boolean;
+  /** Código MLBU (user_product_id) */
+  user_product_id?: string | null;
+  family_id?: string | null;
+  /** Itens da mesma família (item_ids) */
+  family_item_ids?: string[] | null;
 }
 
 type RowStatus = "saved" | "edited" | "error";
@@ -67,6 +91,29 @@ function ensureTiers5(tiers: Tier[]): (Tier | null)[] {
   return result;
 }
 
+function competitivenessBadge(status: PriceReferenceStatus | undefined): { label: string; className: string } {
+  switch (status) {
+    case "competitive":
+      return { label: "Competitivo", className: "bg-green-200 text-green-800" };
+    case "attention":
+      return { label: "Atenção", className: "bg-amber-200 text-amber-800" };
+    case "high":
+      return { label: "Preço alto", className: "bg-red-200 text-red-800" };
+    default:
+      return { label: "Sem referência", className: "bg-gray-200 text-gray-700" };
+  }
+}
+
+function formatRefPrice(summary: ReferenceSummary | null | undefined): string {
+  if (!summary) return "—";
+  const { suggested_price, min_reference_price, max_reference_price } = summary;
+  if (min_reference_price != null && max_reference_price != null && min_reference_price !== max_reference_price) {
+    return `R$ ${Number(min_reference_price).toFixed(2)} – R$ ${Number(max_reference_price).toFixed(2)}`;
+  }
+  const p = suggested_price ?? min_reference_price ?? max_reference_price;
+  return p != null ? `R$ ${Number(p).toFixed(2)}` : "—";
+}
+
 export default function AtacadoPage() {
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
   const [accountId, setAccountId] = useState<string>("");
@@ -79,6 +126,8 @@ export default function AtacadoPage() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [filter, setFilter] = useState("");
+  const [mlbuCodeInput, setMlbuCodeInput] = useState("");
+  const [mlbuCodeApplied, setMlbuCodeApplied] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -104,7 +153,133 @@ export default function AtacadoPage() {
   /** Linha cujo modal "Ver recebível" está aberto (rowKey ou null) */
   const [receivableRowKey, setReceivableRowKey] = useState<string | null>(null);
 
+  /** Linha cujo popover de competitividade está aberto */
+  const [competitivenessPopoverKey, setCompetitivenessPopoverKey] = useState<string | null>(null);
+  const [refJobId, setRefJobId] = useState<string | null>(null);
+  const [refJob, setRefJob] = useState<{ status: string } | null>(null);
+
+  /** Famílias expandidas (family_id -> true). Novo family_id começa expandido. */
+  const [expandedFamilies, setExpandedFamilies] = useState<Record<string, boolean>>({});
+
+  const searchParams = useSearchParams();
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
+
+  /** Agrupa linhas consecutivas com o mesmo family_id para exibir como bloco "Família" expansível */
+  const rowSections = React.useMemo(() => {
+    const sections: Array<{ type: "family"; familyId: string; familyName: string; rows: AtacadoRow[] } | { type: "single"; rows: AtacadoRow[] }> = [];
+    let i = 0;
+    while (i < rows.length) {
+      const r = rows[i];
+      const fid = r.family_id ?? null;
+      if (fid && r.family_name) {
+        const familyRows: AtacadoRow[] = [];
+        while (i < rows.length && (rows[i].family_id === fid)) {
+          familyRows.push(rows[i]);
+          i++;
+        }
+        sections.push({ type: "family", familyId: fid, familyName: r.family_name, rows: familyRows });
+      } else {
+        sections.push({ type: "single", rows: [r] });
+        i++;
+      }
+    }
+    return sections;
+  }, [rows]);
+
+  const setFamilyExpanded = useCallback((familyId: string, expanded: boolean) => {
+    setExpandedFamilies((prev) => ({ ...prev, [familyId]: expanded }));
+  }, []);
+  const isFamilyExpanded = useCallback((familyId: string) => expandedFamilies[familyId] !== false, [expandedFamilies]);
+
+  /** Renderiza uma linha editável; isInFamily aplica estilo visual de item da família */
+  function renderAtacadoRow(r: AtacadoRow, isInFamily: boolean) {
+    const cur = getEditState(r);
+    const tiers5 = ensureTiers5(cur.tiers);
+    const err = validateRow(r);
+    const isInvalid = cur.status === "edited" && err != null;
+    return (
+      <tr
+        key={rowKey(r)}
+        className={`border-b border-gray-100 ${isInFamily ? "border-l-4 border-l-slate-300 bg-slate-50/50 " : ""}${isInvalid ? "bg-red-50" : ""} hover:bg-gray-50`}
+      >
+        <td className="p-2">
+          <button type="button" onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)} title="Clique para copiar" className="font-mono text-gray-600 hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
+            {copiedCell === `${rowKey(r)}-mlb` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.item_id}
+          </button>
+        </td>
+        <td className="max-w-[180px] truncate p-2" title={r.title ?? ""}>{r.title ?? "—"}</td>
+        <td className="p-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {r.is_user_product && <span className="inline-flex items-center rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-800" title="MLBU">MLBU</span>}
+            {r.user_product_id && <span className="font-mono text-xs text-gray-600">{r.user_product_id}</span>}
+            {r.family_name && <span className="max-w-[120px] truncate inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700" title={`Família: ${r.family_name}`}>{r.family_name}</span>}
+            {!r.is_user_product && !r.family_name && !r.user_product_id && <span className="text-gray-400 text-xs">—</span>}
+          </div>
+        </td>
+        <td className="p-2">{r.variation_id ?? "—"}</td>
+        <td className="p-2 text-gray-600" title={r.sku ? "Clique para copiar" : "Configure SELLER_SKU no ML."}>
+          {r.sku ? (
+            <button type="button" onClick={() => copyToClipboard(r.sku ?? "", `${rowKey(r)}-sku`)} className="hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer max-w-full truncate block">
+              {copiedCell === `${rowKey(r)}-sku` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.sku}
+            </button>
+          ) : (
+            <span className="cursor-help text-amber-600">Não configurado</span>
+          )}
+        </td>
+        <td className="p-2">{r.current_price != null ? Number(r.current_price).toFixed(2) : "—"}</td>
+        <td className="relative p-2">
+          {(() => {
+            const status = r.price_reference_status ?? "none";
+            const { label, className } = competitivenessBadge(status);
+            const key = rowKey(r);
+            const isOpen = competitivenessPopoverKey === key;
+            return (
+              <div className="relative inline-block">
+                <button type="button" onClick={() => setCompetitivenessPopoverKey(isOpen ? null : key)} className={`rounded px-2 py-0.5 text-xs font-medium ${className} hover:opacity-90`}>{label}</button>
+                {isOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" aria-hidden onClick={() => setCompetitivenessPopoverKey(null)} />
+                    <div className="absolute left-0 top-full z-20 mt-1 min-w-[280px] rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+                      <p className="text-sm font-medium text-gray-800">Referência de preço</p>
+                      <dl className="mt-2 space-y-1 text-sm">
+                        <div><dt className="text-gray-500">Preço atual</dt><dd>{r.current_price != null ? `R$ ${Number(r.current_price).toFixed(2)}` : "—"}</dd></div>
+                        <div><dt className="text-gray-500">Referência / sugestão</dt><dd>{formatRefPrice(r.reference_summary)}</dd></div>
+                        {r.reference_summary?.explanation && <div><dt className="text-gray-500">Status</dt><dd className="text-gray-700">{r.reference_summary.explanation}</dd></div>}
+                        {r.reference_summary?.updated_at && <div><dt className="text-gray-500">Última atualização</dt><dd className="text-gray-600">{new Date(r.reference_summary.updated_at).toLocaleString("pt-BR")}</dd></div>}
+                      </dl>
+                      <button type="button" disabled={!!refJobId && refJob?.status !== "success" && refJob?.status !== "failed" && refJob?.status !== "partial"} onClick={async () => { setRefJobId(null); setRefJob(null); const res = await fetch("/api/price-references/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, scope: "item", item_id: r.item_id }) }); const data = await res.json(); if (res.ok && data.job_id) { setRefJobId(data.job_id); setRefJob({ status: "queued" }); } setCompetitivenessPopoverKey(null); }} className="mt-3 w-full rounded bg-gray-100 px-2 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50">{refJobId && (refJob?.status === "running" || refJob?.status === "queued") ? "Atualizando…" : "Atualizar referência"}</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
+        </td>
+        {[0, 1, 2, 3, 4].map((i) => {
+          const priceInputKey = `${rowKey(r)}-${i}`;
+          const priceDisplay = editingPrice[priceInputKey] !== undefined ? editingPrice[priceInputKey] : tiers5[i]?.price != null ? formatPriceDisplay(tiers5[i].price) : "";
+          return (
+            <React.Fragment key={i}>
+              <td className="p-2">
+                <input type="number" min={2} step={1} placeholder={i === 0 ? "2" : ""} value={tiers5[i]?.min_qty ?? ""} onChange={(e) => updateTier(r, i, "min_qty", e.target.value)} className={`w-16 rounded border px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : "border-gray-200"}`} />
+              </td>
+              <td className="p-2">
+                <input type="text" inputMode="decimal" placeholder="0,00" value={priceDisplay} onChange={(e) => setEditingPrice((prev) => ({ ...prev, [priceInputKey]: e.target.value }))} onBlur={(e) => { const raw = e.target.value.trim(); const parsed = raw !== "" ? parsePriceInput(raw) : tiers5[i]?.price ?? 0; updateTier(r, i, "price", parsed); setEditingPrice((prev) => { const next = { ...prev }; delete next[priceInputKey]; return next; }); }} className={`w-20 rounded border px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : "border-gray-200"}`} />
+              </td>
+            </React.Fragment>
+          );
+        })}
+        <td className="p-2">
+          <span className={`rounded px-2 py-0.5 text-xs ${cur.status === "error" ? "bg-red-200 text-red-800" : cur.status === "edited" ? "bg-amber-200 text-amber-800" : "bg-green-100 text-green-800"}`}>{cur.status === "error" ? "erro" : cur.status === "edited" ? "alterado" : "salvo"}</span>
+        </td>
+        <td className="p-2">
+          <button type="button" onClick={() => saveRow(r)} disabled={saving} className="mr-1 text-brand-blue hover:underline disabled:opacity-50">Salvar</button>
+          <button type="button" onClick={() => revertRow(r)} className="mr-1 text-gray-600 hover:underline">Reverter</button>
+          <button type="button" onClick={() => setReceivableRowKey(rowKey(r))} title="Ver recebível" className="text-gray-600 hover:underline">Ver recebível</button>
+        </td>
+      </tr>
+    );
+  }
 
   const copyToClipboard = useCallback((text: string, cellId: string) => {
     if (!text) return;
@@ -133,6 +308,7 @@ export default function AtacadoPage() {
     const params = new URLSearchParams({ accountId, page: String(page), limit: String(limit) });
     if (search) params.set("search", search);
     if (filter) params.set("filter", filter);
+    if (mlbuCodeApplied.trim()) params.set("mlbu_code", mlbuCodeApplied.trim());
     if (forceRefresh) params.set("_", String(Date.now()));
     const res = await fetch(`/api/atacado/rows?${params}`);
     if (res.ok) {
@@ -142,15 +318,29 @@ export default function AtacadoPage() {
       setEdits({});
     }
     setLoading(false);
-  }, [accountId, page, limit, search, filter]);
+  }, [accountId, page, limit, search, filter, mlbuCodeApplied]);
 
   useEffect(() => {
     loadAccounts();
   }, [loadAccounts]);
 
+  const urlAccountId = searchParams.get("accountId");
+  const urlFilter = searchParams.get("filter");
+  useEffect(() => {
+    if (urlAccountId && accounts.some((a) => a.id === urlAccountId)) {
+      setAccountId(urlAccountId);
+    }
+  }, [urlAccountId, accounts]);
+  useEffect(() => {
+    if (urlFilter === "price_high" || urlFilter === "mlbu" || urlFilter === "com_familia" || urlFilter === "com_variações" || urlFilter === "com_rascunho" || urlFilter === "sem_rascunho") {
+      setFilter(urlFilter);
+    }
+  }, [urlFilter]);
+
   useEffect(() => {
     if (accountId) loadRows();
   }, [accountId, loadRows]);
+
 
   const editedCount = Object.values(edits).filter((e) => e.status === "edited" || e.status === "error").length;
 
@@ -484,7 +674,30 @@ export default function AtacadoPage() {
     }
   }, [applyJobId, applyJob?.job?.status, fetchApplyJob]);
 
+  const fetchRefJob = useCallback(async (jobId: string) => {
+    const res = await fetch(`/api/jobs/${jobId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    setRefJob({ status: data.job?.status ?? "unknown" });
+    if (["success", "failed", "partial"].includes(data.job?.status ?? "")) {
+      setRefJobId(null);
+      loadRows(true);
+    }
+  }, [loadRows]);
+
+  useEffect(() => {
+    if (!refJobId) return;
+    fetchRefJob(refJobId);
+    const status = refJob?.status;
+    if (status === "queued" || status === "running") {
+      const interval = setInterval(() => fetchRefJob(refJobId), 2500);
+      return () => clearInterval(interval);
+    }
+  }, [refJobId, refJob?.status, fetchRefJob]);
+
   const totalPages = Math.ceil(total / limit) || 1;
+
+  const TABLE_COL_COUNT = 19;
 
   if (loading && accounts.length === 0) {
     return (
@@ -549,13 +762,38 @@ export default function AtacadoPage() {
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Buscar por MLB, título ou SKU"
+            placeholder="Buscar por MLB, título, SKU ou família"
             className="rounded border border-gray-300 px-2 py-1 text-sm"
           />
           <button type="submit" className="rounded bg-gray-200 px-3 py-1 text-sm hover:bg-gray-300">
             Buscar
           </button>
         </form>
+        <div className="flex items-center gap-1">
+          <label className="text-sm text-gray-600">Cód. MLBU:</label>
+          <input
+            type="text"
+            value={mlbuCodeInput}
+            onChange={(e) => setMlbuCodeInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                setMlbuCodeApplied(mlbuCodeInput.trim());
+                setPage(1);
+              }
+            }}
+            placeholder="ex: MLAU123"
+            className="w-28 rounded border border-gray-300 px-2 py-1 text-sm font-mono"
+            title="Filtrar por código User Product (MLBU). Enter ou clique em Filtrar."
+          />
+          <button
+            type="button"
+            onClick={() => { setMlbuCodeApplied(mlbuCodeInput.trim()); setPage(1); }}
+            className="rounded border border-gray-300 px-2 py-1 text-sm hover:bg-gray-100"
+          >
+            Filtrar
+          </button>
+        </div>
         <select
           value={filter}
           onChange={(e) => {
@@ -563,12 +801,38 @@ export default function AtacadoPage() {
             setPage(1);
           }}
           className="rounded border border-gray-300 px-2 py-1 text-sm"
+          title="Filtrar linhas da tabela"
         >
           <option value="">Todos</option>
           <option value="com_variações">Com variações</option>
+          <option value="mlbu">Só MLBU</option>
+          <option value="com_familia">Com família</option>
           <option value="com_rascunho">Com rascunho</option>
           <option value="sem_rascunho">Sem rascunho</option>
+          <option value="price_high">Preço alto</option>
         </select>
+        <button
+          type="button"
+          disabled={!!refJobId && (refJob?.status === "queued" || refJob?.status === "running")}
+          onClick={async () => {
+            if (!accountId) return;
+            const res = await fetch("/api/price-references/refresh", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ accountId, scope: "all" }),
+            });
+            const data = await res.json();
+            if (res.ok && data.job_id) {
+              setRefJobId(data.job_id);
+              setRefJob({ status: "queued" });
+            }
+          }}
+          className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          {refJobId && (refJob?.status === "queued" || refJob?.status === "running")
+            ? "Atualizando referências…"
+            : "Atualizar referências"}
+        </button>
         <button
           type="button"
           onClick={saveAll}
@@ -778,11 +1042,15 @@ export default function AtacadoPage() {
               <tr>
                 <th className="whitespace-nowrap p-2 font-medium">MLB</th>
                   <th className="p-2 font-medium">Título</th>
+                  <th className="p-2 font-medium" title="MLBU = User Product (preço por variação). Família = agrupamento de produtos no modelo MLBU.">
+                    Modelo / Família
+                  </th>
                   <th className="p-2 font-medium">Var.</th>
                   <th className="p-2 font-medium" title="SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.">
                     SKU
                   </th>
                   <th className="p-2 font-medium">Preço R$</th>
+                  <th className="p-2 font-medium">Competitividade</th>
                   {[1, 2, 3, 4, 5].map((i) => (
                     <th key={i} colSpan={2} className="whitespace-nowrap p-2 font-medium text-center">
                       T{i}
@@ -793,153 +1061,34 @@ export default function AtacadoPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => {
-                  const cur = getEditState(r);
-                  const tiers5 = ensureTiers5(cur.tiers);
-                  const err = validateRow(r);
-                  const isInvalid = cur.status === "edited" && err != null;
-                  return (
-                    <tr
-                      key={rowKey(r)}
-                      className={`border-b border-gray-100 ${isInvalid ? "bg-red-50" : ""} hover:bg-gray-50`}
-                    >
-                      <td className="p-2">
-                        <button
-                          type="button"
-                          onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)}
-                          title="Clique para copiar"
-                          className="font-mono text-gray-600 hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer"
-                        >
-                          {copiedCell === `${rowKey(r)}-mlb` ? (
-                            <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
-                          ) : (
-                            r.item_id
-                          )}
-                        </button>
-                      </td>
-                      <td className="max-w-[180px] truncate p-2" title={r.title ?? ""}>
-                        {r.title ?? "—"}
-                      </td>
-                      <td className="p-2">{r.variation_id ?? "—"}</td>
-                      <td
-                        className="p-2 text-gray-600"
-                        title={
-                          r.sku
-                            ? "Clique para copiar"
-                            : "Configure o atributo SELLER_SKU no Mercado Livre: itens sem variação em Atributos do produto; itens com variação em cada variação (atributo SKU). Depois sincronize os anúncios."
-                        }
-                      >
-                        {r.sku ? (
-                          <button
-                            type="button"
-                            onClick={() => copyToClipboard(r.sku ?? "", `${rowKey(r)}-sku`)}
-                            className="hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer max-w-full truncate block"
-                          >
-                            {copiedCell === `${rowKey(r)}-sku` ? (
-                              <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
-                            ) : (
-                              r.sku
-                            )}
-                          </button>
-                        ) : (
-                          <span
-                            className="cursor-help text-amber-600"
-                            title="Configure o atributo SELLER_SKU no Mercado Livre: itens sem variação em Atributos do produto; itens com variação em cada variação (atributo SKU). Depois sincronize os anúncios."
-                          >
-                            Não configurado
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {r.current_price != null ? Number(r.current_price).toFixed(2) : "—"}
-                      </td>
-                      {[0, 1, 2, 3, 4].map((i) => {
-                        const priceInputKey = `${rowKey(r)}-${i}`;
-                        const priceDisplay =
-                          editingPrice[priceInputKey] !== undefined
-                            ? editingPrice[priceInputKey]
-                            : tiers5[i]?.price != null
-                              ? formatPriceDisplay(tiers5[i].price)
-                              : "";
-                        return (
-                          <React.Fragment key={i}>
-                            <td className="p-2">
-                              <input
-                                type="number"
-                                min={2}
-                                step={1}
-                                placeholder={i === 0 ? "2" : ""}
-                                value={tiers5[i]?.min_qty ?? ""}
-                                onChange={(e) => updateTier(r, i, "min_qty", e.target.value)}
-                                className={`w-16 rounded border px-1 py-0.5 text-sm ${
-                                  isInvalid ? "border-red-500" : "border-gray-200"
-                                }`}
-                              />
-                            </td>
-                            <td className="p-2">
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="0,00"
-                                value={priceDisplay}
-                                onChange={(e) =>
-                                  setEditingPrice((prev) => ({ ...prev, [priceInputKey]: e.target.value }))
-                                }
-                                onBlur={(e) => {
-                                  const raw = e.target.value.trim();
-                                  const parsed = raw !== "" ? parsePriceInput(raw) : tiers5[i]?.price ?? 0;
-                                  updateTier(r, i, "price", parsed);
-                                  setEditingPrice((prev) => {
-                                    const next = { ...prev };
-                                    delete next[priceInputKey];
-                                    return next;
-                                  });
-                                }}
-                                className={`w-20 rounded border px-1 py-0.5 text-sm ${
-                                  isInvalid ? "border-red-500" : "border-gray-200"
-                                }`}
-                              />
-                            </td>
-                          </React.Fragment>
-                        );
-                      })}
-                      <td className="p-2">
-                        <span
-                          className={`rounded px-2 py-0.5 text-xs ${
-                            cur.status === "error"
-                              ? "bg-red-200 text-red-800"
-                              : cur.status === "edited"
-                                ? "bg-amber-200 text-amber-800"
-                                : "bg-green-100 text-green-800"
-                          }`}
-                        >
-                          {cur.status === "error" ? "erro" : cur.status === "edited" ? "alterado" : "salvo"}
-                        </span>
-                      </td>
-                      <td className="p-2">
-                        <button
-                          type="button"
-                          onClick={() => saveRow(r)}
-                          disabled={saving}
-                          className="mr-1 text-brand-blue hover:underline disabled:opacity-50"
-                        >
-                          Salvar
-                        </button>
-                        <button type="button" onClick={() => revertRow(r)} className="mr-1 text-gray-600 hover:underline">
-                          Reverter
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setReceivableRowKey(rowKey(r))}
-                          title="Ver recebível"
-                          className="text-gray-600 hover:underline"
-                        >
-                          Ver recebível
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {rowSections.map((section) => {
+                  if (section.type === "family") {
+                    const expanded = isFamilyExpanded(section.familyId);
+                    return (
+                      <React.Fragment key={section.familyId}>
+                        <tr className="border-b border-slate-200 bg-slate-100">
+                          <td colSpan={TABLE_COL_COUNT} className="p-2">
+                            <button
+                              type="button"
+                              onClick={() => setFamilyExpanded(section.familyId, !expanded)}
+                              className="flex items-center gap-2 text-left font-medium text-slate-800 hover:bg-slate-200 rounded px-1 py-0.5 -mx-1"
+                            >
+                              <span className="text-slate-500 text-xs">{expanded ? "▼" : "▶"}</span>
+                              Família: {section.familyName} ({section.rows.length} itens)
+                            </button>
+                          </td>
+                        </tr>
+                        {expanded &&
+                          section.rows.map((r) => renderAtacadoRow(r, true))}
+                        </React.Fragment>
+                      );
+                    }
+                    return (
+                      <React.Fragment key={`single-${section.rows[0] ? rowKey(section.rows[0]) : "s"}`}>
+                        {section.rows.map((r) => renderAtacadoRow(r, false))}
+                      </React.Fragment>
+                    );
+                  })}
               </tbody>
           </AppTable>
 
@@ -1009,6 +1158,7 @@ export default function AtacadoPage() {
           />
         );
       })()}
+
     </div>
   );
 }

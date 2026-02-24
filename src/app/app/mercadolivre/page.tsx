@@ -30,6 +30,9 @@ interface ItemRow {
   price: number | null;
   has_variations: boolean;
   updated_at: string;
+  user_product_id?: string | null;
+  family_id?: string | null;
+  family_name?: string | null;
 }
 
 function MercadoLivreContent() {
@@ -40,6 +43,11 @@ function MercadoLivreContent() {
   const [itemsByAccount, setItemsByAccount] = useState<Record<string, ItemRow[]>>({});
   const [itemsLoading, setItemsLoading] = useState<Record<string, boolean>>({});
   const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
+  const [mlbuOnly, setMlbuOnly] = useState(false);
+  const [mlbuCodeInput, setMlbuCodeInput] = useState("");
+  const [familyModal, setFamilyModal] = useState<{ familyId: string; familyName: string; accountId: string } | null>(null);
+  const [familyItems, setFamilyItems] = useState<ItemRow[]>([]);
+  const [familyItemsLoading, setFamilyItemsLoading] = useState(false);
   const [copiedItemId, setCopiedItemId] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
@@ -116,13 +124,16 @@ function MercadoLivreContent() {
 
   const loadItems = useCallback(async (accountId: string) => {
     setItemsLoading((prev) => ({ ...prev, [accountId]: true }));
-    const res = await fetch(`/api/mercadolivre/${accountId}/items?page=1`);
+    const params = new URLSearchParams({ page: "1" });
+    if (mlbuOnly) params.set("mlbu", "1");
+    if (mlbuCodeInput.trim()) params.set("mlbu_code", mlbuCodeInput.trim());
+    const res = await fetch(`/api/mercadolivre/${accountId}/items?${params}`);
     if (res.ok) {
       const data = await res.json();
       setItemsByAccount((prev) => ({ ...prev, [accountId]: data.items ?? [] }));
     }
     setItemsLoading((prev) => ({ ...prev, [accountId]: false }));
-  }, []);
+  }, [mlbuOnly, mlbuCodeInput]);
 
   useEffect(() => {
     if (!syncing) return;
@@ -182,6 +193,19 @@ function MercadoLivreContent() {
       loadItems(accountId);
     }
   }
+
+  useEffect(() => {
+    if (!familyModal?.accountId) {
+      setFamilyItems([]);
+      return;
+    }
+    setFamilyItemsLoading(true);
+    fetch(`/api/mercadolivre/${familyModal.accountId}/items?family_id=${encodeURIComponent(familyModal.familyId)}&limit=100`)
+      .then((res) => (res.ok ? res.json() : { items: [] }))
+      .then((data) => setFamilyItems(data.items ?? []))
+      .catch(() => setFamilyItems([]))
+      .finally(() => setFamilyItemsLoading(false));
+  }, [familyModal]);
 
   if (loading) {
     return (
@@ -258,6 +282,38 @@ function MercadoLivreContent() {
                   )}
                   {expandedAccount === acc.id && (
                     <div className="mt-2">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={mlbuOnly}
+                            onChange={(e) => {
+                              setMlbuOnly(e.target.checked);
+                              loadItems(acc.id);
+                            }}
+                            className="rounded border-gray-300"
+                          />
+                          <span>Só MLBU</span>
+                        </label>
+                        <div className="flex items-center gap-1 text-sm">
+                          <label className="text-gray-600">Cód. MLBU:</label>
+                          <input
+                            type="text"
+                            value={mlbuCodeInput}
+                            onChange={(e) => setMlbuCodeInput(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && loadItems(acc.id)}
+                            placeholder="ex: MLAU123"
+                            className="w-28 rounded border border-gray-300 px-2 py-1 font-mono text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => loadItems(acc.id)}
+                            className="rounded border border-gray-300 bg-white px-2 py-1 text-sm hover:bg-gray-50"
+                          >
+                            Filtrar
+                          </button>
+                        </div>
+                      </div>
                       {itemsLoading[acc.id] ? (
                         <p className="p-4 text-gray-500">Carregando itens…</p>
                       ) : (itemsByAccount[acc.id]?.length ?? 0) > 0 ? (
@@ -269,6 +325,9 @@ function MercadoLivreContent() {
                             <tr>
                               <th className="p-2 font-medium">ID</th>
                               <th className="p-2 font-medium">Título</th>
+                              <th className="p-2 font-medium" title="MLBU = User Product. Família = agrupamento no modelo MLBU.">
+                                Modelo / Família
+                              </th>
                               <th className="p-2 font-medium">Status</th>
                               <th className="p-2 font-medium">Preço R$</th>
                               <th className="p-2 font-medium">Variações</th>
@@ -294,6 +353,41 @@ function MercadoLivreContent() {
                                 </td>
                                 <td className="max-w-[200px] truncate p-2" title={item.title ?? ""}>
                                   {item.title ?? "—"}
+                                </td>
+                                <td className="p-2">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {item.user_product_id && (
+                                      <span
+                                        className="inline-flex rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-800"
+                                        title="User Product (MLBU)"
+                                      >
+                                        MLBU
+                                      </span>
+                                    )}
+                                    {item.user_product_id && (
+                                      <span className="font-mono text-xs text-gray-600">{item.user_product_id}</span>
+                                    )}
+                                    {item.family_name && (
+                                      <span
+                                        className="max-w-[100px] truncate inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700"
+                                        title={`Família: ${item.family_name}`}
+                                      >
+                                        {item.family_name}
+                                      </span>
+                                    )}
+                                    {item.family_id && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setFamilyModal({ familyId: item.family_id!, familyName: item.family_name ?? "", accountId: acc.id })}
+                                        className="text-xs text-brand-blue hover:underline"
+                                      >
+                                        Ver família
+                                      </button>
+                                    )}
+                                    {!item.user_product_id && !item.family_name && (
+                                      <span className="text-gray-400 text-xs">—</span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="p-2">{item.status ?? "—"}</td>
                                 <td className="p-2">{item.price != null ? Number(item.price).toFixed(2) : "—"}</td>
@@ -322,6 +416,65 @@ function MercadoLivreContent() {
           >
             + Conectar outra conta
           </a>
+        </div>
+      )}
+
+      {familyModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setFamilyModal(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Itens da família"
+        >
+          <div
+            className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 p-4">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Família: {familyModal.familyName || familyModal.familyId}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setFamilyModal(null)}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Fechar"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="max-h-[60vh] overflow-auto p-4">
+              {familyItemsLoading ? (
+                <p className="text-gray-500">Carregando itens da família…</p>
+              ) : familyItems.length === 0 ? (
+                <p className="text-gray-500">Nenhum item encontrado nesta família.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-left">
+                      <th className="p-2 font-medium">MLB</th>
+                      <th className="p-2 font-medium">Título</th>
+                      <th className="p-2 font-medium">Preço R$</th>
+                      <th className="p-2 font-medium">Cód. MLBU</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {familyItems.map((it) => (
+                      <tr key={it.item_id} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="font-mono p-2">{it.item_id}</td>
+                        <td className="max-w-[280px] truncate p-2" title={it.title ?? ""}>
+                          {it.title ?? "—"}
+                        </td>
+                        <td className="p-2">{it.price != null ? Number(it.price).toFixed(2) : "—"}</td>
+                        <td className="font-mono text-gray-600 p-2">{it.user_product_id ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

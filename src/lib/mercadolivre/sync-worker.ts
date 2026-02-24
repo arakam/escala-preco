@@ -1,6 +1,11 @@
 /**
  * Worker de sincronização de anúncios ML.
  * Roda em background (setImmediate). Usa createServiceClient() para acessar banco.
+ *
+ * Contempla os dois modelos do Mercado Livre:
+ * - Clássico: item com array variations (has_variations = true); preço/atacado por item ou por variação.
+ * - User Product (MLBU): cada item_id é uma "variação" do produto; user_product_id, family_id, family_name
+ *   preenchidos; sem array variations (has_variations = false). Atualização de preço/atacado por item_id.
  */
 import type { MLItemDetail } from "./client";
 import { fetchAllItemIds, fetchItemDetail, getItemPrices, runWithConcurrency } from "./client";
@@ -15,6 +20,8 @@ import {
 const CONCURRENCY = 5;
 
 function mapItemToRow(accountId: string, item: MLItemDetail) {
+  // User Product (MLBU): item não tem array variations; cada item_id é uma "variação". Clássico: has_variations = variations?.length > 0.
+  const hasVariations = Array.isArray(item.variations) && item.variations.length > 0;
   return {
     account_id: accountId,
     item_id: item.id,
@@ -32,7 +39,10 @@ function mapItemToRow(accountId: string, item: MLItemDetail) {
     condition: item.condition ?? null,
     shipping_json: item.shipping != null ? (item.shipping as object) : null,
     seller_custom_field: item.seller_custom_field ?? null,
-    has_variations: Array.isArray(item.variations) && item.variations.length > 0,
+    has_variations: hasVariations,
+    user_product_id: item.user_product_id ?? null,
+    family_id: item.family_id ?? null,
+    family_name: item.family_name ?? null,
     raw_json: item as unknown as object,
     updated_at: new Date().toISOString(),
   };
