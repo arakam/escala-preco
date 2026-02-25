@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
@@ -114,7 +114,7 @@ function formatRefPrice(summary: ReferenceSummary | null | undefined): string {
   return p != null ? `R$ ${Number(p).toFixed(2)}` : "—";
 }
 
-export default function AtacadoPage() {
+function AtacadoPageContent() {
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
   const [accountId, setAccountId] = useState<string>("");
   const [rows, setRows] = useState<AtacadoRow[]>([]);
@@ -1160,5 +1160,13 @@ export default function AtacadoPage() {
       })()}
 
     </div>
+  );
+}
+
+export default function AtacadoPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center">Carregando...</div>}>
+      <AtacadoPageContent />
+    </Suspense>
   );
 }
