@@ -106,34 +106,60 @@ async function fetchWithRetry(
   throw lastError;
 }
 
+export interface ItemsSearchScanResponse {
+  results: string[];
+  paging: { total: number; offset: number; limit: number };
+  scroll_id?: string;
+}
+
 /**
- * Lista todos os item_ids do seller (paginado).
+ * Lista todos os item_ids do seller usando search_type=scan para suportar mais de 1000 itens.
+ * A API do ML retorna erro "Invalid limit and offset values" quando offset > 1000,
+ * então usamos scroll_id para paginação de grandes volumes.
  */
 export async function fetchAllItemIds(
   mlUserId: string,
   accessToken: string,
   onPage?: (offset: number, total: number) => void
 ): Promise<string[]> {
-  const limit = 50;
-  let offset = 0;
-  let total = 1;
+  const limit = 100;
   const allIds: string[] = [];
-  while (offset < total) {
-    const url = `https://api.mercadolibre.com/users/${mlUserId}/items/search?offset=${offset}&limit=${limit}`;
+  let scrollId: string | undefined;
+  let total = 0;
+  let fetched = 0;
+
+  // Primeira requisição com search_type=scan
+  const firstUrl = `https://api.mercadolibre.com/users/${mlUserId}/items/search?search_type=scan&limit=${limit}`;
+  const firstRes = await fetchWithRetry(firstUrl, accessToken);
+  if (!firstRes.ok) {
+    const text = await firstRes.text();
+    throw new Error(`items/search failed: ${firstRes.status} ${text}`);
+  }
+  const firstData = (await firstRes.json()) as ItemsSearchScanResponse;
+  const firstResults = firstData.results ?? [];
+  total = firstData.paging?.total ?? 0;
+  scrollId = firstData.scroll_id;
+  allIds.push(...firstResults);
+  fetched += firstResults.length;
+  onPage?.(fetched, total);
+
+  // Continuar com scroll_id enquanto houver mais resultados
+  while (scrollId && fetched < total) {
+    const url = `https://api.mercadolibre.com/users/${mlUserId}/items/search?search_type=scan&limit=${limit}&scroll_id=${scrollId}`;
     const res = await fetchWithRetry(url, accessToken);
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`items/search failed: ${res.status} ${text}`);
     }
-    const data = (await res.json()) as ItemsSearchResponse;
+    const data = (await res.json()) as ItemsSearchScanResponse;
     const results = data.results ?? [];
-    const paging = data.paging ?? { total: 0, offset: 0, limit };
-    total = paging.total;
-    allIds.push(...results);
-    offset += results.length;
-    onPage?.(offset, total);
     if (results.length === 0) break;
+    allIds.push(...results);
+    fetched += results.length;
+    scrollId = data.scroll_id;
+    onPage?.(fetched, total);
   }
+
   return allIds;
 }
 
