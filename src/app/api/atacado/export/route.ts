@@ -34,25 +34,51 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Conta não encontrada" }, { status: 404 });
   }
 
-  let itemsQuery = supabase
-    .from("ml_items")
-    .select("item_id, title, has_variations, price, seller_custom_field, raw_json")
-    .eq("account_id", accountId)
-    .order("updated_at", { ascending: false });
+  // Buscar todos os itens com paginação (Supabase limita a 1000 por query)
+  const PAGE_SIZE = 1000;
+  let allItems: {
+    item_id: string;
+    title: string | null;
+    has_variations: boolean | null;
+    price: number | null;
+    seller_custom_field: string | null;
+    raw_json: unknown;
+  }[] = [];
+  let offset = 0;
+  let hasMore = true;
 
-  if (search) {
-    itemsQuery = itemsQuery.or(
-      `item_id.ilike.%${search}%,title.ilike.%${search}%,seller_custom_field.ilike.%${search}%`
-    );
-  }
-  if (filter === "com_variações") {
-    itemsQuery = itemsQuery.eq("has_variations", true);
+  while (hasMore) {
+    let itemsQuery = supabase
+      .from("ml_items")
+      .select("item_id, title, has_variations, price, seller_custom_field, raw_json")
+      .eq("account_id", accountId)
+      .order("updated_at", { ascending: false })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (search) {
+      itemsQuery = itemsQuery.or(
+        `item_id.ilike.%${search}%,title.ilike.%${search}%,seller_custom_field.ilike.%${search}%`
+      );
+    }
+    if (filter === "com_variações") {
+      itemsQuery = itemsQuery.eq("has_variations", true);
+    }
+
+    const { data: pageItems, error: itemsError } = await itemsQuery;
+    if (itemsError) {
+      return NextResponse.json({ error: "Erro ao listar itens" }, { status: 500 });
+    }
+
+    if (pageItems && pageItems.length > 0) {
+      allItems = allItems.concat(pageItems);
+      offset += PAGE_SIZE;
+      hasMore = pageItems.length === PAGE_SIZE;
+    } else {
+      hasMore = false;
+    }
   }
 
-  const { data: items, error: itemsError } = await itemsQuery;
-  if (itemsError) {
-    return NextResponse.json({ error: "Erro ao listar itens" }, { status: 500 });
-  }
+  const items = allItems;
 
   const itemIds = (items ?? []).map((i) => i.item_id);
   if (itemIds.length === 0) {
@@ -72,17 +98,71 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const { data: variations } = await supabase
-    .from("ml_variations")
-    .select("item_id, variation_id, price, seller_custom_field, attributes_json, raw_json")
-    .eq("account_id", accountId)
-    .in("item_id", itemIds);
+  // Buscar variações em lotes (limite de itens no IN e paginação)
+  const BATCH_SIZE = 500;
+  let allVariations: {
+    item_id: string;
+    variation_id: string | number;
+    price: number | null;
+    seller_custom_field: string | null;
+    attributes_json: unknown;
+    raw_json: unknown;
+  }[] = [];
 
-  const { data: drafts } = await supabase
-    .from("wholesale_drafts")
-    .select("item_id, variation_id, tiers_json")
-    .eq("account_id", accountId)
-    .in("item_id", itemIds);
+  for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
+    const batchIds = itemIds.slice(i, i + BATCH_SIZE);
+    let varOffset = 0;
+    let varHasMore = true;
+
+    while (varHasMore) {
+      const { data: varPage } = await supabase
+        .from("ml_variations")
+        .select("item_id, variation_id, price, seller_custom_field, attributes_json, raw_json")
+        .eq("account_id", accountId)
+        .in("item_id", batchIds)
+        .range(varOffset, varOffset + PAGE_SIZE - 1);
+
+      if (varPage && varPage.length > 0) {
+        allVariations = allVariations.concat(varPage);
+        varOffset += PAGE_SIZE;
+        varHasMore = varPage.length === PAGE_SIZE;
+      } else {
+        varHasMore = false;
+      }
+    }
+  }
+  const variations = allVariations;
+
+  // Buscar drafts em lotes
+  let allDrafts: {
+    item_id: string;
+    variation_id: string | number | null;
+    tiers_json: unknown;
+  }[] = [];
+
+  for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
+    const batchIds = itemIds.slice(i, i + BATCH_SIZE);
+    let draftOffset = 0;
+    let draftHasMore = true;
+
+    while (draftHasMore) {
+      const { data: draftPage } = await supabase
+        .from("wholesale_drafts")
+        .select("item_id, variation_id, tiers_json")
+        .eq("account_id", accountId)
+        .in("item_id", batchIds)
+        .range(draftOffset, draftOffset + PAGE_SIZE - 1);
+
+      if (draftPage && draftPage.length > 0) {
+        allDrafts = allDrafts.concat(draftPage);
+        draftOffset += PAGE_SIZE;
+        draftHasMore = draftPage.length === PAGE_SIZE;
+      } else {
+        draftHasMore = false;
+      }
+    }
+  }
+  const drafts = allDrafts;
 
   const draftsByKey = new Map<string, { min_qty: number; price: number }[]>();
   for (const d of drafts ?? []) {
