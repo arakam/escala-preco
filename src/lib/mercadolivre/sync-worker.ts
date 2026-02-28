@@ -7,8 +7,8 @@
  * - User Product (MLBU): cada item_id é uma "variação" do produto; user_product_id, family_id, family_name
  *   preenchidos; sem array variations (has_variations = false). Atualização de preço/atacado por item_id.
  */
-import type { MLItemDetail } from "./client";
-import { fetchAllItemIds, fetchItemDetail, getItemPrices, runWithConcurrency } from "./client";
+import type { MLItemDetail, MLVariationDetail } from "./client";
+import { fetchAllItemIds, fetchItemDetail, fetchVariationDetail, getItemPrices, runWithConcurrency } from "./client";
 import { getValidAccessToken } from "./refresh";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
@@ -66,13 +66,22 @@ function buildWholesaleTiers(
 function mapVariationToRow(
   accountId: string,
   itemId: string,
-  v: { id: number; price?: number; available_quantity?: number; attribute_combinations?: Array<{ id: string; value_name: string }>; seller_custom_field?: string; [key: string]: unknown }
+  v: MLVariationDetail
 ) {
+  // Extrair SKU do array attributes (onde fica SELLER_SKU nas variações)
+  let skuFromAttributes: string | null = null;
+  if (Array.isArray(v.attributes)) {
+    const skuAttr = v.attributes.find((a) => a.id === "SELLER_SKU");
+    if (skuAttr?.value_name) {
+      skuFromAttributes = skuAttr.value_name;
+    }
+  }
+  
   return {
     account_id: accountId,
     item_id: itemId,
     variation_id: v.id,
-    seller_custom_field: v.seller_custom_field ?? null,
+    seller_custom_field: v.seller_custom_field ?? skuFromAttributes ?? null,
     attributes_json: Array.isArray(v.attribute_combinations) ? v.attribute_combinations : null,
     price: v.price ?? null,
     available_quantity: v.available_quantity ?? null,
@@ -172,7 +181,15 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
 
         if (Array.isArray(item.variations) && item.variations.length > 0) {
           for (const v of item.variations) {
-            const vRow = mapVariationToRow(accountId, item.id, v);
+            // Buscar detalhes completos da variação (inclui attributes com SELLER_SKU)
+            let variationDetail: MLVariationDetail;
+            try {
+              variationDetail = await fetchVariationDetail(item.id, v.id, accessToken);
+            } catch {
+              // Se falhar, usar os dados básicos da variação do item
+              variationDetail = v as MLVariationDetail;
+            }
+            const vRow = mapVariationToRow(accountId, item.id, variationDetail);
             await (supabase as any).from("ml_variations").upsert(vRow, {
               onConflict: "account_id,item_id,variation_id",
             });
@@ -268,7 +285,15 @@ export async function syncSingleItem(
 
     if (Array.isArray(item.variations) && item.variations.length > 0) {
       for (const v of item.variations) {
-        const vRow = mapVariationToRow(accountId, item.id, v);
+        // Buscar detalhes completos da variação (inclui attributes com SELLER_SKU)
+        let variationDetail: MLVariationDetail;
+        try {
+          variationDetail = await fetchVariationDetail(item.id, v.id, accessToken);
+        } catch {
+          // Se falhar, usar os dados básicos da variação do item
+          variationDetail = v as MLVariationDetail;
+        }
+        const vRow = mapVariationToRow(accountId, item.id, variationDetail);
         await (supabase as any).from("ml_variations").upsert(vRow, {
           onConflict: "account_id,item_id,variation_id",
         });

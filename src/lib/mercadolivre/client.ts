@@ -36,6 +36,7 @@ export interface MLItemDetail {
     price: number;
     available_quantity: number;
     attribute_combinations?: Array<{ id: string; value_name: string }>;
+    attributes?: Array<{ id: string; value_name?: string | null }>;
     seller_custom_field?: string;
   }>;
   /** User Product (UP) / MLBU: ID do produto no modelo Price per Variation. */
@@ -177,6 +178,35 @@ export async function fetchItemDetail(
     throw new Error(`items/${itemId} failed: ${res.status} ${text}`);
   }
   return (await res.json()) as MLItemDetail;
+}
+
+export interface MLVariationDetail {
+  id: number;
+  price?: number;
+  available_quantity?: number;
+  attribute_combinations?: Array<{ id: string; value_name: string }>;
+  attributes?: Array<{ id: string; value_name?: string | null }>;
+  seller_custom_field?: string | null;
+  [key: string]: unknown;
+}
+
+/**
+ * Busca detalhes de uma variação específica.
+ * GET /items/{itemId}/variations/{variationId}
+ * Retorna dados completos incluindo o array `attributes` com SELLER_SKU.
+ */
+export async function fetchVariationDetail(
+  itemId: string,
+  variationId: number,
+  accessToken: string
+): Promise<MLVariationDetail> {
+  const url = `https://api.mercadolibre.com/items/${itemId}/variations/${variationId}`;
+  const res = await fetchWithRetry(url, accessToken);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`items/${itemId}/variations/${variationId} failed: ${res.status} ${text}`);
+  }
+  return (await res.json()) as MLVariationDetail;
 }
 
 /**

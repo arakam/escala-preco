@@ -116,19 +116,34 @@ function formatRefPrice(summary: ReferenceSummary | null | undefined): string {
 
 function AtacadoPageContent() {
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [accountId, setAccountId] = useState<string>("");
   const [rows, setRows] = useState<AtacadoRow[]>([]);
   const [edits, setEdits] = useState<Record<string, RowEditState>>({});
   const [total, setTotal] = useState(0);
+  const [totalItems, setTotalItems] = useState(0);
   const [page, setPage] = useState(1);
   const [limit] = useState(50);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  const [filter, setFilter] = useState("");
-  const [mlbuCodeInput, setMlbuCodeInput] = useState("");
-  const [mlbuCodeApplied, setMlbuCodeApplied] = useState("");
+  const [loadingRows, setLoadingRows] = useState(true);
   const [saving, setSaving] = useState(false);
+  
+  // Filtros
+  const [filterMlb, setFilterMlb] = useState("");
+  const [filterMlbu, setFilterMlbu] = useState("");
+  const [filterTitle, setFilterTitle] = useState("");
+  const [filterSku, setFilterSku] = useState("");
+  const [filterVariation, setFilterVariation] = useState<"" | "com" | "sem">("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [hideVariations, setHideVariations] = useState(false);
+  const [filtersApplied, setFiltersApplied] = useState<{
+    mlb: string;
+    mlbu: string;
+    title: string;
+    sku: string;
+    variation: "" | "com" | "sem";
+    status: string;
+    hideVariations: boolean;
+  }>({ mlb: "", mlbu: "", title: "", sku: "", variation: "", status: "", hideVariations: false });
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -158,41 +173,11 @@ function AtacadoPageContent() {
   const [refJobId, setRefJobId] = useState<string | null>(null);
   const [refJob, setRefJob] = useState<{ status: string } | null>(null);
 
-  /** Famílias expandidas (family_id -> true). Novo family_id começa expandido. */
-  const [expandedFamilies, setExpandedFamilies] = useState<Record<string, boolean>>({});
-
   const searchParams = useSearchParams();
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
 
-  /** Agrupa linhas consecutivas com o mesmo family_id para exibir como bloco "Família" expansível */
-  const rowSections = React.useMemo(() => {
-    const sections: Array<{ type: "family"; familyId: string; familyName: string; rows: AtacadoRow[] } | { type: "single"; rows: AtacadoRow[] }> = [];
-    let i = 0;
-    while (i < rows.length) {
-      const r = rows[i];
-      const fid = r.family_id ?? null;
-      if (fid && r.family_name) {
-        const familyRows: AtacadoRow[] = [];
-        while (i < rows.length && (rows[i].family_id === fid)) {
-          familyRows.push(rows[i]);
-          i++;
-        }
-        sections.push({ type: "family", familyId: fid, familyName: r.family_name, rows: familyRows });
-      } else {
-        sections.push({ type: "single", rows: [r] });
-        i++;
-      }
-    }
-    return sections;
-  }, [rows]);
-
-  const setFamilyExpanded = useCallback((familyId: string, expanded: boolean) => {
-    setExpandedFamilies((prev) => ({ ...prev, [familyId]: expanded }));
-  }, []);
-  const isFamilyExpanded = useCallback((familyId: string) => expandedFamilies[familyId] !== false, [expandedFamilies]);
-
-  /** Renderiza uma linha editável; isInFamily aplica estilo visual de item da família */
-  function renderAtacadoRow(r: AtacadoRow, isInFamily: boolean) {
+  /** Renderiza uma linha editável */
+  function renderAtacadoRow(r: AtacadoRow) {
     const cur = getEditState(r);
     const tiers5 = ensureTiers5(cur.tiers);
     const err = validateRow(r);
@@ -200,23 +185,30 @@ function AtacadoPageContent() {
     return (
       <tr
         key={rowKey(r)}
-        className={`border-b border-gray-100 ${isInFamily ? "border-l-4 border-l-slate-300 bg-slate-50/50 " : ""}${isInvalid ? "bg-red-50" : ""} hover:bg-gray-50`}
+        className={`border-b border-gray-100 ${isInvalid ? "bg-red-50" : ""} hover:bg-gray-50`}
       >
         <td className="p-2">
           <button type="button" onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)} title="Clique para copiar" className="font-mono text-gray-600 hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
             {copiedCell === `${rowKey(r)}-mlb` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.item_id}
           </button>
         </td>
+        <td className="p-2">
+          {r.user_product_id ? (
+            <button type="button" onClick={() => copyToClipboard(r.user_product_id ?? "", `${rowKey(r)}-mlbu`)} title="Clique para copiar" className="font-mono text-gray-600 hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
+              {copiedCell === `${rowKey(r)}-mlbu` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.user_product_id}
+            </button>
+          ) : (
+            <span className="text-gray-400">—</span>
+          )}
+        </td>
         <td className="max-w-[180px] truncate p-2" title={r.title ?? ""}>{r.title ?? "—"}</td>
         <td className="p-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {r.is_user_product && <span className="inline-flex items-center rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-800" title="MLBU">MLBU</span>}
-            {r.user_product_id && <span className="font-mono text-xs text-gray-600">{r.user_product_id}</span>}
-            {r.family_name && <span className="max-w-[120px] truncate inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700" title={`Família: ${r.family_name}`}>{r.family_name}</span>}
-            {!r.is_user_product && !r.family_name && !r.user_product_id && <span className="text-gray-400 text-xs">—</span>}
-          </div>
+          {r.has_variations ? (
+            <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800">Sim</span>
+          ) : (
+            <span className="text-gray-400">Não</span>
+          )}
         </td>
-        <td className="p-2">{r.variation_id ?? "—"}</td>
         <td className="p-2 text-gray-600" title={r.sku ? "Clique para copiar" : "Configure SELLER_SKU no ML."}>
           {r.sku ? (
             <button type="button" onClick={() => copyToClipboard(r.sku ?? "", `${rowKey(r)}-sku`)} className="hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer max-w-full truncate block">
@@ -297,32 +289,46 @@ function AtacadoPageContent() {
       const data = await res.json();
       const accs = data.accounts ?? [];
       setAccounts(accs);
-      if (accs.length > 0 && !accountId) setAccountId(accs[0].id);
+      if (accs.length > 0 && !accountId) {
+        setAccountId(accs[0].id);
+      }
     }
-    setLoading(false);
+    setAccountsLoaded(true);
   }, [accountId]);
 
   const loadRows = useCallback(async (forceRefresh = false) => {
     if (!accountId) return;
-    setLoading(true);
+    setLoadingRows(true);
     const params = new URLSearchParams({ accountId, page: String(page), limit: String(limit) });
-    if (search) params.set("search", search);
-    if (filter) params.set("filter", filter);
-    if (mlbuCodeApplied.trim()) params.set("mlbu_code", mlbuCodeApplied.trim());
+    if (filtersApplied.mlb) params.set("mlb", filtersApplied.mlb.trim());
+    if (filtersApplied.mlbu) params.set("mlbu_code", filtersApplied.mlbu.trim());
+    if (filtersApplied.title) params.set("title", filtersApplied.title.trim());
+    if (filtersApplied.sku) params.set("sku", filtersApplied.sku.trim());
+    if (filtersApplied.variation) params.set("variation", filtersApplied.variation);
+    if (filtersApplied.status) params.set("filter", filtersApplied.status);
+    if (filtersApplied.hideVariations) params.set("hide_variations", "true");
     if (forceRefresh) params.set("_", String(Date.now()));
     const res = await fetch(`/api/atacado/rows?${params}`);
     if (res.ok) {
       const data = await res.json();
       setRows(data.rows ?? []);
       setTotal(data.total ?? 0);
+      setTotalItems(data.totalItems ?? 0);
       setEdits({});
     }
-    setLoading(false);
-  }, [accountId, page, limit, search, filter, mlbuCodeApplied]);
+    setLoadingRows(false);
+  }, [accountId, page, limit, filtersApplied]);
 
   useEffect(() => {
     loadAccounts();
   }, [loadAccounts]);
+
+  // Se não houver contas após carregar, não há rows para carregar
+  useEffect(() => {
+    if (accountsLoaded && accounts.length === 0) {
+      setLoadingRows(false);
+    }
+  }, [accountsLoaded, accounts.length]);
 
   const urlAccountId = searchParams.get("accountId");
   const urlFilter = searchParams.get("filter");
@@ -332,10 +338,38 @@ function AtacadoPageContent() {
     }
   }, [urlAccountId, accounts]);
   useEffect(() => {
-    if (urlFilter === "price_high" || urlFilter === "mlbu" || urlFilter === "com_familia" || urlFilter === "com_variações" || urlFilter === "com_rascunho" || urlFilter === "sem_rascunho") {
-      setFilter(urlFilter);
+    if (urlFilter === "price_high" || urlFilter === "mlbu" || urlFilter === "com_familia" || urlFilter === "com_rascunho" || urlFilter === "sem_rascunho") {
+      setFilterStatus(urlFilter);
+      setFiltersApplied((prev) => ({ ...prev, status: urlFilter }));
     }
   }, [urlFilter]);
+
+  const applyFilters = useCallback(() => {
+    setFiltersApplied({
+      mlb: filterMlb,
+      mlbu: filterMlbu,
+      title: filterTitle,
+      sku: filterSku,
+      variation: filterVariation,
+      status: filterStatus,
+      hideVariations,
+    });
+    setPage(1);
+  }, [filterMlb, filterMlbu, filterTitle, filterSku, filterVariation, filterStatus, hideVariations]);
+
+  const clearFilters = useCallback(() => {
+    setFilterMlb("");
+    setFilterMlbu("");
+    setFilterTitle("");
+    setFilterSku("");
+    setFilterVariation("");
+    setFilterStatus("");
+    setHideVariations(false);
+    setFiltersApplied({ mlb: "", mlbu: "", title: "", sku: "", variation: "", status: "", hideVariations: false });
+    setPage(1);
+  }, []);
+
+  const hasActiveFilters = filtersApplied.mlb || filtersApplied.mlbu || filtersApplied.title || filtersApplied.sku || filtersApplied.variation || filtersApplied.status || filtersApplied.hideVariations;
 
   useEffect(() => {
     if (accountId) loadRows();
@@ -510,8 +544,13 @@ function AtacadoPageContent() {
 
   const exportCsv = () => {
     const params = new URLSearchParams({ accountId });
-    if (search) params.set("search", search);
-    if (filter) params.set("filter", filter);
+    if (filtersApplied.mlb) params.set("mlb", filtersApplied.mlb);
+    if (filtersApplied.mlbu) params.set("mlbu_code", filtersApplied.mlbu);
+    if (filtersApplied.title) params.set("title", filtersApplied.title);
+    if (filtersApplied.sku) params.set("sku", filtersApplied.sku);
+    if (filtersApplied.variation) params.set("variation", filtersApplied.variation);
+    if (filtersApplied.status) params.set("filter", filtersApplied.status);
+    if (filtersApplied.hideVariations) params.set("hide_variations", "true");
     window.open(`/api/atacado/export?${params}`, "_blank");
     setMessage({ type: "success", text: "Exportação iniciada." });
   };
@@ -697,12 +736,15 @@ function AtacadoPageContent() {
 
   const totalPages = Math.ceil(total / limit) || 1;
 
-  const TABLE_COL_COUNT = 19;
+  const TABLE_COL_COUNT = 18;
 
-  if (loading && accounts.length === 0) {
+  if (!accountsLoaded) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="text-gray-500">Carregando…</p>
+        <div className="flex flex-col items-center justify-center py-8">
+          <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-brand-blue"></div>
+          <p className="text-gray-500">Carregando…</p>
+        </div>
       </div>
     );
   }
@@ -735,7 +777,8 @@ function AtacadoPageContent() {
         </div>
       )}
 
-      <div className="mb-6 flex flex-wrap items-center gap-4">
+      {/* Seletor de conta e ações */}
+      <div className="mb-4 flex flex-wrap items-center gap-4">
         <div>
           <label className="mr-2 text-sm text-gray-600">Conta:</label>
           <select
@@ -750,67 +793,6 @@ function AtacadoPageContent() {
             ))}
           </select>
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            setSearch(searchInput.trim());
-            setPage(1);
-          }}
-          className="flex gap-2"
-        >
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Buscar por MLB, título, SKU ou família"
-            className="rounded border border-gray-300 px-2 py-1 text-sm"
-          />
-          <button type="submit" className="rounded bg-gray-200 px-3 py-1 text-sm hover:bg-gray-300">
-            Buscar
-          </button>
-        </form>
-        <div className="flex items-center gap-1">
-          <label className="text-sm text-gray-600">Cód. MLBU:</label>
-          <input
-            type="text"
-            value={mlbuCodeInput}
-            onChange={(e) => setMlbuCodeInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                setMlbuCodeApplied(mlbuCodeInput.trim());
-                setPage(1);
-              }
-            }}
-            placeholder="ex: MLAU123"
-            className="w-28 rounded border border-gray-300 px-2 py-1 text-sm font-mono"
-            title="Filtrar por código User Product (MLBU). Enter ou clique em Filtrar."
-          />
-          <button
-            type="button"
-            onClick={() => { setMlbuCodeApplied(mlbuCodeInput.trim()); setPage(1); }}
-            className="rounded border border-gray-300 px-2 py-1 text-sm hover:bg-gray-100"
-          >
-            Filtrar
-          </button>
-        </div>
-        <select
-          value={filter}
-          onChange={(e) => {
-            setFilter(e.target.value);
-            setPage(1);
-          }}
-          className="rounded border border-gray-300 px-2 py-1 text-sm"
-          title="Filtrar linhas da tabela"
-        >
-          <option value="">Todos</option>
-          <option value="com_variações">Com variações</option>
-          <option value="mlbu">Só MLBU</option>
-          <option value="com_familia">Com família</option>
-          <option value="com_rascunho">Com rascunho</option>
-          <option value="sem_rascunho">Sem rascunho</option>
-          <option value="price_high">Preço alto</option>
-        </select>
         <button
           type="button"
           disabled={!!refJobId && (refJob?.status === "queued" || refJob?.status === "running")}
@@ -846,7 +828,7 @@ function AtacadoPageContent() {
           onClick={exportCsv}
           className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
-          Exportar CSV modelo
+          Exportar CSV
         </button>
         <input
           ref={fileInputRef}
@@ -876,6 +858,161 @@ function AtacadoPageContent() {
         </span>
         {editedCount > 0 && (
           <span className="text-sm text-amber-700">{editedCount} linha(s) alterada(s)</span>
+        )}
+      </div>
+
+      {/* Filtros */}
+      <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-medium text-gray-700">Filtros</h3>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="text-xs text-gray-500 hover:text-gray-700 hover:underline"
+            >
+              Limpar filtros
+            </button>
+          )}
+        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            applyFilters();
+          }}
+          className="flex flex-wrap items-end gap-4"
+        >
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">MLB</label>
+            <input
+              type="text"
+              value={filterMlb}
+              onChange={(e) => setFilterMlb(e.target.value)}
+              placeholder="ex: MLB123"
+              className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm font-mono"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">MLBU</label>
+            <input
+              type="text"
+              value={filterMlbu}
+              onChange={(e) => setFilterMlbu(e.target.value)}
+              placeholder="ex: MLBU123"
+              className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm font-mono"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">Título</label>
+            <input
+              type="text"
+              value={filterTitle}
+              onChange={(e) => setFilterTitle(e.target.value)}
+              placeholder="Buscar no título"
+              className="w-48 rounded border border-gray-300 px-2 py-1.5 text-sm"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">SKU</label>
+            <input
+              type="text"
+              value={filterSku}
+              onChange={(e) => setFilterSku(e.target.value)}
+              placeholder="ex: SKU-001"
+              className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm font-mono"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">Variação</label>
+            <select
+              value={filterVariation}
+              onChange={(e) => setFilterVariation(e.target.value as "" | "com" | "sem")}
+              className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm"
+            >
+              <option value="">Todas</option>
+              <option value="com">Com variação</option>
+              <option value="sem">Sem variação</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">Status</label>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="w-36 rounded border border-gray-300 px-2 py-1.5 text-sm"
+            >
+              <option value="">Todos</option>
+              <option value="mlbu">Só MLBU</option>
+              <option value="com_familia">Com família</option>
+              <option value="com_rascunho">Com rascunho</option>
+              <option value="sem_rascunho">Sem rascunho</option>
+              <option value="price_high">Preço alto</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">&nbsp;</label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hideVariations}
+                onChange={(e) => setHideVariations(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              <span className="text-sm text-gray-700">Só anúncios</span>
+            </label>
+          </div>
+          <button
+            type="submit"
+            className="rounded bg-brand-blue px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-blue-dark"
+          >
+            Filtrar
+          </button>
+        </form>
+        {hasActiveFilters && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {filtersApplied.mlb && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">
+                MLB: {filtersApplied.mlb}
+                <button type="button" onClick={() => { setFilterMlb(""); setFiltersApplied((p) => ({ ...p, mlb: "" })); }} className="hover:text-blue-600">×</button>
+              </span>
+            )}
+            {filtersApplied.mlbu && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-800">
+                MLBU: {filtersApplied.mlbu}
+                <button type="button" onClick={() => { setFilterMlbu(""); setFiltersApplied((p) => ({ ...p, mlbu: "" })); }} className="hover:text-indigo-600">×</button>
+              </span>
+            )}
+            {filtersApplied.title && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-800">
+                Título: {filtersApplied.title}
+                <button type="button" onClick={() => { setFilterTitle(""); setFiltersApplied((p) => ({ ...p, title: "" })); }} className="hover:text-green-600">×</button>
+              </span>
+            )}
+            {filtersApplied.sku && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+                SKU: {filtersApplied.sku}
+                <button type="button" onClick={() => { setFilterSku(""); setFiltersApplied((p) => ({ ...p, sku: "" })); }} className="hover:text-amber-600">×</button>
+              </span>
+            )}
+            {filtersApplied.variation && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-800">
+                Variação: {filtersApplied.variation === "com" ? "Com" : "Sem"}
+                <button type="button" onClick={() => { setFilterVariation(""); setFiltersApplied((p) => ({ ...p, variation: "" })); }} className="hover:text-purple-600">×</button>
+              </span>
+            )}
+            {filtersApplied.status && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-800">
+                Status: {filtersApplied.status.replace(/_/g, " ")}
+                <button type="button" onClick={() => { setFilterStatus(""); setFiltersApplied((p) => ({ ...p, status: "" })); }} className="hover:text-gray-600">×</button>
+              </span>
+            )}
+            {filtersApplied.hideVariations && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs text-teal-800">
+                Só anúncios
+                <button type="button" onClick={() => { setHideVariations(false); setFiltersApplied((p) => ({ ...p, hideVariations: false })); }} className="hover:text-teal-600">×</button>
+              </span>
+            )}
+          </div>
         )}
       </div>
 
@@ -1022,8 +1159,12 @@ function AtacadoPageContent() {
         </div>
       )}
 
-      {loading ? (
-        <p className="text-gray-500">Carregando…</p>
+      {loadingRows ? (
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="mb-4 h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-brand-blue"></div>
+          <p className="text-gray-600 font-medium">Carregando anúncios…</p>
+          <p className="text-sm text-gray-400 mt-1">Isso pode levar alguns segundos</p>
+        </div>
       ) : rows.length === 0 ? (
         <p className="text-gray-500">
           Nenhum item encontrado. Sincronize anúncios em{" "}
@@ -1035,60 +1176,31 @@ function AtacadoPageContent() {
       ) : (
         <>
           <AppTable
-            summary={`${total} linha(s) — página ${page} de ${totalPages}`}
+            summary={`${rows.length} linha(s) — página ${page} de ${totalPages}`}
             maxHeight="70vh"
           >
             <thead>
               <tr>
                 <th className="whitespace-nowrap p-2 font-medium">MLB</th>
-                  <th className="p-2 font-medium">Título</th>
-                  <th className="p-2 font-medium" title="MLBU = User Product (preço por variação). Família = agrupamento de produtos no modelo MLBU.">
-                    Modelo / Família
+                <th className="whitespace-nowrap p-2 font-medium" title="Código User Product (MLBU)">MLBU</th>
+                <th className="p-2 font-medium">Título</th>
+                <th className="p-2 font-medium" title="Indica se o anúncio possui variações">Variação</th>
+                <th className="p-2 font-medium" title="SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.">
+                  SKU
+                </th>
+                <th className="p-2 font-medium">Preço R$</th>
+                <th className="p-2 font-medium">Competitividade</th>
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <th key={i} colSpan={2} className="whitespace-nowrap p-2 font-medium text-center">
+                    T{i}
                   </th>
-                  <th className="p-2 font-medium">Var.</th>
-                  <th className="p-2 font-medium" title="SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.">
-                    SKU
-                  </th>
-                  <th className="p-2 font-medium">Preço R$</th>
-                  <th className="p-2 font-medium">Competitividade</th>
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <th key={i} colSpan={2} className="whitespace-nowrap p-2 font-medium text-center">
-                      T{i}
-                    </th>
-                  ))}
-                  <th className="p-2 font-medium">Status</th>
-                  <th className="p-2 font-medium">Ações</th>
-                </tr>
-              </thead>
+                ))}
+                <th className="p-2 font-medium">Status</th>
+                <th className="p-2 font-medium">Ações</th>
+              </tr>
+            </thead>
               <tbody>
-                {rowSections.map((section) => {
-                  if (section.type === "family") {
-                    const expanded = isFamilyExpanded(section.familyId);
-                    return (
-                      <React.Fragment key={section.familyId}>
-                        <tr className="border-b border-slate-200 bg-slate-100">
-                          <td colSpan={TABLE_COL_COUNT} className="p-2">
-                            <button
-                              type="button"
-                              onClick={() => setFamilyExpanded(section.familyId, !expanded)}
-                              className="flex items-center gap-2 text-left font-medium text-slate-800 hover:bg-slate-200 rounded px-1 py-0.5 -mx-1"
-                            >
-                              <span className="text-slate-500 text-xs">{expanded ? "▼" : "▶"}</span>
-                              Família: {section.familyName} ({section.rows.length} itens)
-                            </button>
-                          </td>
-                        </tr>
-                        {expanded &&
-                          section.rows.map((r) => renderAtacadoRow(r, true))}
-                        </React.Fragment>
-                      );
-                    }
-                    return (
-                      <React.Fragment key={`single-${section.rows[0] ? rowKey(section.rows[0]) : "s"}`}>
-                        {section.rows.map((r) => renderAtacadoRow(r, false))}
-                      </React.Fragment>
-                    );
-                  })}
+                {rows.map((r) => renderAtacadoRow(r))}
               </tbody>
           </AppTable>
 
