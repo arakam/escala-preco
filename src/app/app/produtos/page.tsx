@@ -1,0 +1,673 @@
+"use client";
+
+import { useCallback, useEffect, useState, useRef } from "react";
+import { AppTable } from "@/components/AppTable";
+import { Product, ProductInput } from "@/lib/db/types";
+
+interface ProductFormData {
+  sku: string;
+  title: string;
+  description: string;
+  ean: string;
+  height: string;
+  width: string;
+  length: string;
+  weight: string;
+  cost_price: string;
+  sale_price: string;
+}
+
+const emptyForm: ProductFormData = {
+  sku: "",
+  title: "",
+  description: "",
+  ean: "",
+  height: "",
+  width: "",
+  length: "",
+  weight: "",
+  cost_price: "",
+  sale_price: "",
+};
+
+export default function ProdutosPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(50);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [form, setForm] = useState<ProductFormData>(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const [deleteConfirm, setDeleteConfirm] = useState<Product | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ success: boolean; imported?: number; errors?: string[] } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadProducts = useCallback(async () => {
+    setLoading(true);
+    const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
+    if (search) params.set("search", search);
+
+    const res = await fetch(`/api/products?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      setProducts(data.products ?? []);
+      setTotal(data.total ?? 0);
+    }
+    setLoading(false);
+  }, [page, pageSize, search]);
+
+  useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
+
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSearch(searchInput.trim());
+    setPage(1);
+  }
+
+  function openNewProduct() {
+    setEditingProduct(null);
+    setForm(emptyForm);
+    setFormError(null);
+    setModalOpen(true);
+  }
+
+  function openEditProduct(product: Product) {
+    setEditingProduct(product);
+    setForm({
+      sku: product.sku,
+      title: product.title,
+      description: product.description ?? "",
+      ean: product.ean ?? "",
+      height: product.height?.toString() ?? "",
+      width: product.width?.toString() ?? "",
+      length: product.length?.toString() ?? "",
+      weight: product.weight?.toString() ?? "",
+      cost_price: product.cost_price?.toString() ?? "",
+      sale_price: product.sale_price?.toString() ?? "",
+    });
+    setFormError(null);
+    setModalOpen(true);
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    setEditingProduct(null);
+    setForm(emptyForm);
+    setFormError(null);
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.sku.trim() || !form.title.trim()) {
+      setFormError("SKU e Título são obrigatórios");
+      return;
+    }
+
+    setSaving(true);
+    setFormError(null);
+
+    const payload: ProductInput = {
+      sku: form.sku.trim(),
+      title: form.title.trim(),
+      description: form.description.trim() || null,
+      ean: form.ean.trim() || null,
+      height: form.height ? parseFloat(form.height.replace(",", ".")) : null,
+      width: form.width ? parseFloat(form.width.replace(",", ".")) : null,
+      length: form.length ? parseFloat(form.length.replace(",", ".")) : null,
+      weight: form.weight ? parseFloat(form.weight.replace(",", ".")) : null,
+      cost_price: form.cost_price ? parseFloat(form.cost_price.replace(",", ".")) : null,
+      sale_price: form.sale_price ? parseFloat(form.sale_price.replace(",", ".")) : null,
+    };
+
+    try {
+      const url = editingProduct ? `/api/products/${editingProduct.id}` : "/api/products";
+      const method = editingProduct ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setFormError(data.error || "Erro ao salvar produto");
+        setSaving(false);
+        return;
+      }
+
+      closeModal();
+      loadProducts();
+    } catch {
+      setFormError("Erro de conexão");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteConfirm) return;
+    setDeleting(true);
+
+    try {
+      const res = await fetch(`/api/products/${deleteConfirm.id}`, { method: "DELETE" });
+      if (res.ok) {
+        setDeleteConfirm(null);
+        loadProducts();
+      }
+    } catch {
+      // ignore
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleExport() {
+    window.location.href = "/api/products/export";
+  }
+
+  async function handleImport(e: React.FormEvent) {
+    e.preventDefault();
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setImportResult(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("mode", "upsert");
+
+    try {
+      const res = await fetch("/api/products/import", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setImportResult({ success: true, imported: data.imported, errors: data.errors });
+        loadProducts();
+      } else {
+        setImportResult({ success: false, errors: [data.error || "Erro ao importar"] });
+      }
+    } catch {
+      setImportResult({ success: false, errors: ["Erro de conexão"] });
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  const totalPages = Math.ceil(total / pageSize);
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-6">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-xl font-semibold">Cadastro de Produtos</h1>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setImportModalOpen(true)}
+            className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Importar CSV
+          </button>
+          <button
+            type="button"
+            onClick={handleExport}
+            className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Exportar CSV
+          </button>
+          <button
+            type="button"
+            onClick={openNewProduct}
+            className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark"
+          >
+            Novo Produto
+          </button>
+        </div>
+      </div>
+
+      <form onSubmit={handleSearchSubmit} className="mb-6 flex flex-wrap gap-3">
+        <input
+          type="text"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Buscar por SKU, título ou EAN…"
+          className="rounded border border-gray-300 px-3 py-2 text-sm"
+        />
+        <button
+          type="submit"
+          className="rounded bg-gray-200 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+        >
+          Buscar
+        </button>
+        {search && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch("");
+              setSearchInput("");
+              setPage(1);
+            }}
+            className="text-sm text-gray-600 underline hover:text-gray-900"
+          >
+            Limpar
+          </button>
+        )}
+      </form>
+
+      {loading ? (
+        <p className="text-gray-500">Carregando…</p>
+      ) : products.length === 0 ? (
+        <p className="text-gray-500">
+          Nenhum produto cadastrado. Clique em &quot;Novo Produto&quot; ou importe via CSV.
+        </p>
+      ) : (
+        <>
+          <AppTable
+            summary={`${total} produto(s) — página ${page} de ${totalPages || 1}`}
+            maxHeight="70vh"
+          >
+            <thead>
+              <tr>
+                <th className="p-2 font-medium text-gray-700">SKU</th>
+                <th className="p-2 font-medium text-gray-700">Título</th>
+                <th className="p-2 font-medium text-gray-700">EAN</th>
+                <th className="p-2 font-medium text-gray-700">Custo (R$)</th>
+                <th className="p-2 font-medium text-gray-700">Venda (R$)</th>
+                <th className="p-2 font-medium text-gray-700">Altura (cm)</th>
+                <th className="p-2 font-medium text-gray-700">Largura (cm)</th>
+                <th className="p-2 font-medium text-gray-700">Comprimento (cm)</th>
+                <th className="p-2 font-medium text-gray-700">Peso (kg)</th>
+                <th className="p-2 font-medium text-gray-700">Criado em</th>
+                <th className="p-2 font-medium text-gray-700">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((product) => (
+                <tr key={product.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <td className="p-2 font-mono text-sm">{product.sku}</td>
+                  <td className="max-w-[240px] truncate p-2" title={product.title}>
+                    {product.title}
+                  </td>
+                  <td className="p-2 font-mono text-sm text-gray-600">{product.ean ?? "—"}</td>
+                  <td className="p-2 text-right">{product.cost_price != null ? Number(product.cost_price).toFixed(2) : "—"}</td>
+                  <td className="p-2 text-right font-medium">{product.sale_price != null ? Number(product.sale_price).toFixed(2) : "—"}</td>
+                  <td className="p-2 text-right">{product.height ?? "—"}</td>
+                  <td className="p-2 text-right">{product.width ?? "—"}</td>
+                  <td className="p-2 text-right">{product.length ?? "—"}</td>
+                  <td className="p-2 text-right">{product.weight ?? "—"}</td>
+                  <td className="p-2 text-gray-500 text-sm">
+                    {new Date(product.created_at).toLocaleDateString()}
+                  </td>
+                  <td className="p-2">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEditProduct(product)}
+                        className="text-sm text-brand-blue hover:underline"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirm(product)}
+                        className="text-sm text-red-600 hover:underline"
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </AppTable>
+
+          {totalPages > 1 && (
+            <div className="mt-6 flex justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="rounded border border-gray-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
+              >
+                Anterior
+              </button>
+              <span className="py-1 text-sm text-gray-600">
+                Página {page} de {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="rounded border border-gray-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
+              >
+                Próxima
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Modal: Novo/Editar Produto */}
+      {modalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={closeModal}
+          role="dialog"
+          aria-modal="true"
+          aria-label={editingProduct ? "Editar Produto" : "Novo Produto"}
+        >
+          <div
+            className="w-full max-w-lg rounded-lg border border-gray-200 bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 p-4">
+              <h2 className="text-lg font-semibold text-gray-900">
+                {editingProduct ? "Editar Produto" : "Novo Produto"}
+              </h2>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Fechar"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleSave} className="p-4">
+              {formError && (
+                <div className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">{formError}</div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-1">
+                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                    SKU <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.sku}
+                    onChange={(e) => setForm({ ...form, sku: e.target.value })}
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    required
+                  />
+                </div>
+                <div className="col-span-1">
+                  <label className="mb-1 block text-sm font-medium text-gray-700">EAN</label>
+                  <input
+                    type="text"
+                    value={form.ean}
+                    onChange={(e) => setForm({ ...form, ean: e.target.value })}
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                    Título <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.title}
+                    onChange={(e) => setForm({ ...form, title: e.target.value })}
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    required
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Descrição</label>
+                  <textarea
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    rows={3}
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Altura (cm)</label>
+                  <input
+                    type="text"
+                    value={form.height}
+                    onChange={(e) => setForm({ ...form, height: e.target.value })}
+                    placeholder="0,00"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Largura (cm)</label>
+                  <input
+                    type="text"
+                    value={form.width}
+                    onChange={(e) => setForm({ ...form, width: e.target.value })}
+                    placeholder="0,00"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Comprimento (cm)</label>
+                  <input
+                    type="text"
+                    value={form.length}
+                    onChange={(e) => setForm({ ...form, length: e.target.value })}
+                    placeholder="0,00"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Peso (kg)</label>
+                  <input
+                    type="text"
+                    value={form.weight}
+                    onChange={(e) => setForm({ ...form, weight: e.target.value })}
+                    placeholder="0,000"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Preço de Custo (R$)</label>
+                  <input
+                    type="text"
+                    value={form.cost_price}
+                    onChange={(e) => setForm({ ...form, cost_price: e.target.value })}
+                    placeholder="0,00"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Preço de Venda (R$)</label>
+                  <input
+                    type="text"
+                    value={form.sale_price}
+                    onChange={(e) => setForm({ ...form, sale_price: e.target.value })}
+                    placeholder="0,00"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+                >
+                  {saving ? "Salvando…" : "Salvar"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar exclusão */}
+      {deleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setDeleteConfirm(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirmar exclusão"
+        >
+          <div
+            className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="mb-4 text-lg font-semibold text-gray-900">Excluir Produto</h2>
+            <p className="mb-6 text-sm text-gray-600">
+              Tem certeza que deseja excluir o produto <strong>{deleteConfirm.sku}</strong>?
+              Esta ação não pode ser desfeita.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? "Excluindo…" : "Excluir"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Importar CSV */}
+      {importModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => {
+            setImportModalOpen(false);
+            setImportResult(null);
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Importar CSV"
+        >
+          <div
+            className="w-full max-w-md rounded-lg border border-gray-200 bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 p-4">
+              <h2 className="text-lg font-semibold text-gray-900">Importar Produtos via CSV</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setImportModalOpen(false);
+                  setImportResult(null);
+                }}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Fechar"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleImport} className="p-4">
+              <p className="mb-4 text-sm text-gray-600">
+                O arquivo CSV deve conter as colunas: <strong>SKU</strong>, <strong>Titulo</strong> (obrigatórios),
+                e opcionalmente: Descricao, EAN, Altura, Largura, Comprimento, Peso.
+              </p>
+              <p className="mb-4 text-sm text-gray-600">
+                Produtos com SKU existente serão atualizados.
+              </p>
+              <a
+                href="/api/products/template"
+                download="modelo_produtos.csv"
+                className="mb-4 inline-flex items-center gap-2 rounded border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Baixar modelo CSV
+              </a>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                className="mb-4 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                required
+              />
+
+              {importResult && (
+                <div
+                  className={`mb-4 rounded p-3 text-sm ${
+                    importResult.success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+                  }`}
+                >
+                  {importResult.success ? (
+                    <p>{importResult.imported} produto(s) importado(s) com sucesso!</p>
+                  ) : (
+                    <p>{importResult.errors?.[0] || "Erro ao importar"}</p>
+                  )}
+                  {importResult.errors && importResult.errors.length > 0 && importResult.success && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-amber-700">
+                        {importResult.errors.length} aviso(s)
+                      </summary>
+                      <ul className="mt-1 list-inside list-disc text-xs">
+                        {importResult.errors.slice(0, 10).map((err, i) => (
+                          <li key={i}>{err}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportModalOpen(false);
+                    setImportResult(null);
+                  }}
+                  className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Fechar
+                </button>
+                <button
+                  type="submit"
+                  disabled={importing}
+                  className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+                >
+                  {importing ? "Importando…" : "Importar"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

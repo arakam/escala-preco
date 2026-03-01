@@ -22,3 +22,33 @@ export interface MLAccountWithToken extends MLAccount {
   refresh_token?: string;
   expires_at?: string;
 }
+
+export interface Product {
+  id: string;
+  user_id: string;
+  sku: string;
+  title: string;
+  description: string | null;
+  ean: string | null;
+  height: number | null;
+  width: number | null;
+  length: number | null;
+  weight: number | null;
+  cost_price: number | null;
+  sale_price: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductInput {
+  sku: string;
+  title: string;
+  description?: string | null;
+  ean?: string | null;
+  height?: number | null;
+  width?: number | null;
+  length?: number | null;
+  weight?: number | null;
+  cost_price?: number | null;
+  sale_price?: number | null;
+}
