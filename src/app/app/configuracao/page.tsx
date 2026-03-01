@@ -11,9 +11,24 @@ interface MLAccountRow {
   created_at: string;
 }
 
+interface ShippingCostRange {
+  id: number;
+  weight_min_kg: number;
+  weight_max_kg: number | null;
+  weight_label: string;
+  cost_under_79: number;
+  cost_79_to_99: number;
+  cost_100_to_119: number;
+  cost_120_to_149: number;
+  cost_150_to_199: number;
+  cost_200_plus: number;
+}
+
 function ConfiguracaoContent() {
   const [accounts, setAccounts] = useState<MLAccountRow[]>([]);
+  const [shippingCosts, setShippingCosts] = useState<ShippingCostRange[]>([]);
   const [loading, setLoading] = useState(true);
+  const [shippingLoading, setShippingLoading] = useState(true);
   const searchParams = useSearchParams();
 
   const loadAccounts = useCallback(async () => {
@@ -25,9 +40,19 @@ function ConfiguracaoContent() {
     setLoading(false);
   }, []);
 
+  const loadShippingCosts = useCallback(async () => {
+    const res = await fetch("/api/shipping-costs");
+    if (res.ok) {
+      const data = await res.json();
+      setShippingCosts(data.costs ?? []);
+    }
+    setShippingLoading(false);
+  }, []);
+
   useEffect(() => {
     loadAccounts();
-  }, [loadAccounts]);
+    loadShippingCosts();
+  }, [loadAccounts, loadShippingCosts]);
 
   useEffect(() => {
     const connected = searchParams.get("connected");
@@ -129,6 +154,104 @@ function ConfiguracaoContent() {
             </ul>
           </div>
         )}
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-lg font-medium text-gray-900">Tabela de Frete - Mercado Livre</h2>
+        <p className="mb-4 text-gray-600">
+          Custos de envio para MercadoLíderes e vendedores com reputação verde.
+          Válido para Agências ML, Envios com Coleta e Full.
+        </p>
+
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <p className="text-sm text-blue-800">
+            <strong>Regras de frete grátis:</strong>
+          </p>
+          <ul className="mt-2 list-inside list-disc text-sm text-blue-700">
+            <li>Produtos novos de R$ 19 a R$ 78,99: frete grátis pago pelo ML</li>
+            <li>Produtos novos ≥ R$ 79: vendedor paga com desconto de até 70%</li>
+            <li>Produtos &lt; R$ 19 ou usados: vendedor paga custo integral</li>
+          </ul>
+        </div>
+
+        {shippingLoading ? (
+          <p className="text-gray-500">Carregando tabela de frete…</p>
+        ) : shippingCosts.length === 0 ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <p className="text-amber-800">
+              Tabela de frete não encontrada. Execute a migration 008_ml_shipping_costs.sql no Supabase.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-900">
+                    Peso
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900">
+                    &lt; R$ 79
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900">
+                    R$ 79-99
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900">
+                    R$ 100-119
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900">
+                    R$ 120-149
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900">
+                    R$ 150-199
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900">
+                    ≥ R$ 200
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white">
+                {shippingCosts.map((row) => (
+                  <tr key={row.id} className="hover:bg-gray-50">
+                    <td className="whitespace-nowrap px-3 py-2 font-medium text-gray-900">
+                      {row.weight_label}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">
+                      R$ {Number(row.cost_under_79).toFixed(2).replace(".", ",")}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">
+                      R$ {Number(row.cost_79_to_99).toFixed(2).replace(".", ",")}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">
+                      R$ {Number(row.cost_100_to_119).toFixed(2).replace(".", ",")}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">
+                      R$ {Number(row.cost_120_to_149).toFixed(2).replace(".", ",")}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">
+                      R$ {Number(row.cost_150_to_199).toFixed(2).replace(".", ",")}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">
+                      R$ {Number(row.cost_200_plus).toFixed(2).replace(".", ",")}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <p className="mt-3 text-xs text-gray-500">
+          Fonte:{" "}
+          <a
+            href="https://www.mercadolivre.com.br/ajuda/40538"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline"
+          >
+            mercadolivre.com.br/ajuda/40538
+          </a>
+        </p>
       </section>
     </div>
   );
