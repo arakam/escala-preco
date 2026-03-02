@@ -24,11 +24,88 @@ interface ShippingCostRange {
   cost_200_plus: number;
 }
 
+interface SellerReputation {
+  level_id: string | null;
+  power_seller_status: string | null;
+  real_level?: string;
+  protection_end_date?: string;
+  transactions: {
+    canceled: number;
+    completed: number;
+    period: string;
+    ratings: {
+      negative: number;
+      neutral: number;
+      positive: number;
+    };
+    total: number;
+  };
+  metrics: {
+    sales: {
+      period: string;
+      completed: number;
+    };
+    claims: {
+      period: string;
+      rate: number;
+      value: number;
+    };
+    delayed_handling_time: {
+      period: string;
+      rate: number;
+      value: number;
+    };
+    cancellations: {
+      period: string;
+      rate: number;
+      value: number;
+    };
+  };
+}
+
+interface ReputationData {
+  user_id: number;
+  nickname: string;
+  reputation: SellerReputation;
+}
+
+function getReputationColor(levelId: string | null): { bg: string; text: string; label: string } {
+  if (!levelId) return { bg: "bg-gray-100", text: "text-gray-600", label: "Sem reputação" };
+  
+  if (levelId.includes("green")) return { bg: "bg-green-100", text: "text-green-800", label: "Verde" };
+  if (levelId.includes("yellow")) return { bg: "bg-yellow-100", text: "text-yellow-800", label: "Amarelo" };
+  if (levelId.includes("orange")) return { bg: "bg-orange-100", text: "text-orange-800", label: "Laranja" };
+  if (levelId.includes("red")) return { bg: "bg-red-100", text: "text-red-800", label: "Vermelho" };
+  
+  return { bg: "bg-gray-100", text: "text-gray-600", label: levelId };
+}
+
+function getMercadoLiderLabel(status: string | null): { bg: string; text: string; label: string } | null {
+  if (!status) return null;
+  
+  switch (status.toLowerCase()) {
+    case "platinum":
+      return { bg: "bg-gradient-to-r from-slate-200 to-slate-300", text: "text-slate-800", label: "MercadoLíder Platinum" };
+    case "gold":
+      return { bg: "bg-gradient-to-r from-yellow-200 to-yellow-300", text: "text-yellow-800", label: "MercadoLíder Gold" };
+    case "silver":
+      return { bg: "bg-gradient-to-r from-gray-200 to-gray-300", text: "text-gray-700", label: "MercadoLíder" };
+    default:
+      return null;
+  }
+}
+
+function formatPercent(value: number): string {
+  return (value * 100).toFixed(1).replace(".", ",") + "%";
+}
+
 function ConfiguracaoContent() {
   const [accounts, setAccounts] = useState<MLAccountRow[]>([]);
   const [shippingCosts, setShippingCosts] = useState<ShippingCostRange[]>([]);
+  const [reputation, setReputation] = useState<ReputationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [shippingLoading, setShippingLoading] = useState(true);
+  const [reputationLoading, setReputationLoading] = useState(true);
   const searchParams = useSearchParams();
 
   const loadAccounts = useCallback(async () => {
@@ -49,10 +126,20 @@ function ConfiguracaoContent() {
     setShippingLoading(false);
   }, []);
 
+  const loadReputation = useCallback(async () => {
+    const res = await fetch("/api/mercadolivre/reputation");
+    if (res.ok) {
+      const data = await res.json();
+      setReputation(data);
+    }
+    setReputationLoading(false);
+  }, []);
+
   useEffect(() => {
     loadAccounts();
     loadShippingCosts();
-  }, [loadAccounts, loadShippingCosts]);
+    loadReputation();
+  }, [loadAccounts, loadShippingCosts, loadReputation]);
 
   useEffect(() => {
     const connected = searchParams.get("connected");
@@ -155,6 +242,167 @@ function ConfiguracaoContent() {
           </div>
         )}
       </section>
+
+      {accounts.length > 0 && (
+        <section className="mb-8">
+          <h2 className="mb-3 text-lg font-medium text-gray-900">Reputação do Vendedor</h2>
+          <p className="mb-4 text-gray-600">
+            Métricas de qualidade da sua conta no Mercado Livre.
+          </p>
+
+          {reputationLoading ? (
+            <p className="text-gray-500">Carregando reputação…</p>
+          ) : !reputation ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <p className="text-amber-800">Não foi possível carregar a reputação.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                {(() => {
+                  const repColor = getReputationColor(reputation.reputation.level_id);
+                  return (
+                    <span className={`rounded-full px-4 py-2 text-sm font-semibold ${repColor.bg} ${repColor.text}`}>
+                      Reputação: {repColor.label}
+                    </span>
+                  );
+                })()}
+                {(() => {
+                  const mlStatus = getMercadoLiderLabel(reputation.reputation.power_seller_status);
+                  return mlStatus ? (
+                    <span className={`rounded-full px-4 py-2 text-sm font-semibold ${mlStatus.bg} ${mlStatus.text}`}>
+                      {mlStatus.label}
+                    </span>
+                  ) : null;
+                })()}
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <p className="text-sm text-gray-500">Vendas Concluídas</p>
+                  <p className="mt-1 text-2xl font-bold text-gray-900">
+                    {reputation.reputation.metrics.sales.completed}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    Período: {reputation.reputation.metrics.sales.period}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <p className="text-sm text-gray-500">Taxa de Reclamações</p>
+                  <p className={`mt-1 text-2xl font-bold ${
+                    reputation.reputation.metrics.claims.rate <= 0.02 ? "text-green-600" :
+                    reputation.reputation.metrics.claims.rate <= 0.045 ? "text-yellow-600" :
+                    reputation.reputation.metrics.claims.rate <= 0.08 ? "text-orange-600" : "text-red-600"
+                  }`}>
+                    {formatPercent(reputation.reputation.metrics.claims.rate)}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {reputation.reputation.metrics.claims.value} reclamações
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <p className="text-sm text-gray-500">Atrasos no Envio</p>
+                  <p className={`mt-1 text-2xl font-bold ${
+                    reputation.reputation.metrics.delayed_handling_time.rate <= 0.10 ? "text-green-600" :
+                    reputation.reputation.metrics.delayed_handling_time.rate <= 0.18 ? "text-yellow-600" :
+                    reputation.reputation.metrics.delayed_handling_time.rate <= 0.22 ? "text-orange-600" : "text-red-600"
+                  }`}>
+                    {formatPercent(reputation.reputation.metrics.delayed_handling_time.rate)}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {reputation.reputation.metrics.delayed_handling_time.value} envios atrasados
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <p className="text-sm text-gray-500">Taxa de Cancelamentos</p>
+                  <p className={`mt-1 text-2xl font-bold ${
+                    reputation.reputation.metrics.cancellations.rate <= 0.015 ? "text-green-600" :
+                    reputation.reputation.metrics.cancellations.rate <= 0.035 ? "text-yellow-600" :
+                    reputation.reputation.metrics.cancellations.rate <= 0.04 ? "text-orange-600" : "text-red-600"
+                  }`}>
+                    {formatPercent(reputation.reputation.metrics.cancellations.rate)}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {reputation.reputation.metrics.cancellations.value} cancelamentos
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <h3 className="mb-3 text-sm font-medium text-gray-900">Qualificações dos Compradores</h3>
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <div className="mb-1 flex justify-between text-xs">
+                      <span className="text-green-600">Positivas</span>
+                      <span className="font-medium">{formatPercent(reputation.reputation.transactions.ratings.positive)}</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                      <div
+                        className="h-full bg-green-500"
+                        style={{ width: `${reputation.reputation.transactions.ratings.positive * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="mb-1 flex justify-between text-xs">
+                      <span className="text-gray-500">Neutras</span>
+                      <span className="font-medium">{formatPercent(reputation.reputation.transactions.ratings.neutral)}</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                      <div
+                        className="h-full bg-gray-400"
+                        style={{ width: `${reputation.reputation.transactions.ratings.neutral * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="mb-1 flex justify-between text-xs">
+                      <span className="text-red-600">Negativas</span>
+                      <span className="font-medium">{formatPercent(reputation.reputation.transactions.ratings.negative)}</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                      <div
+                        className="h-full bg-red-500"
+                        style={{ width: `${reputation.reputation.transactions.ratings.negative * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs text-gray-500">
+                  Total histórico: {reputation.reputation.transactions.total} transações
+                  ({reputation.reputation.transactions.completed} concluídas, {reputation.reputation.transactions.canceled} canceladas)
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <p className="text-sm text-blue-800">
+                  <strong>Limites para MercadoLíder (MLB):</strong>
+                </p>
+                <ul className="mt-2 grid gap-2 text-xs text-blue-700 sm:grid-cols-3">
+                  <li>Reclamações: ≤ 1%</li>
+                  <li>Cancelamentos: ≤ 0,5%</li>
+                  <li>Atrasos: ≤ 6%</li>
+                </ul>
+              </div>
+
+              <p className="text-xs text-gray-500">
+                Fonte:{" "}
+                <a
+                  href="https://developers.mercadolivre.com.br/pt_br/reputacao-de-vendedores"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline"
+                >
+                  developers.mercadolivre.com.br
+                </a>
+              </p>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="mb-8">
         <h2 className="mb-3 text-lg font-medium text-gray-900">Tabela de Frete - Mercado Livre</h2>
