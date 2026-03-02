@@ -111,7 +111,9 @@ export async function GET(req: NextRequest) {
     totalCount = itemsCount || 0;
 
     for (const item of itemsData || []) {
-      const product = item.products as { id: string; sku: string; cost_price: number | null; weight: number | null } | null;
+      type ProductData = { id: string; sku: string; cost_price: number | null; weight: number | null };
+      const rawProduct = item.products;
+      const product: ProductData | null = Array.isArray(rawProduct) ? rawProduct[0] ?? null : rawProduct as ProductData | null;
       const rawJson = item.raw_json as Record<string, unknown> | null;
       
       let sku: string | null = null;
@@ -191,7 +193,9 @@ export async function GET(req: NextRequest) {
       );
 
       for (const variation of variationsData) {
-        const product = variation.products as { id: string; sku: string; cost_price: number | null; weight: number | null } | null;
+        type ProductData = { id: string; sku: string; cost_price: number | null; weight: number | null };
+        const rawProduct = variation.products;
+        const product: ProductData | null = Array.isArray(rawProduct) ? rawProduct[0] ?? null : rawProduct as ProductData | null;
         const mlItem = itemsMap.get(variation.item_id);
         const rawJson = variation.raw_json as Record<string, unknown> | null;
 
