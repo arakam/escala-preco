@@ -16,7 +16,13 @@ interface ParsedProduct {
   extra_fee_percent: number | null;
 }
 
-function parseCSVLine(line: string): string[] {
+function detectSeparator(headerLine: string): string {
+  const semicolonCount = (headerLine.match(/;/g) || []).length;
+  const commaCount = (headerLine.match(/,/g) || []).length;
+  return semicolonCount >= commaCount ? ";" : ",";
+}
+
+function parseCSVLine(line: string, separator: string): string[] {
   const result: string[] = [];
   let current = "";
   let inQuotes = false;
@@ -37,7 +43,7 @@ function parseCSVLine(line: string): string[] {
     } else {
       if (char === '"') {
         inQuotes = true;
-      } else if (char === ";" || char === ",") {
+      } else if (char === separator) {
         result.push(current.trim());
         current = "";
       } else {
@@ -51,10 +57,11 @@ function parseCSVLine(line: string): string[] {
 
 function parseNumber(value: string, maxValue: number = 99999999): number | null {
   if (!value || value.trim() === "") return null;
-  const num = parseFloat(value.replace(",", "."));
+  const cleaned = value.trim().replace(/\s/g, "").replace(",", ".");
+  const num = parseFloat(cleaned);
   if (isNaN(num)) return null;
   if (Math.abs(num) > maxValue) return null;
-  return num;
+  return Math.round(num * 100) / 100;
 }
 
 function parseDimension(value: string): number | null {
@@ -63,6 +70,51 @@ function parseDimension(value: string): number | null {
 
 function parsePrice(value: string): number | null {
   return parseNumber(value, 9999999999);
+}
+
+const EXPECTED_HEADERS = ["sku", "titulo", "altura", "largura", "comprimento", "peso", "precocusto", "precovenda", "imposto", "taxaextra"];
+
+const VALID_HEADER_ALIASES: Record<string, string[]> = {
+  sku: ["sku"],
+  titulo: ["titulo", "title", "nome"],
+  altura: ["altura", "height"],
+  largura: ["largura", "width"],
+  comprimento: ["comprimento", "length", "profundidade"],
+  peso: ["peso", "weight"],
+  precocusto: ["precocusto", "cost_price", "custo", "preco_custo"],
+  precovenda: ["precovenda", "sale_price", "venda", "preco", "preco_venda"],
+  imposto: ["imposto", "tax_percent", "tax", "impostos"],
+  taxaextra: ["taxaextra", "extra_fee_percent", "extra_fee", "taxa_extra", "extra"],
+};
+
+function normalizeHeader(header: string): string | null {
+  const h = header.toLowerCase().trim().replace(/[^a-z0-9_]/g, "");
+  for (const [canonical, aliases] of Object.entries(VALID_HEADER_ALIASES)) {
+    if (aliases.includes(h)) {
+      return canonical;
+    }
+  }
+  return null;
+}
+
+function validateHeaders(headers: string[]): { valid: boolean; normalized: Map<string, number>; unknown: string[] } {
+  const normalized = new Map<string, number>();
+  const unknown: string[] = [];
+  
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i];
+    if (!header) continue;
+    
+    const normalizedName = normalizeHeader(header);
+    if (normalizedName) {
+      normalized.set(normalizedName, i);
+    } else {
+      unknown.push(header);
+    }
+  }
+  
+  const hasSku = normalized.has("sku");
+  return { valid: hasSku, normalized, unknown };
 }
 
 export async function POST(request: NextRequest) {
@@ -93,36 +145,43 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const separator = detectSeparator(lines[0]);
   const headerLine = lines[0].toLowerCase();
-  const headers = parseCSVLine(headerLine);
+  const headers = parseCSVLine(headerLine, separator);
   
-  const colIndex = {
-    sku: headers.findIndex((h) => h === "sku"),
-    title: headers.findIndex((h) => h === "titulo" || h === "title"),
-    description: headers.findIndex((h) => h === "descricao" || h === "description"),
-    ean: headers.findIndex((h) => h === "ean"),
-    height: headers.findIndex((h) => h === "altura" || h === "height"),
-    width: headers.findIndex((h) => h === "largura" || h === "width"),
-    length: headers.findIndex((h) => h === "comprimento" || h === "length"),
-    weight: headers.findIndex((h) => h === "peso" || h === "weight"),
-    cost_price: headers.findIndex((h) => h === "precocusto" || h === "cost_price" || h === "custo"),
-    sale_price: headers.findIndex((h) => h === "precovenda" || h === "sale_price" || h === "venda" || h === "preco"),
-    tax_percent: headers.findIndex((h) => h === "imposto" || h === "tax_percent" || h === "tax" || h === "impostos"),
-    extra_fee_percent: headers.findIndex((h) => h === "taxaextra" || h === "extra_fee_percent" || h === "extra_fee" || h === "taxa_extra" || h === "extra"),
-  };
-
-  if (colIndex.sku === -1) {
+  const { valid, normalized, unknown } = validateHeaders(headers);
+  
+  if (!valid) {
     return NextResponse.json(
-      { error: "CSV deve conter a coluna SKU" },
+      { error: "CSV deve conter a coluna SKU. Colunas válidas: " + EXPECTED_HEADERS.join(", ") },
       { status: 400 }
     );
   }
+  
+  const colIndex = {
+    sku: normalized.get("sku") ?? -1,
+    title: normalized.get("titulo") ?? -1,
+    height: normalized.get("altura") ?? -1,
+    width: normalized.get("largura") ?? -1,
+    length: normalized.get("comprimento") ?? -1,
+    weight: normalized.get("peso") ?? -1,
+    cost_price: normalized.get("precocusto") ?? -1,
+    sale_price: normalized.get("precovenda") ?? -1,
+    tax_percent: normalized.get("imposto") ?? -1,
+    extra_fee_percent: normalized.get("taxaextra") ?? -1,
+  };
 
   const products: ParsedProduct[] = [];
   const errors: string[] = [];
+  
+  if (unknown.length > 0) {
+    errors.push(`Colunas ignoradas (não reconhecidas): ${unknown.join(", ")}`);
+  }
+  
+  console.log(`[Import] Separador detectado: "${separator}", Colunas encontradas:`, Object.fromEntries(normalized));
 
   for (let i = 1; i < lines.length; i++) {
-    const values = parseCSVLine(lines[i]);
+    const values = parseCSVLine(lines[i], separator);
     const sku = values[colIndex.sku]?.trim();
     const title = colIndex.title >= 0 ? values[colIndex.title]?.trim() : null;
 
@@ -134,8 +193,8 @@ export async function POST(request: NextRequest) {
     products.push({
       sku,
       title: title || sku,
-      description: colIndex.description >= 0 ? values[colIndex.description]?.trim() || null : null,
-      ean: colIndex.ean >= 0 ? values[colIndex.ean]?.trim() || null : null,
+      description: null,
+      ean: null,
       height: colIndex.height >= 0 ? parseDimension(values[colIndex.height]) : null,
       width: colIndex.width >= 0 ? parseDimension(values[colIndex.width]) : null,
       length: colIndex.length >= 0 ? parseDimension(values[colIndex.length]) : null,
