@@ -48,8 +48,30 @@ export async function fetchSaleFee(
   }
 
   const data = (await res.json()) as ListingPriceResult[];
-  const item = Array.isArray(data) ? data.find((d) => d.listing_type_id === listingTypeId) : null;
+  
+  if (!Array.isArray(data) || data.length === 0) {
+    console.warn("[fees] No data returned from listing_prices API");
+    return null;
+  }
+  
+  // Try exact match first
+  let item = data.find((d) => d.listing_type_id === listingTypeId);
+  
+  // If no exact match, try to find a reasonable fallback
+  if (!item) {
+    // Common listing types in order of preference for fallback
+    const fallbackOrder = ["gold_special", "gold_pro", "gold", "silver", "bronze", "free"];
+    for (const fallbackType of fallbackOrder) {
+      item = data.find((d) => d.listing_type_id === fallbackType);
+      if (item) {
+        console.warn(`[fees] Using fallback listing_type_id: ${fallbackType} instead of ${listingTypeId}`);
+        break;
+      }
+    }
+  }
+  
   if (!item || typeof item.sale_fee_amount !== "number") {
+    console.warn("[fees] No matching listing_type_id found. Requested:", listingTypeId, "Available:", data.map(d => d.listing_type_id));
     return null;
   }
 

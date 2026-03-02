@@ -32,6 +32,9 @@ export default function AppLayout({
             <Link href="/app/produtos" className="text-sm font-medium text-blue-100 transition hover:text-white">
               Produtos
             </Link>
+            <Link href="/app/precos" className="text-sm font-medium text-blue-100 transition hover:text-white">
+              Preço
+            </Link>
             <Link href="/app/configuracao" className="text-sm font-medium text-blue-100 transition hover:text-white">
               Configuração
             </Link>
