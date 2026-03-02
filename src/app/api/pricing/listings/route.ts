@@ -111,9 +111,20 @@ export async function GET(req: NextRequest) {
     totalCount = itemsCount || 0;
 
     for (const item of itemsData || []) {
-      type ProductData = { id: string; sku: string; cost_price: number | null; weight: number | null };
-      const rawProduct = item.products;
-      const product: ProductData | null = Array.isArray(rawProduct) ? rawProduct[0] ?? null : rawProduct as ProductData | null;
+      const rawProduct = item.products as Record<string, unknown> | Record<string, unknown>[] | null;
+      let productCostPrice: number | null = null;
+      let productWeight: number | null = null;
+      let productSku: string | null = null;
+      
+      if (rawProduct) {
+        const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
+        if (prod) {
+          productCostPrice = prod.cost_price != null ? Number(prod.cost_price) : null;
+          productWeight = prod.weight != null ? Number(prod.weight) : null;
+          productSku = prod.sku != null ? String(prod.sku) : null;
+        }
+      }
+      
       const rawJson = item.raw_json as Record<string, unknown> | null;
       
       let sku: string | null = null;
@@ -126,8 +137,8 @@ export async function GET(req: NextRequest) {
       if (!sku && rawJson?.seller_custom_field) {
         sku = String(rawJson.seller_custom_field);
       }
-      if (!sku && product?.sku) {
-        sku = product.sku;
+      if (!sku && productSku) {
+        sku = productSku;
       }
 
       listings.push({
@@ -143,8 +154,8 @@ export async function GET(req: NextRequest) {
         current_price: item.price ?? 0,
         sku,
         product_id: item.product_id,
-        cost_price: product?.cost_price ?? null,
-        weight_kg: product?.weight ?? null,
+        cost_price: productCostPrice,
+        weight_kg: productWeight,
         account_id: item.account_id,
       });
     }
@@ -193,9 +204,20 @@ export async function GET(req: NextRequest) {
       );
 
       for (const variation of variationsData) {
-        type ProductData = { id: string; sku: string; cost_price: number | null; weight: number | null };
-        const rawProduct = variation.products;
-        const product: ProductData | null = Array.isArray(rawProduct) ? rawProduct[0] ?? null : rawProduct as ProductData | null;
+        const rawProduct = variation.products as Record<string, unknown> | Record<string, unknown>[] | null;
+        let productCostPrice: number | null = null;
+        let productWeight: number | null = null;
+        let productSku: string | null = null;
+        
+        if (rawProduct) {
+          const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
+          if (prod) {
+            productCostPrice = prod.cost_price != null ? Number(prod.cost_price) : null;
+            productWeight = prod.weight != null ? Number(prod.weight) : null;
+            productSku = prod.sku != null ? String(prod.sku) : null;
+          }
+        }
+        
         const mlItem = itemsMap.get(variation.item_id);
         const rawJson = variation.raw_json as Record<string, unknown> | null;
 
@@ -213,8 +235,8 @@ export async function GET(req: NextRequest) {
         if (!sku && rawJson?.seller_custom_field) {
           sku = String(rawJson.seller_custom_field);
         }
-        if (!sku && product?.sku) {
-          sku = product.sku;
+        if (!sku && productSku) {
+          sku = productSku;
         }
 
         let variationName = "";
@@ -243,8 +265,8 @@ export async function GET(req: NextRequest) {
           current_price: variation.price ?? 0,
           sku,
           product_id: variation.product_id,
-          cost_price: product?.cost_price ?? null,
-          weight_kg: product?.weight ?? null,
+          cost_price: productCostPrice,
+          weight_kg: productWeight,
           account_id: variation.account_id,
         });
       }

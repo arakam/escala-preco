@@ -16,7 +16,9 @@ interface ShippingCostRange {
   weight_min_kg: number;
   weight_max_kg: number | null;
   weight_label: string;
-  cost_under_79: number;
+  cost_0_to_18: number;
+  cost_19_to_48: number;
+  cost_49_to_78: number;
   cost_79_to_99: number;
   cost_100_to_119: number;
   cost_120_to_149: number;
@@ -413,12 +415,12 @@ function ConfiguracaoContent() {
 
         <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
           <p className="text-sm text-blue-800">
-            <strong>Regras de frete grátis:</strong>
+            <strong>Regras de frete grátis (válido a partir de 2 de março de 2026):</strong>
           </p>
           <ul className="mt-2 list-inside list-disc text-sm text-blue-700">
-            <li>Produtos novos de R$ 19 a R$ 78,99: frete grátis pago pelo ML</li>
-            <li>Produtos novos ≥ R$ 79: vendedor paga com desconto de até 70%</li>
-            <li>Produtos &lt; R$ 19 ou usados: vendedor paga custo integral</li>
+            <li>Produtos de R$ 19 a R$ 78,99: frete grátis padrão oferecido pelo ML</li>
+            <li>Produtos ≥ R$ 79: você oferece frete grátis e rápido</li>
+            <li>Produtos &lt; R$ 19: custo máximo é metade do preço do produto</li>
           </ul>
         </div>
 
@@ -439,7 +441,13 @@ function ConfiguracaoContent() {
                     Peso
                   </th>
                   <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900">
-                    &lt; R$ 79
+                    R$ 0-18
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900">
+                    R$ 19-48
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900">
+                    R$ 49-78
                   </th>
                   <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900">
                     R$ 79-99
@@ -465,7 +473,13 @@ function ConfiguracaoContent() {
                       {row.weight_label}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">
-                      R$ {Number(row.cost_under_79).toFixed(2).replace(".", ",")}
+                      R$ {Number(row.cost_0_to_18).toFixed(2).replace(".", ",")}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">
+                      R$ {Number(row.cost_19_to_48).toFixed(2).replace(".", ",")}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">
+                      R$ {Number(row.cost_49_to_78).toFixed(2).replace(".", ",")}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600">
                       R$ {Number(row.cost_79_to_99).toFixed(2).replace(".", ",")}
@@ -492,12 +506,12 @@ function ConfiguracaoContent() {
         <p className="mt-3 text-xs text-gray-500">
           Fonte:{" "}
           <a
-            href="https://www.mercadolivre.com.br/ajuda/40538"
+            href="https://www.mercadolivre.com.br/ajuda/custos-envio-reputacao-verde-sem-reputacao_48392"
             target="_blank"
             rel="noopener noreferrer"
             className="text-blue-600 hover:underline"
           >
-            mercadolivre.com.br/ajuda/40538
+            mercadolivre.com.br/ajuda/custos-envio-reputacao-verde-sem-reputacao_48392
           </a>
         </p>
       </section>

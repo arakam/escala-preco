@@ -89,28 +89,57 @@ export async function POST(req: NextRequest) {
   const siteId = account.site_id || "MLB";
   const isMercadoLider = body.is_mercado_lider ?? false;
 
-  const { data: shippingRanges } = await adminSupabase
+  const { data: shippingRanges, error: shippingError } = await adminSupabase
     .from("ml_shipping_cost_ranges")
     .select("*")
     .order("weight_min_kg", { ascending: true });
 
+  if (shippingError) {
+    console.error("[Pricing calculate] Error fetching shipping ranges:", shippingError);
+  }
+  
+  console.log("[Pricing calculate] is_mercado_lider:", isMercadoLider, "shipping ranges count:", shippingRanges?.length ?? 0);
+
   const getShippingCost = (weightKg: number | null | undefined, price: number): number => {
-    if (!isMercadoLider || !weightKg || !shippingRanges || shippingRanges.length === 0) {
+    if (!isMercadoLider) {
+      return 0;
+    }
+    
+    if (!weightKg) {
+      console.log("[Pricing calculate] No weight_kg provided for shipping calculation");
+      return 0;
+    }
+    
+    if (!shippingRanges || shippingRanges.length === 0) {
+      console.log("[Pricing calculate] No shipping ranges available");
       return 0;
     }
 
     const range = shippingRanges.find(
-      (r) => weightKg >= r.weight_min_kg && (r.weight_max_kg === null || weightKg < r.weight_max_kg)
+      (r) => weightKg >= Number(r.weight_min_kg) && (r.weight_max_kg === null || weightKg < Number(r.weight_max_kg))
     );
 
-    if (!range) return 0;
+    if (!range) {
+      console.log("[Pricing calculate] No matching range for weight:", weightKg);
+      return 0;
+    }
 
-    if (price < 79) return range.cost_under_79;
-    if (price < 100) return range.cost_79_to_99;
-    if (price < 120) return range.cost_100_to_119;
-    if (price < 150) return range.cost_120_to_149;
-    if (price < 200) return range.cost_150_to_199;
-    return range.cost_200_plus;
+    let cost = 0;
+    if (price < 19) cost = Number(range.cost_0_to_18);
+    else if (price < 49) cost = Number(range.cost_19_to_48);
+    else if (price < 79) cost = Number(range.cost_49_to_78);
+    else if (price < 100) cost = Number(range.cost_79_to_99);
+    else if (price < 120) cost = Number(range.cost_100_to_119);
+    else if (price < 150) cost = Number(range.cost_120_to_149);
+    else if (price < 200) cost = Number(range.cost_150_to_199);
+    else cost = Number(range.cost_200_plus);
+    
+    if (price < 19 && cost > price / 2) {
+      cost = price / 2;
+    }
+    
+    console.log("[Pricing calculate] Shipping cost for weight", weightKg, "price", price, "=", cost);
+    return cost;
   };
 
   const results: CalculatedItem[] = [];
@@ -119,6 +148,9 @@ export async function POST(req: NextRequest) {
   for (const item of body.items) {
     try {
       const price = Math.round(item.price * 100) / 100;
+      const weightKg = item.weight_kg != null ? Number(item.weight_kg) : null;
+      
+      console.log(`[Pricing calculate] Processing ${item.item_id}: price=${price}, weight_kg=${weightKg}, listing_type_id=${item.listing_type_id}`);
       
       if (price <= 0) {
         results.push({
@@ -140,7 +172,7 @@ export async function POST(req: NextRequest) {
       
       const fee = feeResult?.fee ?? 0;
 
-      const shippingCost = getShippingCost(item.weight_kg, price);
+      const shippingCost = getShippingCost(weightKg, price);
 
       const netAmount = Math.round((price - fee - shippingCost) * 100) / 100;
 
