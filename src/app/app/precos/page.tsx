@@ -108,6 +108,99 @@ function PriceInput({
   );
 }
 
+function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div
+        className="absolute inset-0 bg-black/50"
+        onClick={onClose}
+      />
+      <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 text-gray-400 hover:text-gray-600"
+        >
+          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        <h2 className="mb-4 text-xl font-semibold">Como funciona a Calculadora de Preços</h2>
+
+        <div className="space-y-4 text-sm text-gray-700">
+          <section>
+            <h3 className="mb-2 font-medium text-gray-900">Objetivo</h3>
+            <p>
+              Esta ferramenta permite simular preços de venda em massa para seus anúncios do Mercado Livre,
+              calculando automaticamente as taxas e o valor líquido que você receberá.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="mb-2 font-medium text-gray-900">Colunas da tabela</h3>
+            <ul className="list-inside list-disc space-y-1">
+              <li><strong>SKU:</strong> Código do produto vinculado ao anúncio</li>
+              <li><strong>Custo:</strong> Preço de custo do produto (cadastrado em Produtos)</li>
+              <li><strong>Preço Atual:</strong> Preço atual do anúncio no Mercado Livre</li>
+              <li><strong>Preço Novo:</strong> Campo editável para simular um novo preço</li>
+              <li><strong>Taxa ML:</strong> Taxa de comissão do Mercado Livre calculada sobre o preço</li>
+              <li><strong>Frete:</strong> Custo de frete (apenas para contas Mercado Líder)</li>
+              <li><strong>Vai Receber:</strong> Valor líquido após descontar taxa e frete</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3 className="mb-2 font-medium text-gray-900">Como usar</h3>
+            <ol className="list-inside list-decimal space-y-1">
+              <li>Os anúncios são carregados automaticamente ao abrir a página</li>
+              <li>Edite o campo &quot;Preço Novo&quot; para simular um valor diferente</li>
+              <li>Pressione Enter ou clique fora do campo para recalcular</li>
+              <li>Use &quot;Calcular Todos&quot; para recalcular todos os itens de uma vez</li>
+            </ol>
+          </section>
+
+          <section>
+            <h3 className="mb-2 font-medium text-gray-900">Mercado Líder</h3>
+            <p>
+              Se sua conta é Mercado Líder, marque a opção para incluir o custo de frete no cálculo.
+              O frete é calculado com base no peso do produto cadastrado.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="mb-2 font-medium text-gray-900">Filtros</h3>
+            <ul className="list-inside list-disc space-y-1">
+              <li><strong>Status:</strong> Filtre por anúncios ativos, pausados ou encerrados</li>
+              <li><strong>Apenas vinculados:</strong> Mostra apenas anúncios com produto vinculado</li>
+              <li><strong>Busca:</strong> Pesquise por título ou código MLB</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3 className="mb-2 font-medium text-gray-900">Observações</h3>
+            <ul className="list-inside list-disc space-y-1">
+              <li>Anúncios sem tipo de listagem (N/D) precisam ser sincronizados novamente</li>
+              <li>Para ter o custo, vincule o anúncio a um produto na página de Produtos</li>
+              <li>Esta ferramenta é apenas para simulação, não altera os preços no Mercado Livre</li>
+            </ul>
+          </section>
+        </div>
+
+        <div className="mt-6 flex justify-end">
+          <button
+            onClick={onClose}
+            className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark"
+          >
+            Entendi
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PrecosPage() {
   const [listings, setListings] = useState<ListingWithPricing[]>([]);
   const [total, setTotal] = useState(0);
@@ -121,6 +214,7 @@ export default function PrecosPage() {
   const [calculating, setCalculating] = useState(false);
   const [isMercadoLider, setIsMercadoLider] = useState(false);
   const [reputationLoading, setReputationLoading] = useState(true);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const loadReputation = useCallback(async () => {
     setReputationLoading(true);
@@ -453,9 +547,23 @@ export default function PrecosPage() {
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold">Calculadora de Preços</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold">Calculadora de Preços</h1>
+            <button
+              type="button"
+              onClick={() => setHelpOpen(true)}
+              className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              title="Como funciona"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+          </div>
           <p className="mt-1 text-sm text-gray-500">
             Simule preços de venda e veja o valor líquido a receber
           </p>
@@ -784,33 +892,6 @@ export default function PrecosPage() {
           )}
         </>
       )}
-
-      <div className="mt-6 rounded bg-gray-50 p-4 text-sm text-gray-600">
-        <h3 className="mb-2 font-medium text-gray-900">Como funciona:</h3>
-        <ul className="list-inside list-disc space-y-1">
-          <li>
-            <strong>Custo:</strong> Preço de custo do produto cadastrado (vinculado via SKU)
-          </li>
-          <li>
-            <strong>Preço Atual:</strong> Preço atual do anúncio no Mercado Livre
-          </li>
-          <li>
-            <strong>Preço Novo:</strong> Altere para simular um novo preço de venda
-          </li>
-          <li>
-            <strong>Taxa ML:</strong> Taxa de venda cobrada pelo Mercado Livre
-          </li>
-          <li>
-            <strong>Frete:</strong> Custo de frete para Mercado Líder (baseado no peso do produto)
-          </li>
-          <li>
-            <strong>Vai Receber:</strong> Valor líquido = Preço Novo - Taxa ML - Frete
-          </li>
-          <li>
-            <strong>Lucro:</strong> Vai Receber - Custo (mostra também o percentual sobre o custo)
-          </li>
-        </ul>
-      </div>
     </div>
   );
 }

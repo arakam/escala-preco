@@ -181,7 +181,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (variationsData && variationsData.length > 0) {
-      const itemIds = [...new Set(variationsData.map((v) => v.item_id))];
+      const itemIds = Array.from(new Set(variationsData.map((v) => v.item_id)));
       const { data: parentItems } = await adminSupabase
         .from("ml_items")
         .select("item_id, title, thumbnail, permalink, status, listing_type_id, category_id")
