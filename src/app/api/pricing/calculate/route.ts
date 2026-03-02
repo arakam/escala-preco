@@ -10,6 +10,7 @@ interface CalculateRequest {
     variation_id?: number | null;
     price: number;
     listing_type_id: string;
+    category_id: string;
     weight_kg?: number | null;
   }[];
   is_mercado_lider?: boolean;
@@ -150,7 +151,7 @@ export async function POST(req: NextRequest) {
       const price = Math.round(item.price * 100) / 100;
       const weightKg = item.weight_kg != null ? Number(item.weight_kg) : null;
       
-      console.log(`[Pricing calculate] Processing ${item.item_id}: price=${price}, weight_kg=${weightKg}, listing_type_id=${item.listing_type_id}`);
+      console.log(`[Pricing calculate] Processing ${item.item_id}: price=${price}, weight_kg=${weightKg}, listing_type_id=${item.listing_type_id}, category_id=${item.category_id}`);
       
       if (price <= 0) {
         results.push({
@@ -164,10 +165,23 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const feeResult = await fetchSaleFee(accessToken, siteId, item.listing_type_id, price);
+      if (!item.category_id) {
+        console.warn(`[Pricing calculate] No category_id for ${item.item_id}, skipping fee calculation`);
+        results.push({
+          item_id: item.item_id,
+          variation_id: item.variation_id ?? null,
+          price,
+          fee: 0,
+          shipping_cost: getShippingCost(weightKg, price),
+          net_amount: price - getShippingCost(weightKg, price),
+        });
+        continue;
+      }
+
+      const feeResult = await fetchSaleFee(accessToken, siteId, item.listing_type_id, price, item.category_id);
       
       if (!feeResult) {
-        console.warn(`[Pricing calculate] No fee result for ${item.item_id}, listing_type_id=${item.listing_type_id}, price=${price}`);
+        console.warn(`[Pricing calculate] No fee result for ${item.item_id}, listing_type_id=${item.listing_type_id}, category_id=${item.category_id}, price=${price}`);
       }
       
       const fee = feeResult?.fee ?? 0;

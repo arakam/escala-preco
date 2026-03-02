@@ -274,12 +274,13 @@ export default function PrecosPage() {
   const doCalculate = useCallback(
     async (items: ListingWithPricing[], mercadoLider: boolean) => {
       const itemsToCalculate = items
-        .filter((item) => item.new_price > 0 && item.listing_type_id)
+        .filter((item) => item.new_price > 0 && item.listing_type_id && item.category_id)
         .map((item) => ({
           item_id: item.item_id,
           variation_id: item.variation_id,
           price: item.new_price,
           listing_type_id: item.listing_type_id!,
+          category_id: item.category_id!,
           weight_kg: item.weight_kg,
         }));
 
@@ -365,12 +366,13 @@ export default function PrecosPage() {
       setCalculating(true);
 
       const itemsToCalculate = items
-        .filter((item) => item.new_price > 0 && item.listing_type_id)
+        .filter((item) => item.new_price > 0 && item.listing_type_id && item.category_id)
         .map((item) => ({
           item_id: item.item_id,
           variation_id: item.variation_id,
           price: item.new_price,
           listing_type_id: item.listing_type_id!,
+          category_id: item.category_id!,
           weight_kg: item.weight_kg,
         }));
 
@@ -446,7 +448,7 @@ export default function PrecosPage() {
 
   const handleCalculateSingle = useCallback(
     async (listing: ListingWithPricing) => {
-      if (!listing.listing_type_id || listing.new_price <= 0) return;
+      if (!listing.listing_type_id || !listing.category_id || listing.new_price <= 0) return;
 
       setListings((prev) =>
         prev.map((item) =>
@@ -465,6 +467,7 @@ export default function PrecosPage() {
                 variation_id: listing.variation_id,
                 price: listing.new_price,
                 listing_type_id: listing.listing_type_id,
+                category_id: listing.category_id,
                 weight_kg: listing.weight_kg,
               },
             ],

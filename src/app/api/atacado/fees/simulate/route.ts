@@ -42,11 +42,12 @@ export async function POST(request: NextRequest) {
   const accountId = body.accountId?.trim();
   const itemId = body.item_id?.trim();
   const listingTypeId = body.listing_type_id?.trim();
+  const categoryId = body.category_id?.trim();
   const prices = Array.isArray(body.prices) ? body.prices.filter((p) => typeof p === "number" && p > 0) : [];
 
-  if (!accountId || !itemId || !listingTypeId) {
+  if (!accountId || !itemId || !listingTypeId || !categoryId) {
     return NextResponse.json(
-      { ok: false, error: "accountId, item_id e listing_type_id são obrigatórios" },
+      { ok: false, error: "accountId, item_id, listing_type_id e category_id são obrigatórios" },
       { status: 400 }
     );
   }
@@ -106,12 +107,12 @@ export async function POST(request: NextRequest) {
 
   const results: { price: number; fee: number; net: number }[] = [];
   for (const price of prices) {
-    const feeResult = await fetchSaleFee(accessToken, siteId, listingTypeId, price);
+    const feeResult = await fetchSaleFee(accessToken, siteId, listingTypeId, price, categoryId);
     if (feeResult == null) {
       return NextResponse.json(
         {
           ok: false,
-          error: `Não foi possível obter a taxa para o preço R$ ${price.toFixed(2)}. Verifique o tipo de anúncio ou tente novamente.`,
+          error: `Não foi possível obter a taxa para o preço R$ ${price.toFixed(2)}. Verifique o tipo de anúncio, categoria ou tente novamente.`,
         },
         { status: 502 }
       );
