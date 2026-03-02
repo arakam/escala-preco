@@ -391,10 +391,10 @@ export default function PrecosPage() {
 
         if (res.ok) {
           const data = await res.json();
-          const results = data.results as CalculatedPricing & {
+          const results = data.results as (CalculatedPricing & {
             item_id: string;
             variation_id: number | null;
-          }[];
+          })[];
 
           setListings((prev) =>
             prev.map((listing) => {
