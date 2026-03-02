@@ -18,6 +18,8 @@ interface PricingListing {
   product_id: string | null;
   cost_price: number | null;
   weight_kg: number | null;
+  tax_percent: number | null;
+  extra_fee_percent: number | null;
   account_id: string;
 }
 
@@ -25,6 +27,8 @@ interface CalculatedPricing {
   price: number;
   fee: number;
   shipping_cost: number;
+  tax_amount: number;
+  extra_fee_amount: number;
   net_amount: number;
 }
 
@@ -108,6 +112,24 @@ function PriceInput({
   );
 }
 
+function calculateFullPricing(
+  listing: { tax_percent: number | null; extra_fee_percent: number | null },
+  result: { price: number; fee: number; shipping_cost: number }
+): CalculatedPricing {
+  const taxAmount = listing.tax_percent ? (result.price * listing.tax_percent / 100) : 0;
+  const extraFeeAmount = listing.extra_fee_percent ? (result.price * listing.extra_fee_percent / 100) : 0;
+  const netAmount = result.price - result.fee - result.shipping_cost - taxAmount - extraFeeAmount;
+  
+  return {
+    price: result.price,
+    fee: result.fee,
+    shipping_cost: result.shipping_cost,
+    tax_amount: Math.round(taxAmount * 100) / 100,
+    extra_fee_amount: Math.round(extraFeeAmount * 100) / 100,
+    net_amount: Math.round(netAmount * 100) / 100,
+  };
+}
+
 function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
 
@@ -147,7 +169,10 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li><strong>Preço Novo:</strong> Campo editável para simular um novo preço</li>
               <li><strong>Taxa ML:</strong> Taxa de comissão do Mercado Livre calculada sobre o preço</li>
               <li><strong>Frete:</strong> Custo de frete (apenas para contas Mercado Líder)</li>
-              <li><strong>Vai Receber:</strong> Valor líquido após descontar taxa e frete</li>
+              <li><strong>Imposto:</strong> Valor do imposto calculado sobre o preço (% cadastrado no produto)</li>
+              <li><strong>Taxa Extra:</strong> Taxa extra calculada sobre o preço (% cadastrado no produto)</li>
+              <li><strong>Vai Receber:</strong> Valor líquido após descontar taxa ML, frete, imposto e taxa extra</li>
+              <li><strong>Lucro:</strong> Diferença entre o valor recebido e o custo do produto</li>
             </ul>
           </section>
 
@@ -179,10 +204,23 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </section>
 
           <section>
+            <h3 className="mb-2 font-medium text-gray-900">Imposto e Taxa Extra</h3>
+            <p className="mb-2">
+              Os percentuais de imposto e taxa extra são cadastrados na página de Produtos.
+              Esses valores são calculados sobre o preço de venda e descontados para calcular o lucro real.
+            </p>
+            <p className="text-gray-600">
+              Exemplo: Produto com 10% de imposto e 5% de taxa extra vendido a R$ 100,00:
+              <br />Imposto = R$ 10,00 | Taxa Extra = R$ 5,00
+            </p>
+          </section>
+
+          <section>
             <h3 className="mb-2 font-medium text-gray-900">Observações</h3>
             <ul className="list-inside list-disc space-y-1">
               <li>Anúncios sem tipo de listagem (N/D) precisam ser sincronizados novamente</li>
               <li>Para ter o custo, vincule o anúncio a um produto na página de Produtos</li>
+              <li>Imposto e taxa extra são calculados apenas se cadastrados no produto vinculado</li>
               <li>Esta ferramenta é apenas para simulação, não altera os preços no Mercado Livre</li>
             </ul>
           </section>
@@ -298,10 +336,13 @@ export default function PrecosPage() {
 
         if (res.ok) {
           const data = await res.json();
-          const results = data.results as (CalculatedPricing & {
+          const results = data.results as {
             item_id: string;
             variation_id: number | null;
-          })[];
+            price: number;
+            fee: number;
+            shipping_cost: number;
+          }[];
 
           setListings((prev) =>
             prev.map((listing) => {
@@ -313,12 +354,7 @@ export default function PrecosPage() {
               if (result) {
                 return {
                   ...listing,
-                  calculated: {
-                    price: result.price,
-                    fee: result.fee,
-                    shipping_cost: result.shipping_cost,
-                    net_amount: result.net_amount,
-                  },
+                  calculated: calculateFullPricing(listing, result),
                   dirty: false,
                 };
               }
@@ -393,10 +429,13 @@ export default function PrecosPage() {
 
         if (res.ok) {
           const data = await res.json();
-          const results = data.results as (CalculatedPricing & {
+          const results = data.results as {
             item_id: string;
             variation_id: number | null;
-          })[];
+            price: number;
+            fee: number;
+            shipping_cost: number;
+          }[];
 
           setListings((prev) =>
             prev.map((listing) => {
@@ -408,12 +447,7 @@ export default function PrecosPage() {
               if (result) {
                 return {
                   ...listing,
-                  calculated: {
-                    price: result.price,
-                    fee: result.fee,
-                    shipping_cost: result.shipping_cost,
-                    net_amount: result.net_amount,
-                  },
+                  calculated: calculateFullPricing(listing, result),
                   dirty: false,
                 };
               }
@@ -477,19 +511,14 @@ export default function PrecosPage() {
 
         if (res.ok) {
           const data = await res.json();
-          const result = data.results?.[0];
+          const result = data.results?.[0] as { price: number; fee: number; shipping_cost: number } | undefined;
           if (result) {
             setListings((prev) =>
               prev.map((item) =>
                 item.id === listing.id
                   ? {
                       ...item,
-                      calculated: {
-                        price: result.price,
-                        fee: result.fee,
-                        shipping_cost: result.shipping_cost,
-                        net_amount: result.net_amount,
-                      },
+                      calculated: calculateFullPricing(listing, result),
                       calculating: false,
                       dirty: false,
                     }
@@ -699,6 +728,8 @@ export default function PrecosPage() {
                 <th className="p-2 font-medium text-gray-700 text-right">Preço Novo</th>
                 <th className="p-2 font-medium text-gray-700 text-right">Taxa ML</th>
                 <th className="p-2 font-medium text-gray-700 text-right">Frete</th>
+                <th className="p-2 font-medium text-gray-700 text-right" title="Imposto sobre o preço">Imposto</th>
+                <th className="p-2 font-medium text-gray-700 text-right" title="Taxa extra sobre o preço">Taxa Extra</th>
                 <th className="p-2 font-medium text-gray-700 text-right font-semibold">
                   Vai Receber
                 </th>
@@ -804,6 +835,46 @@ export default function PrecosPage() {
                         >
                           {listing.calculated.shipping_cost > 0
                             ? `R$ ${formatBRL(listing.calculated.shipping_cost)}`
+                            : "—"}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="p-2 text-right text-sm">
+                      {listing.calculating ? (
+                        <span className="text-gray-400">…</span>
+                      ) : listing.calculated ? (
+                        <span
+                          className={
+                            listing.calculated.tax_amount > 0
+                              ? "text-orange-600"
+                              : "text-gray-400"
+                          }
+                          title={listing.tax_percent ? `${listing.tax_percent}%` : undefined}
+                        >
+                          {listing.calculated.tax_amount > 0
+                            ? `R$ ${formatBRL(listing.calculated.tax_amount)}`
+                            : "—"}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="p-2 text-right text-sm">
+                      {listing.calculating ? (
+                        <span className="text-gray-400">…</span>
+                      ) : listing.calculated ? (
+                        <span
+                          className={
+                            listing.calculated.extra_fee_amount > 0
+                              ? "text-purple-600"
+                              : "text-gray-400"
+                          }
+                          title={listing.extra_fee_percent ? `${listing.extra_fee_percent}%` : undefined}
+                        >
+                          {listing.calculated.extra_fee_amount > 0
+                            ? `R$ ${formatBRL(listing.calculated.extra_fee_amount)}`
                             : "—"}
                         </span>
                       ) : (

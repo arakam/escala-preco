@@ -17,6 +17,8 @@ export interface PricingListingRow {
   product_id: string | null;
   cost_price: number | null;
   weight_kg: number | null;
+  tax_percent: number | null;
+  extra_fee_percent: number | null;
   account_id: string;
 }
 
@@ -81,7 +83,9 @@ export async function GET(req: NextRequest) {
           id,
           sku,
           cost_price,
-          weight
+          weight,
+          tax_percent,
+          extra_fee_percent
         )
       `, { count: "exact" })
       .eq("account_id", account.id)
@@ -115,6 +119,8 @@ export async function GET(req: NextRequest) {
       let productCostPrice: number | null = null;
       let productWeight: number | null = null;
       let productSku: string | null = null;
+      let productTaxPercent: number | null = null;
+      let productExtraFeePercent: number | null = null;
       
       if (rawProduct) {
         const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
@@ -122,6 +128,8 @@ export async function GET(req: NextRequest) {
           productCostPrice = prod.cost_price != null ? Number(prod.cost_price) : null;
           productWeight = prod.weight != null ? Number(prod.weight) : null;
           productSku = prod.sku != null ? String(prod.sku) : null;
+          productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
+          productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
         }
       }
       
@@ -156,6 +164,8 @@ export async function GET(req: NextRequest) {
         product_id: item.product_id,
         cost_price: productCostPrice,
         weight_kg: productWeight,
+        tax_percent: productTaxPercent,
+        extra_fee_percent: productExtraFeePercent,
         account_id: item.account_id,
       });
     }
@@ -174,7 +184,9 @@ export async function GET(req: NextRequest) {
           id,
           sku,
           cost_price,
-          weight
+          weight,
+          tax_percent,
+          extra_fee_percent
         )
       `, { count: "exact" })
       .eq("account_id", account.id);
@@ -208,6 +220,8 @@ export async function GET(req: NextRequest) {
         let productCostPrice: number | null = null;
         let productWeight: number | null = null;
         let productSku: string | null = null;
+        let productTaxPercent: number | null = null;
+        let productExtraFeePercent: number | null = null;
         
         if (rawProduct) {
           const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
@@ -215,6 +229,8 @@ export async function GET(req: NextRequest) {
             productCostPrice = prod.cost_price != null ? Number(prod.cost_price) : null;
             productWeight = prod.weight != null ? Number(prod.weight) : null;
             productSku = prod.sku != null ? String(prod.sku) : null;
+            productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
+            productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
           }
         }
         
@@ -267,6 +283,8 @@ export async function GET(req: NextRequest) {
           product_id: variation.product_id,
           cost_price: productCostPrice,
           weight_kg: productWeight,
+          tax_percent: productTaxPercent,
+          extra_fee_percent: productExtraFeePercent,
           account_id: variation.account_id,
         });
       }
