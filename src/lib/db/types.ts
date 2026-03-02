@@ -36,6 +36,8 @@ export interface Product {
   weight: number | null;
   cost_price: number | null;
   sale_price: number | null;
+  tax_percent: number | null;
+  extra_fee_percent: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -51,6 +53,8 @@ export interface ProductInput {
   weight?: number | null;
   cost_price?: number | null;
   sale_price?: number | null;
+  tax_percent?: number | null;
+  extra_fee_percent?: number | null;
 }
 
 export interface ProductListingStats {

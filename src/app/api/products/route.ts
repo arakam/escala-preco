@@ -63,9 +63,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
   }
 
-  if (!body.sku || !body.title) {
+  if (!body.sku) {
     return NextResponse.json(
-      { error: "SKU e Título são obrigatórios" },
+      { error: "SKU é obrigatório" },
       { status: 400 }
     );
   }
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
     .insert({
       user_id: user.id,
       sku: body.sku.trim(),
-      title: body.title.trim(),
+      title: body.title?.trim() || body.sku.trim(),
       description: body.description?.trim() || null,
       ean: body.ean?.trim() || null,
       height: body.height ?? null,
@@ -84,6 +84,8 @@ export async function POST(request: NextRequest) {
       weight: body.weight ?? null,
       cost_price: body.cost_price ?? null,
       sale_price: body.sale_price ?? null,
+      tax_percent: body.tax_percent ?? null,
+      extra_fee_percent: body.extra_fee_percent ?? null,
     })
     .select()
     .single();

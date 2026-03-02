@@ -15,6 +15,8 @@ interface ProductFormData {
   weight: string;
   cost_price: string;
   sale_price: string;
+  tax_percent: string;
+  extra_fee_percent: string;
 }
 
 const emptyForm: ProductFormData = {
@@ -28,6 +30,8 @@ const emptyForm: ProductFormData = {
   weight: "",
   cost_price: "",
   sale_price: "",
+  tax_percent: "",
+  extra_fee_percent: "",
 };
 
 type ViewMode = "products" | "stats";
@@ -136,6 +140,8 @@ export default function ProdutosPage() {
       weight: product.weight?.toString() ?? "",
       cost_price: product.cost_price?.toString() ?? "",
       sale_price: product.sale_price?.toString() ?? "",
+      tax_percent: product.tax_percent?.toString() ?? "",
+      extra_fee_percent: product.extra_fee_percent?.toString() ?? "",
     });
     setFormError(null);
     setModalOpen(true);
@@ -150,8 +156,8 @@ export default function ProdutosPage() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.sku.trim() || !form.title.trim()) {
-      setFormError("SKU e Título são obrigatórios");
+    if (!form.sku.trim()) {
+      setFormError("SKU é obrigatório");
       return;
     }
 
@@ -160,7 +166,7 @@ export default function ProdutosPage() {
 
     const payload: ProductInput = {
       sku: form.sku.trim(),
-      title: form.title.trim(),
+      title: form.title.trim() || form.sku.trim(),
       description: form.description.trim() || null,
       ean: form.ean.trim() || null,
       height: form.height ? parseFloat(form.height.replace(",", ".")) : null,
@@ -169,6 +175,8 @@ export default function ProdutosPage() {
       weight: form.weight ? parseFloat(form.weight.replace(",", ".")) : null,
       cost_price: form.cost_price ? parseFloat(form.cost_price.replace(",", ".")) : null,
       sale_price: form.sale_price ? parseFloat(form.sale_price.replace(",", ".")) : null,
+      tax_percent: form.tax_percent ? parseFloat(form.tax_percent.replace(",", ".")) : null,
+      extra_fee_percent: form.extra_fee_percent ? parseFloat(form.extra_fee_percent.replace(",", ".")) : null,
     };
 
     try {
@@ -386,7 +394,7 @@ export default function ProdutosPage() {
           type="text"
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Buscar por SKU, título ou EAN…"
+          placeholder="Buscar por SKU ou título…"
           className="rounded border border-gray-300 px-3 py-2 text-sm"
         />
         <button
@@ -427,9 +435,10 @@ export default function ProdutosPage() {
                 <tr>
                   <th className="p-2 font-medium text-gray-700">SKU</th>
                   <th className="p-2 font-medium text-gray-700">Título</th>
-                  <th className="p-2 font-medium text-gray-700">EAN</th>
                   <th className="p-2 font-medium text-gray-700">Custo (R$)</th>
                   <th className="p-2 font-medium text-gray-700">Venda (R$)</th>
+                  <th className="p-2 font-medium text-gray-700">Imposto (%)</th>
+                  <th className="p-2 font-medium text-gray-700">Taxa Extra (%)</th>
                   <th className="p-2 font-medium text-gray-700">Altura (cm)</th>
                   <th className="p-2 font-medium text-gray-700">Largura (cm)</th>
                   <th className="p-2 font-medium text-gray-700">Comprimento (cm)</th>
@@ -445,9 +454,10 @@ export default function ProdutosPage() {
                     <td className="max-w-[240px] truncate p-2" title={product.title}>
                       {product.title}
                     </td>
-                    <td className="p-2 font-mono text-sm text-gray-600">{product.ean ?? "—"}</td>
                     <td className="p-2 text-right">{product.cost_price != null ? Number(product.cost_price).toFixed(2) : "—"}</td>
                     <td className="p-2 text-right font-medium">{product.sale_price != null ? Number(product.sale_price).toFixed(2) : "—"}</td>
+                    <td className="p-2 text-right">{product.tax_percent != null ? Number(product.tax_percent).toFixed(2) : "—"}</td>
+                    <td className="p-2 text-right">{product.extra_fee_percent != null ? Number(product.extra_fee_percent).toFixed(2) : "—"}</td>
                     <td className="p-2 text-right">{product.height ?? "—"}</td>
                     <td className="p-2 text-right">{product.width ?? "—"}</td>
                     <td className="p-2 text-right">{product.length ?? "—"}</td>
@@ -634,32 +644,11 @@ export default function ProdutosPage() {
                   />
                 </div>
                 <div className="col-span-1">
-                  <label className="mb-1 block text-sm font-medium text-gray-700">EAN</label>
-                  <input
-                    type="text"
-                    value={form.ean}
-                    onChange={(e) => setForm({ ...form, ean: e.target.value })}
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="mb-1 block text-sm font-medium text-gray-700">
-                    Título <span className="text-red-500">*</span>
-                  </label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Título</label>
                   <input
                     type="text"
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
-                    required
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Descrição</label>
-                  <textarea
-                    value={form.description}
-                    onChange={(e) => setForm({ ...form, description: e.target.value })}
-                    rows={3}
                     className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
                   />
                 </div>
@@ -719,6 +708,26 @@ export default function ProdutosPage() {
                     type="text"
                     value={form.sale_price}
                     onChange={(e) => setForm({ ...form, sale_price: e.target.value })}
+                    placeholder="0,00"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Imposto (%)</label>
+                  <input
+                    type="text"
+                    value={form.tax_percent}
+                    onChange={(e) => setForm({ ...form, tax_percent: e.target.value })}
+                    placeholder="0,00"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Taxa Extra (%)</label>
+                  <input
+                    type="text"
+                    value={form.extra_fee_percent}
+                    onChange={(e) => setForm({ ...form, extra_fee_percent: e.target.value })}
                     placeholder="0,00"
                     className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
                   />
@@ -817,8 +826,8 @@ export default function ProdutosPage() {
             </div>
             <form onSubmit={handleImport} className="p-4">
               <p className="mb-4 text-sm text-gray-600">
-                O arquivo CSV deve conter as colunas: <strong>SKU</strong>, <strong>Titulo</strong> (obrigatórios),
-                e opcionalmente: Descricao, EAN, Altura, Largura, Comprimento, Peso.
+                O arquivo CSV deve conter a coluna <strong>SKU</strong> (obrigatório),
+                e opcionalmente: Titulo, Altura, Largura, Comprimento, Peso, PrecoCusto, PrecoVenda, Imposto, TaxaExtra.
               </p>
               <p className="mb-4 text-sm text-gray-600">
                 Produtos com SKU existente serão atualizados.

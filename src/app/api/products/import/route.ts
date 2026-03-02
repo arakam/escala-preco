@@ -12,6 +12,8 @@ interface ParsedProduct {
   weight: number | null;
   cost_price: number | null;
   sale_price: number | null;
+  tax_percent: number | null;
+  extra_fee_percent: number | null;
 }
 
 function parseCSVLine(line: string): string[] {
@@ -105,11 +107,13 @@ export async function POST(request: NextRequest) {
     weight: headers.findIndex((h) => h === "peso" || h === "weight"),
     cost_price: headers.findIndex((h) => h === "precocusto" || h === "cost_price" || h === "custo"),
     sale_price: headers.findIndex((h) => h === "precovenda" || h === "sale_price" || h === "venda" || h === "preco"),
+    tax_percent: headers.findIndex((h) => h === "imposto" || h === "tax_percent" || h === "tax" || h === "impostos"),
+    extra_fee_percent: headers.findIndex((h) => h === "taxaextra" || h === "extra_fee_percent" || h === "extra_fee" || h === "taxa_extra" || h === "extra"),
   };
 
-  if (colIndex.sku === -1 || colIndex.title === -1) {
+  if (colIndex.sku === -1) {
     return NextResponse.json(
-      { error: "CSV deve conter colunas SKU e Titulo" },
+      { error: "CSV deve conter a coluna SKU" },
       { status: 400 }
     );
   }
@@ -120,16 +124,16 @@ export async function POST(request: NextRequest) {
   for (let i = 1; i < lines.length; i++) {
     const values = parseCSVLine(lines[i]);
     const sku = values[colIndex.sku]?.trim();
-    const title = values[colIndex.title]?.trim();
+    const title = colIndex.title >= 0 ? values[colIndex.title]?.trim() : null;
 
-    if (!sku || !title) {
-      errors.push(`Linha ${i + 1}: SKU e Título são obrigatórios`);
+    if (!sku) {
+      errors.push(`Linha ${i + 1}: SKU é obrigatório`);
       continue;
     }
 
     products.push({
       sku,
-      title,
+      title: title || sku,
       description: colIndex.description >= 0 ? values[colIndex.description]?.trim() || null : null,
       ean: colIndex.ean >= 0 ? values[colIndex.ean]?.trim() || null : null,
       height: colIndex.height >= 0 ? parseDimension(values[colIndex.height]) : null,
@@ -138,6 +142,8 @@ export async function POST(request: NextRequest) {
       weight: colIndex.weight >= 0 ? parseDimension(values[colIndex.weight]) : null,
       cost_price: colIndex.cost_price >= 0 ? parsePrice(values[colIndex.cost_price]) : null,
       sale_price: colIndex.sale_price >= 0 ? parsePrice(values[colIndex.sale_price]) : null,
+      tax_percent: colIndex.tax_percent >= 0 ? parseNumber(values[colIndex.tax_percent], 100) : null,
+      extra_fee_percent: colIndex.extra_fee_percent >= 0 ? parseNumber(values[colIndex.extra_fee_percent], 100) : null,
     });
   }
 
