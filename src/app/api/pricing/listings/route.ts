@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
-import { getSalesMap } from "../sales/route";
+import { getSalesMap } from "@/lib/mercadolivre/sales";
 
 export interface PricingListingRow {
   id: string;
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
 
   const { data: account, error: accountError } = await supabase
     .from("ml_accounts")
-    .select(orderBySales ? "id, ml_user_id" : "id")
+    .select("id,ml_user_id")
     .eq("user_id", user.id)
     .single();
 
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
 
   try {
     if (orderBySales) {
-      const sellerId = (account as { id: string; ml_user_id: number }).ml_user_id;
+      const sellerId = account.ml_user_id;
       const { data: tokenData, error: tokenError } = await adminSupabase
         .from("ml_tokens")
         .select("access_token, refresh_token, expires_at")
@@ -117,7 +117,7 @@ export async function GET(req: NextRequest) {
         console.error("[Pricing listings] order_by sales variations error:", allVarsErr);
         return NextResponse.json({ error: "Erro ao buscar anúncios" }, { status: 500 });
       }
-      const varItemIds = [...new Set((allVarsData || []).map((v) => v.item_id))];
+      const varItemIds = Array.from(new Set((allVarsData || []).map((v) => v.item_id)));
       let filteredVars = allVarsData || [];
       if (varItemIds.length > 0 && (statusFilter || search)) {
         const { data: parentItems } = await adminSupabase
@@ -136,7 +136,7 @@ export async function GET(req: NextRequest) {
       }
       const varList = filteredVars.map((v) => ({ id: v.id, item_id: v.item_id, variation_id: v.variation_id, source: "variation" as const }));
       const combined = [...simpleList, ...varList];
-      const allItemIds = [...new Set(combined.map((c) => c.item_id))];
+      const allItemIds = Array.from(new Set(combined.map((c) => c.item_id)));
       const { sales: salesMap, orders: ordersMap } = await getSalesMap(accessToken, sellerId, allItemIds, dateFrom, dateTo);
       combined.sort((a, b) => {
         const sa = salesMap[a.item_id] ?? 0;
@@ -217,7 +217,7 @@ export async function GET(req: NextRequest) {
             products:product_id (id, sku, cost_price, weight, tax_percent, extra_fee_percent)
           `)
           .in("id", variationIdsPage);
-        const varItemIdsPage = [...new Set((varsPageData || []).map((v) => v.item_id))];
+        const varItemIdsPage = Array.from(new Set((varsPageData || []).map((v) => v.item_id)));
         const { data: parentItems } = await adminSupabase
           .from("ml_items")
           .select("item_id, title, thumbnail, permalink, status, listing_type_id, category_id")
@@ -267,17 +267,29 @@ export async function GET(req: NextRequest) {
         if (rawJson?.attribute_combinations && Array.isArray(rawJson.attribute_combinations)) {
           variationName = rawJson.attribute_combinations.map((a: { value_name?: string }) => a.value_name || "").filter(Boolean).join(" / ");
         }
-        const title = mlItem?.title || null;
+        const title: string | null =
+          (mlItem?.title as string | null | undefined) ?? null;
+        const thumbnail: string | null =
+          (mlItem?.thumbnail as string | null | undefined) ?? null;
+        const permalink: string | null =
+          (mlItem?.permalink as string | null | undefined) ?? null;
+        const status: string | null =
+          (mlItem?.status as string | null | undefined) ?? null;
+        const listingTypeId: string | null =
+          (mlItem?.listing_type_id as string | null | undefined) ?? null;
+        const categoryId: string | null =
+          (mlItem?.category_id as string | null | undefined) ?? null;
+
         fullListings.push({
           id: variation.id as string,
           item_id: variation.item_id as string,
           variation_id: variation.variation_id as number,
           title: variationName ? `${title || ""} - ${variationName}` : title,
-          thumbnail: mlItem?.thumbnail ?? null,
-          permalink: mlItem?.permalink ?? null,
-          status: mlItem?.status ?? null,
-          listing_type_id: mlItem?.listing_type_id ?? null,
-          category_id: mlItem?.category_id ?? null,
+          thumbnail,
+          permalink,
+          status,
+          listing_type_id: listingTypeId,
+          category_id: categoryId,
           current_price: (variation.price as number) ?? 0,
           sku,
           product_id: variation.product_id as string | null,

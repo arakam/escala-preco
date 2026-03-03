@@ -360,7 +360,7 @@ export default function PrecosPage() {
   useEffect(() => {
     if (loading || listings.length === 0) return;
     if (sortBy === "sales_desc" || sortBy === "sales_asc") return;
-    const itemIds = [...new Set(listings.map((l) => l.item_id))];
+    const itemIds = Array.from(new Set(listings.map((l) => l.item_id)));
     if (itemIds.length === 0) return;
     setSalesLoading(true);
     setSalesError(false);
