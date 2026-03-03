@@ -269,6 +269,14 @@ export default function PrecosPage() {
   const [salesError, setSalesError] = useState(false);
   /** Ordenação: "" = padrão, "sales_desc" = mais vendas primeiro, "sales_asc" = menos vendas primeiro */
   const [sortBy, setSortBy] = useState<"" | "sales_desc" | "sales_asc">("");
+  /** Itens selecionados para criar campanha ML (por id de listing) */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [campaignOpen, setCampaignOpen] = useState(false);
+  const [campaignName, setCampaignName] = useState("");
+  const [campaignStart, setCampaignStart] = useState("");
+  const [campaignFinish, setCampaignFinish] = useState("");
+  const [campaignLoading, setCampaignLoading] = useState(false);
+  const [campaignMessage, setCampaignMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
 
   const loadReputation = useCallback(async () => {
     setReputationLoading(true);
@@ -707,6 +715,115 @@ export default function PrecosPage() {
     return filteredListings;
   }, [filteredListings]);
 
+  const selectedCount = useMemo(() => selectedIds.size, [selectedIds]);
+
+  const handleToggleSelectAll = useCallback(() => {
+    if (selectedIds.size === sortedListings.length) {
+      setSelectedIds(new Set());
+      return;
+    }
+    const next = new Set<string>();
+    sortedListings.forEach((l) => next.add(l.id));
+    setSelectedIds(next);
+  }, [selectedIds, sortedListings]);
+
+  const handleToggleSelectOne = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleOpenCampaign = useCallback(() => {
+    const today = new Date();
+    const toDateInput = (d: Date) => d.toISOString().slice(0, 10);
+    const start = toDateInput(today);
+    const finishDate = new Date(today);
+    finishDate.setDate(finishDate.getDate() + 6);
+    const finish = toDateInput(finishDate);
+    setCampaignStart(start);
+    setCampaignFinish(finish);
+    if (!campaignName) {
+      const month = (today.getMonth() + 1).toString().padStart(2, "0");
+      const year = today.getFullYear();
+      setCampaignName(`Campanha preços ${month}/${year}`);
+    }
+    setCampaignOpen(true);
+  }, [campaignName]);
+
+  const handleCreateCampaign = useCallback(async () => {
+    if (!campaignName.trim()) {
+      setCampaignMessage({ type: "error", text: "Informe o nome da campanha." });
+      return;
+    }
+    if (!campaignStart || !campaignFinish) {
+      setCampaignMessage({ type: "error", text: "Informe data de início e término." });
+      return;
+    }
+    if (selectedIds.size === 0) {
+      setCampaignMessage({ type: "error", text: "Selecione pelo menos um anúncio." });
+      return;
+    }
+
+    const selectedListingsForCampaign = listings.filter((l) => selectedIds.has(l.id));
+    const items = selectedListingsForCampaign.map((l) => ({
+      item_id: l.item_id,
+      variation_id: l.variation_id,
+    }));
+
+    setCampaignLoading(true);
+    setCampaignMessage(null);
+    try {
+      const res = await fetch("/api/mercadolivre/seller-campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: campaignName.trim(),
+          start_date: campaignStart,
+          finish_date: campaignFinish,
+          items,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCampaignMessage({
+          type: "error",
+          text:
+            (data as { error?: string; details?: string }).error ||
+            (data as { error?: string; details?: string }).details ||
+            "Erro ao criar campanha no Mercado Livre.",
+        });
+        return;
+      }
+
+      const summary = (data as { summary?: { applied?: number; skipped_no_planned_price?: number; errors?: number } }).summary || {};
+      const applied = summary.applied ?? 0;
+      const skipped = summary.skipped_no_planned_price ?? 0;
+      const errors = summary.errors ?? 0;
+      const campaign = (data as { campaign?: { id?: string } }).campaign;
+
+      setCampaignMessage({
+        type: "ok",
+        text: `Campanha criada${campaign?.id ? ` (${campaign.id})` : ""}: ${applied} item(s) incluído(s), ${skipped} sem preço salvo, ${errors} com erro.`,
+      });
+      setSelectedIds(new Set());
+      setCampaignOpen(false);
+      setTimeout(() => setCampaignMessage(null), 6000);
+    } catch {
+      setCampaignMessage({
+        type: "error",
+        text: "Erro de rede ao criar campanha no Mercado Livre.",
+      });
+    } finally {
+      setCampaignLoading(false);
+    }
+  }, [campaignName, campaignStart, campaignFinish, selectedIds, listings]);
+
   if (loading && listings.length === 0) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-6">
@@ -718,6 +835,71 @@ export default function PrecosPage() {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+
+      {campaignOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setCampaignOpen(false)}
+          />
+          <div className="relative w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-lg font-semibold">Criar campanha no Mercado Livre</h2>
+            <div className="space-y-3 text-sm">
+              <div>
+                <label className="mb-1 block text-gray-700">Nome da campanha</label>
+                <input
+                  type="text"
+                  value={campaignName}
+                  onChange={(e) => setCampaignName(e.target.value)}
+                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                  placeholder="Ex.: Campanha preços março"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-gray-700">Início</label>
+                  <input
+                    type="date"
+                    value={campaignStart}
+                    onChange={(e) => setCampaignStart(e.target.value)}
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-gray-700">Término</label>
+                  <input
+                    type="date"
+                    value={campaignFinish}
+                    onChange={(e) => setCampaignFinish(e.target.value)}
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">
+                Use os anúncios selecionados nesta página. O preço de cada item virá do &quot;Preço Novo&quot; salvo (planned_price).
+              </p>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCampaignOpen(false)}
+                className="rounded border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                disabled={campaignLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateCampaign}
+                disabled={campaignLoading}
+                className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+              >
+                {campaignLoading ? "Criando…" : "Criar campanha"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -765,6 +947,14 @@ export default function PrecosPage() {
           >
             {saving ? "Salvando…" : "Salvar preços alterados"}
           </button>
+          <button
+            type="button"
+            onClick={handleOpenCampaign}
+            disabled={listings.length === 0 || selectedCount === 0}
+            className="rounded border border-indigo-600 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+          >
+            Criar campanha ML ({selectedCount})
+          </button>
         </div>
       </div>
 
@@ -777,6 +967,18 @@ export default function PrecosPage() {
           }`}
         >
           {saveMessage.text}
+        </div>
+      )}
+
+      {campaignMessage && (
+        <div
+          className={`mb-4 rounded p-3 text-sm ${
+            campaignMessage.type === "ok"
+              ? "bg-blue-50 text-blue-700"
+              : "bg-red-50 text-red-700"
+          }`}
+        >
+          {campaignMessage.text}
         </div>
       )}
 
@@ -918,6 +1120,14 @@ export default function PrecosPage() {
           >
             <thead>
               <tr>
+                <th className="p-2 font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300"
+                    checked={sortedListings.length > 0 && selectedIds.size === sortedListings.length}
+                    onChange={handleToggleSelectAll}
+                  />
+                </th>
                 <th className="p-2 font-medium text-gray-700">Imagem</th>
                 <th className="p-2 font-medium text-gray-700">MLB</th>
                 <th className="p-2 font-medium text-gray-700">Título</th>
@@ -963,11 +1173,21 @@ export default function PrecosPage() {
                     ? (profit / listing.new_price) * 100
                     : null;
 
+                const isSelected = selectedIds.has(listing.id);
+
                 return (
                   <tr
                     key={`${listing.id}-${listing.variation_id ?? "item"}`}
                     className="border-b border-gray-100 hover:bg-gray-50"
                   >
+                    <td className="p-2 text-center">
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300"
+                        checked={isSelected}
+                        onChange={() => handleToggleSelectOne(listing.id)}
+                      />
+                    </td>
                     <td className="p-2">
                       {listing.thumbnail ? (
                         <img
