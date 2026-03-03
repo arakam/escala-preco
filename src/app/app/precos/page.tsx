@@ -183,6 +183,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li>Edite o campo &quot;Preço Novo&quot; para simular um valor diferente</li>
               <li>Pressione Enter ou clique fora do campo para recalcular</li>
               <li>Use &quot;Calcular Todos&quot; para recalcular todos os itens de uma vez</li>
+              <li>Use &quot;Salvar preços alterados&quot; para guardar o novo preço vinculado ao MLB e ao SKU de cada anúncio</li>
             </ol>
           </section>
 
@@ -221,7 +222,8 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li>Anúncios sem tipo de listagem (N/D) precisam ser sincronizados novamente</li>
               <li>Para ter o custo, vincule o anúncio a um produto na página de Produtos</li>
               <li>Imposto e taxa extra são calculados apenas se cadastrados no produto vinculado</li>
-              <li>Esta ferramenta é apenas para simulação, não altera os preços no Mercado Livre</li>
+              <li>Os preços salvos ficam vinculados ao MLB e ao SKU; ao reabrir a página, o &quot;Preço Novo&quot; virá do último valor salvo</li>
+              <li>Esta ferramenta não altera os preços no Mercado Livre; ela apenas calcula e guarda o preço planejado</li>
             </ul>
           </section>
         </div>
@@ -253,6 +255,10 @@ export default function PrecosPage() {
   const [isMercadoLider, setIsMercadoLider] = useState(false);
   const [reputationLoading, setReputationLoading] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+  /** Filtro por % de lucro: "" = todos, "high" = >20%, "medium" = 10-20%, "low" = 0-10%, "negative" = ≤0% */
+  const [profitFilter, setProfitFilter] = useState<"" | "high" | "medium" | "low" | "negative">("");
 
   const loadReputation = useCallback(async () => {
     setReputationLoading(true);
@@ -281,19 +287,36 @@ export default function PrecosPage() {
     if (linkedOnly) params.set("linked", "1");
 
     try {
-      const res = await fetch(`/api/pricing/listings?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        const items = (data.listings ?? []) as PricingListing[];
-        setListings(
-          items.map((item) => ({
-            ...item,
-            new_price: item.current_price,
-            dirty: false,
-          }))
-        );
-        setTotal(data.total ?? 0);
+      const [listingsRes, plannedRes] = await Promise.all([
+        fetch(`/api/pricing/listings?${params}`),
+        fetch("/api/pricing/planned-prices"),
+      ]);
+
+      const listingsData = listingsRes.ok ? await listingsRes.json() : { listings: [], total: 0 };
+      const items = (listingsData.listings ?? []) as PricingListing[];
+      const plannedMap = new Map<string, number>();
+      if (plannedRes.ok) {
+        const plannedData = await plannedRes.json();
+        const plannedList = plannedData.prices ?? [];
+        for (const p of plannedList) {
+          const key = `${p.item_id}:${p.variation_id ?? "n"}`;
+          plannedMap.set(key, p.planned_price);
+        }
       }
+
+      setListings(
+        items.map((item) => {
+          const key = `${item.item_id}:${item.variation_id ?? "n"}`;
+          const savedPrice = plannedMap.get(key);
+          const newPrice = savedPrice ?? item.current_price;
+          return {
+            ...item,
+            new_price: newPrice,
+            dirty: false,
+          };
+        })
+      );
+      setTotal(listingsData.total ?? 0);
     } catch {
       // ignore
     } finally {
@@ -355,7 +378,6 @@ export default function PrecosPage() {
                 return {
                   ...listing,
                   calculated: calculateFullPricing(listing, result),
-                  dirty: false,
                 };
               }
               return listing;
@@ -448,7 +470,6 @@ export default function PrecosPage() {
                 return {
                   ...listing,
                   calculated: calculateFullPricing(listing, result),
-                  dirty: false,
                 };
               }
               return listing;
@@ -467,6 +488,45 @@ export default function PrecosPage() {
   const handleCalculateAll = useCallback(() => {
     calculatePrices(listings);
   }, [calculatePrices, listings]);
+
+  const handleSavePlannedPrices = useCallback(async () => {
+    const toSave = listings.filter((l) => l.dirty && l.new_price >= 0);
+    if (toSave.length === 0) return;
+    setSaveMessage(null);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/pricing/planned-prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: toSave.map((l) => ({
+            item_id: l.item_id,
+            variation_id: l.variation_id,
+            sku: l.sku ?? undefined,
+            planned_price: l.new_price,
+          })),
+        }),
+      });
+      const data = res.ok ? await res.json().catch(() => ({})) : {};
+      if (!res.ok) {
+        setSaveMessage({ type: "error", text: (data as { error?: string }).error ?? "Erro ao salvar" });
+        return;
+      }
+      setSaveMessage({ type: "ok", text: `${(data as { saved?: number }).saved ?? toSave.length} preço(s) salvos (MLB + SKU).` });
+      const savedKeys = new Set(toSave.map((l) => `${l.item_id}:${l.variation_id ?? "n"}`));
+      setListings((prev) =>
+        prev.map((item) => {
+          const key = `${item.item_id}:${item.variation_id ?? "n"}`;
+          return savedKeys.has(key) ? { ...item, dirty: false } : item;
+        })
+      );
+      setTimeout(() => setSaveMessage(null), 4000);
+    } catch {
+      setSaveMessage({ type: "error", text: "Erro ao salvar preços" });
+    } finally {
+      setSaving(false);
+    }
+  }, [listings]);
 
   const handlePriceChange = useCallback((id: string, variationId: number | null, value: string) => {
     const numValue = parseFloat(value.replace(",", ".")) || 0;
@@ -520,7 +580,6 @@ export default function PrecosPage() {
                       ...item,
                       calculated: calculateFullPricing(listing, result),
                       calculating: false,
-                      dirty: false,
                     }
                   : item
               )
@@ -568,6 +627,33 @@ export default function PrecosPage() {
     () => listings.filter((l) => !l.listing_type_id).length,
     [listings]
   );
+
+  const getProfitPercent = useCallback((listing: ListingWithPricing): number | null => {
+    if (!listing.calculated || listing.cost_price == null) return null;
+    const profit = listing.calculated.net_amount - listing.cost_price;
+    if (listing.new_price <= 0) return null;
+    return (profit / listing.new_price) * 100;
+  }, []);
+
+  const filteredListings = useMemo(() => {
+    if (!profitFilter) return listings;
+    return listings.filter((listing) => {
+      const pct = getProfitPercent(listing);
+      if (pct == null) return false;
+      switch (profitFilter) {
+        case "high":
+          return pct > 20;
+        case "medium":
+          return pct > 10 && pct <= 20;
+        case "low":
+          return pct > 0 && pct <= 10;
+        case "negative":
+          return pct <= 0;
+        default:
+          return true;
+      }
+    });
+  }, [listings, profitFilter, getProfitPercent]);
 
   if (loading && listings.length === 0) {
     return (
@@ -619,8 +705,28 @@ export default function PrecosPage() {
           >
             {calculating ? "Calculando…" : "Calcular Todos"}
           </button>
+          <button
+            type="button"
+            onClick={handleSavePlannedPrices}
+            disabled={saving || dirtyCount === 0}
+            className="rounded border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+          >
+            {saving ? "Salvando…" : "Salvar preços alterados"}
+          </button>
         </div>
       </div>
+
+      {saveMessage && (
+        <div
+          className={`mb-4 rounded p-3 text-sm ${
+            saveMessage.type === "ok"
+              ? "bg-emerald-50 text-emerald-700"
+              : "bg-red-50 text-red-700"
+          }`}
+        >
+          {saveMessage.text}
+        </div>
+      )}
 
       {dirtyCount > 0 && (
         <div className="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-700">
@@ -668,7 +774,32 @@ export default function PrecosPage() {
           />
           <span>Só vinculados</span>
         </label>
-        {(search || statusFilter || linkedOnly) && (
+        <span className="text-sm text-gray-500">Lucratividade:</span>
+        <div className="flex flex-wrap gap-1">
+          {(
+            [
+              { value: "" as const, label: "Todos" },
+              { value: "high" as const, label: "> 20%" },
+              { value: "medium" as const, label: "10–20%" },
+              { value: "low" as const, label: "0–10%" },
+              { value: "negative" as const, label: "Prejuízo" },
+            ] as const
+          ).map(({ value, label }) => (
+            <button
+              key={value || "all"}
+              type="button"
+              onClick={() => setProfitFilter(value)}
+              className={`rounded px-2 py-1 text-sm font-medium ${
+                profitFilter === value
+                  ? "bg-brand-blue text-white"
+                  : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {(search || statusFilter || linkedOnly || profitFilter) && (
           <button
             type="button"
             onClick={() => {
@@ -676,6 +807,7 @@ export default function PrecosPage() {
               setSearchInput("");
               setStatusFilter("active");
               setLinkedOnly(false);
+              setProfitFilter("");
               setPage(1);
             }}
             className="text-sm text-gray-600 underline hover:text-gray-900"
@@ -711,10 +843,18 @@ export default function PrecosPage() {
         <p className="text-gray-500">Carregando anúncios…</p>
       ) : listings.length === 0 ? (
         <p className="text-gray-500">Nenhum anúncio encontrado com os filtros selecionados.</p>
+      ) : filteredListings.length === 0 ? (
+        <p className="text-gray-500">
+          Nenhum anúncio nesta faixa de lucratividade. Calcule os preços ou escolha outro filtro.
+        </p>
       ) : (
         <>
           <AppTable
-            summary={`${total} anúncio(s) — página ${page} de ${totalPages || 1}`}
+            summary={
+              profitFilter
+                ? `${filteredListings.length} de ${listings.length} nesta página (lucro ${profitFilter === "high" ? "> 20%" : profitFilter === "medium" ? "10–20%" : profitFilter === "low" ? "0–10%" : "≤ 0%"}) — página ${page} de ${totalPages || 1}`
+                : `${total} anúncio(s) — página ${page} de ${totalPages || 1}`
+            }
             maxHeight="70vh"
           >
             <thead>
@@ -738,14 +878,14 @@ export default function PrecosPage() {
               </tr>
             </thead>
             <tbody>
-              {listings.map((listing) => {
+              {filteredListings.map((listing) => {
                 const profit =
                   listing.calculated && listing.cost_price != null
                     ? listing.calculated.net_amount - listing.cost_price
                     : null;
                 const profitPercent =
-                  profit != null && listing.cost_price && listing.cost_price > 0
-                    ? (profit / listing.cost_price) * 100
+                  profit != null && listing.new_price > 0
+                    ? (profit / listing.new_price) * 100
                     : null;
 
                 return (
