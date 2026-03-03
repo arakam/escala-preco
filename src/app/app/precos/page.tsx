@@ -164,6 +164,8 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <h3 className="mb-2 font-medium text-gray-900">Colunas da tabela</h3>
             <ul className="list-inside list-disc space-y-1">
               <li><strong>SKU:</strong> Código do produto vinculado ao anúncio</li>
+              <li><strong>Vendas (30d):</strong> Soma das quantidades vendidas em cada pedido (unidades) nos últimos 30 dias. Clique no cabeçalho para ordenar.</li>
+              <li><strong>Pedidos (30d):</strong> Número de pedidos pagos que contêm o item nos últimos 30 dias.</li>
               <li><strong>Custo:</strong> Preço de custo do produto (cadastrado em Produtos)</li>
               <li><strong>Preço Atual:</strong> Preço atual do anúncio no Mercado Livre</li>
               <li><strong>Preço Novo:</strong> Campo editável para simular um novo preço</li>
@@ -259,6 +261,14 @@ export default function PrecosPage() {
   const [saveMessage, setSaveMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   /** Filtro por % de lucro: "" = todos, "high" = >20%, "medium" = 10-20%, "low" = 0-10%, "negative" = ≤0% */
   const [profitFilter, setProfitFilter] = useState<"" | "high" | "medium" | "low" | "negative">("");
+  /** Quantidade vendida (soma das quantidades nos pedidos) últimos 30 dias por item_id */
+  const [salesData, setSalesData] = useState<Record<string, number>>({});
+  /** Número de pedidos (pagados) que contêm o item nos últimos 30 dias por item_id */
+  const [ordersData, setOrdersData] = useState<Record<string, number>>({});
+  const [salesLoading, setSalesLoading] = useState(false);
+  const [salesError, setSalesError] = useState(false);
+  /** Ordenação: "" = padrão, "sales_desc" = mais vendas primeiro, "sales_asc" = menos vendas primeiro */
+  const [sortBy, setSortBy] = useState<"" | "sales_desc" | "sales_asc">("");
 
   const loadReputation = useCallback(async () => {
     setReputationLoading(true);
@@ -285,6 +295,7 @@ export default function PrecosPage() {
     if (search) params.set("search", search);
     if (statusFilter) params.set("status", statusFilter);
     if (linkedOnly) params.set("linked", "1");
+    if (sortBy === "sales_desc" || sortBy === "sales_asc") params.set("order_by", sortBy);
 
     try {
       const [listingsRes, plannedRes] = await Promise.all([
@@ -294,6 +305,12 @@ export default function PrecosPage() {
 
       const listingsData = listingsRes.ok ? await listingsRes.json() : { listings: [], total: 0 };
       const items = (listingsData.listings ?? []) as PricingListing[];
+      if (listingsData.sales && typeof listingsData.sales === "object") {
+        setSalesData(listingsData.sales as Record<string, number>);
+      }
+      if (listingsData.orders && typeof listingsData.orders === "object") {
+        setOrdersData(listingsData.orders as Record<string, number>);
+      }
       const plannedMap = new Map<string, number>();
       if (plannedRes.ok) {
         const plannedData = await plannedRes.json();
@@ -322,7 +339,7 @@ export default function PrecosPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, search, statusFilter, linkedOnly]);
+  }, [page, pageSize, search, statusFilter, linkedOnly, sortBy]);
 
   useEffect(() => {
     loadReputation();
@@ -331,6 +348,37 @@ export default function PrecosPage() {
   useEffect(() => {
     loadListings();
   }, [loadListings]);
+
+  useEffect(() => {
+    if (loading || listings.length === 0) return;
+    if (sortBy === "sales_desc" || sortBy === "sales_asc") return;
+    const itemIds = [...new Set(listings.map((l) => l.item_id))];
+    if (itemIds.length === 0) return;
+    setSalesLoading(true);
+    setSalesError(false);
+    fetch("/api/pricing/sales", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ item_ids: itemIds }),
+    })
+      .then((res) => {
+        if (!res.ok) {
+          setSalesError(true);
+          return { sales: {} };
+        }
+        return res.json();
+      })
+      .then((data: { sales?: Record<string, number>; orders?: Record<string, number> }) => {
+        setSalesData(data.sales ?? {});
+        setOrdersData(data.orders ?? {});
+      })
+      .catch(() => {
+        setSalesError(true);
+        setSalesData({});
+        setOrdersData({});
+      })
+      .finally(() => setSalesLoading(false));
+  }, [loading, listings, sortBy]);
 
   const doCalculate = useCallback(
     async (items: ListingWithPricing[], mercadoLider: boolean) => {
@@ -655,6 +703,10 @@ export default function PrecosPage() {
     });
   }, [listings, profitFilter, getProfitPercent]);
 
+  const sortedListings = useMemo(() => {
+    return filteredListings;
+  }, [filteredListings]);
+
   if (loading && listings.length === 0) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-6">
@@ -799,7 +851,7 @@ export default function PrecosPage() {
             </button>
           ))}
         </div>
-        {(search || statusFilter || linkedOnly || profitFilter) && (
+        {(search || statusFilter || linkedOnly || profitFilter || sortBy) && (
           <button
             type="button"
             onClick={() => {
@@ -808,6 +860,7 @@ export default function PrecosPage() {
               setStatusFilter("active");
               setLinkedOnly(false);
               setProfitFilter("");
+              setSortBy("");
               setPage(1);
             }}
             className="text-sm text-gray-600 underline hover:text-gray-900"
@@ -825,6 +878,12 @@ export default function PrecosPage() {
             Produtos
           </a>
           .
+        </div>
+      )}
+
+      {salesError && !salesLoading && (
+        <div className="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-800">
+          Não foi possível carregar vendas/pedidos (30 dias). As colunas &quot;Vendas (30d)&quot; e &quot;Pedidos (30d)&quot; podem aparecer vazias. Verifique sua conexão ou tente novamente mais tarde.
         </div>
       )}
 
@@ -863,6 +922,22 @@ export default function PrecosPage() {
                 <th className="p-2 font-medium text-gray-700">MLB</th>
                 <th className="p-2 font-medium text-gray-700">Título</th>
                 <th className="p-2 font-medium text-gray-700">SKU</th>
+                <th
+                  className="p-2 font-medium text-gray-700 text-right cursor-pointer select-none hover:bg-gray-100 rounded"
+                  title="Clique para ordenar por vendas (30 dias)"
+                  onClick={() => {
+                    const next = sortBy === "" ? "sales_desc" : sortBy === "sales_desc" ? "sales_asc" : "";
+                    setSortBy(next);
+                    if (next) setPage(1);
+                  }}
+                >
+                  Vendas (30d)
+                  {sortBy === "sales_desc" && " ↓"}
+                  {sortBy === "sales_asc" && " ↑"}
+                </th>
+                <th className="p-2 font-medium text-gray-700 text-right" title="Número de pedidos pagos (30 dias)">
+                  Pedidos (30d)
+                </th>
                 <th className="p-2 font-medium text-gray-700 text-right">Custo</th>
                 <th className="p-2 font-medium text-gray-700 text-right">Preço Atual</th>
                 <th className="p-2 font-medium text-gray-700 text-right">Preço Novo</th>
@@ -878,7 +953,7 @@ export default function PrecosPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredListings.map((listing) => {
+              {sortedListings.map((listing) => {
                 const profit =
                   listing.calculated && listing.cost_price != null
                     ? listing.calculated.net_amount - listing.cost_price
@@ -920,6 +995,42 @@ export default function PrecosPage() {
                     </td>
                     <td className="p-2 font-mono text-xs text-gray-600">
                       {listing.sku ?? "—"}
+                    </td>
+                    <td
+                      className="p-2 text-right text-sm tabular-nums"
+                      title={
+                        salesLoading
+                          ? "Carregando vendas (30 dias)…"
+                          : salesData[listing.item_id] != null
+                            ? `${salesData[listing.item_id]} unidade(s) vendida(s) em 30 dias`
+                            : "Soma das quantidades vendidas (pedidos pagos). Indisponível ou sem vendas."
+                      }
+                    >
+                      {salesLoading ? (
+                        <span className="text-gray-400">…</span>
+                      ) : salesData[listing.item_id] != null ? (
+                        salesData[listing.item_id]
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td
+                      className="p-2 text-right text-sm tabular-nums"
+                      title={
+                        salesLoading
+                          ? "Carregando…"
+                          : ordersData[listing.item_id] != null
+                            ? `${ordersData[listing.item_id]} pedido(s) em 30 dias`
+                            : "Número de pedidos pagos que contêm este item."
+                      }
+                    >
+                      {salesLoading ? (
+                        <span className="text-gray-400">…</span>
+                      ) : ordersData[listing.item_id] != null ? (
+                        ordersData[listing.item_id]
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
                     </td>
                     <td className="p-2 text-right text-sm">
                       {listing.cost_price != null ? (

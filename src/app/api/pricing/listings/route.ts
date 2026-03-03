@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
+import { getSalesMap } from "../sales/route";
 
 export interface PricingListingRow {
   id: string;
@@ -38,12 +40,14 @@ export async function GET(req: NextRequest) {
   const search = url.searchParams.get("search")?.trim() || "";
   const statusFilter = url.searchParams.get("status")?.trim() || "";
   const linkedOnly = url.searchParams.get("linked") === "1";
+  const orderBy = url.searchParams.get("order_by")?.trim() || "";
+  const orderBySales = orderBy === "sales_desc" || orderBy === "sales_asc";
 
   const offset = (page - 1) * limit;
 
   const { data: account, error: accountError } = await supabase
     .from("ml_accounts")
-    .select("id")
+    .select(orderBySales ? "id, ml_user_id" : "id")
     .eq("user_id", user.id)
     .single();
 
@@ -60,6 +64,241 @@ export async function GET(req: NextRequest) {
   const adminSupabase = createSupabaseClient(supabaseUrl, supabaseServiceKey);
 
   try {
+    if (orderBySales) {
+      const sellerId = (account as { id: string; ml_user_id: number }).ml_user_id;
+      const { data: tokenData, error: tokenError } = await adminSupabase
+        .from("ml_tokens")
+        .select("access_token, refresh_token, expires_at")
+        .eq("account_id", account.id)
+        .single();
+      if (tokenError || !tokenData) {
+        return NextResponse.json({ error: "Token não encontrado" }, { status: 404 });
+      }
+      const token = tokenData as { access_token: string; refresh_token: string; expires_at: string };
+      const accessToken = await getValidAccessToken(
+        account.id,
+        token.access_token,
+        token.refresh_token,
+        token.expires_at,
+        adminSupabase
+      );
+      if (!accessToken) {
+        return NextResponse.json({ error: "Falha ao obter token válido" }, { status: 401 });
+      }
+      const now = new Date();
+      const to = new Date(now);
+      const from = new Date(now);
+      from.setDate(from.getDate() - 30);
+      const dateFrom = from.toISOString().replace(/\.\d{3}/, ".000");
+      const dateTo = to.toISOString().replace(/\.\d{3}/, ".999");
+
+      let allItemsQuery = adminSupabase
+        .from("ml_items")
+        .select("id, item_id")
+        .eq("account_id", account.id)
+        .eq("has_variations", false);
+      if (statusFilter) allItemsQuery = allItemsQuery.eq("status", statusFilter);
+      if (linkedOnly) allItemsQuery = allItemsQuery.not("product_id", "is", null);
+      if (search) allItemsQuery = allItemsQuery.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
+      const { data: allItemsData, error: allItemsErr } = await allItemsQuery.order("title", { ascending: true });
+      if (allItemsErr) {
+        console.error("[Pricing listings] order_by sales items error:", allItemsErr);
+        return NextResponse.json({ error: "Erro ao buscar anúncios" }, { status: 500 });
+      }
+      const simpleList = (allItemsData || []).map((i) => ({ id: i.id, item_id: i.item_id, variation_id: null as number | null, source: "item" as const }));
+
+      let allVarsQuery = adminSupabase
+        .from("ml_variations")
+        .select("id, item_id, variation_id")
+        .eq("account_id", account.id);
+      if (linkedOnly) allVarsQuery = allVarsQuery.not("product_id", "is", null);
+      const { data: allVarsData, error: allVarsErr } = await allVarsQuery.order("item_id", { ascending: true });
+      if (allVarsErr) {
+        console.error("[Pricing listings] order_by sales variations error:", allVarsErr);
+        return NextResponse.json({ error: "Erro ao buscar anúncios" }, { status: 500 });
+      }
+      const varItemIds = [...new Set((allVarsData || []).map((v) => v.item_id))];
+      let filteredVars = allVarsData || [];
+      if (varItemIds.length > 0 && (statusFilter || search)) {
+        const { data: parentItems } = await adminSupabase
+          .from("ml_items")
+          .select("item_id, status, title")
+          .eq("account_id", account.id)
+          .in("item_id", varItemIds);
+        const parentMap = new Map((parentItems || []).map((p) => [p.item_id, p]));
+        filteredVars = filteredVars.filter((v) => {
+          const parent = parentMap.get(v.item_id);
+          if (!parent) return false;
+          if (statusFilter && parent.status !== statusFilter) return false;
+          if (search && !(parent.title || "").toLowerCase().includes(search.toLowerCase()) && !v.item_id.toLowerCase().includes(search.toLowerCase())) return false;
+          return true;
+        });
+      }
+      const varList = filteredVars.map((v) => ({ id: v.id, item_id: v.item_id, variation_id: v.variation_id, source: "variation" as const }));
+      const combined = [...simpleList, ...varList];
+      const allItemIds = [...new Set(combined.map((c) => c.item_id))];
+      const { sales: salesMap, orders: ordersMap } = await getSalesMap(accessToken, sellerId, allItemIds, dateFrom, dateTo);
+      combined.sort((a, b) => {
+        const sa = salesMap[a.item_id] ?? 0;
+        const sb = salesMap[b.item_id] ?? 0;
+        return orderBy === "sales_desc" ? sb - sa : sa - sb;
+      });
+      const totalCount = combined.length;
+      const pageList = combined.slice(offset, offset + limit);
+
+      const itemIdsPage = pageList.filter((p) => p.source === "item").map((p) => p.id);
+      const variationIdsPage = pageList.filter((p) => p.source === "variation").map((p) => p.id);
+
+      const fullListings: PricingListingRow[] = [];
+      const buildRowFromItem = (item: Record<string, unknown>): PricingListingRow => {
+        const rawProduct = item.products as Record<string, unknown> | Record<string, unknown>[] | null;
+        let productCostPrice: number | null = null;
+        let productWeight: number | null = null;
+        let productSku: string | null = null;
+        let productTaxPercent: number | null = null;
+        let productExtraFeePercent: number | null = null;
+        if (rawProduct) {
+          const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
+          if (prod) {
+            productCostPrice = prod.cost_price != null ? Number(prod.cost_price) : null;
+            productWeight = prod.weight != null ? Number(prod.weight) : null;
+            productSku = prod.sku != null ? String(prod.sku) : null;
+            productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
+            productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
+          }
+        }
+        const rawJson = item.raw_json as Record<string, unknown> | null;
+        let sku: string | null = null;
+        if (rawJson?.attributes && Array.isArray(rawJson.attributes)) {
+          const skuAttr = rawJson.attributes.find((a: { id?: string }) => a.id === "SELLER_SKU");
+          if (skuAttr && typeof (skuAttr as { value_name?: string }).value_name === "string") sku = (skuAttr as { value_name: string }).value_name;
+        }
+        if (!sku && rawJson?.seller_custom_field) sku = String(rawJson.seller_custom_field);
+        if (!sku && productSku) sku = productSku;
+        return {
+          id: item.id as string,
+          item_id: item.item_id as string,
+          variation_id: null,
+          title: item.title as string | null,
+          thumbnail: item.thumbnail as string | null,
+          permalink: item.permalink as string | null,
+          status: item.status as string | null,
+          listing_type_id: item.listing_type_id as string | null,
+          category_id: item.category_id as string | null,
+          current_price: (item.price as number) ?? 0,
+          sku,
+          product_id: item.product_id as string | null,
+          cost_price: productCostPrice,
+          weight_kg: productWeight,
+          tax_percent: productTaxPercent,
+          extra_fee_percent: productExtraFeePercent,
+          account_id: item.account_id as string,
+        };
+      };
+
+      let itemsById = new Map<string, Record<string, unknown>>();
+      if (itemIdsPage.length > 0) {
+        const { data: itemsPageData } = await adminSupabase
+          .from("ml_items")
+          .select(`
+            id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id, account_id,
+            products:product_id (id, sku, cost_price, weight, tax_percent, extra_fee_percent)
+          `)
+          .in("id", itemIdsPage);
+        itemsById = new Map((itemsPageData || []).map((i) => [i.id, i as unknown as Record<string, unknown>]));
+      }
+
+      let variationRowsByPageId = new Map<string, { variation: Record<string, unknown>; mlItem: Record<string, unknown> | null }>();
+      if (variationIdsPage.length > 0) {
+        const { data: varsPageData } = await adminSupabase
+          .from("ml_variations")
+          .select(`
+            id, item_id, variation_id, price, raw_json, product_id, account_id,
+            products:product_id (id, sku, cost_price, weight, tax_percent, extra_fee_percent)
+          `)
+          .in("id", variationIdsPage);
+        const varItemIdsPage = [...new Set((varsPageData || []).map((v) => v.item_id))];
+        const { data: parentItems } = await adminSupabase
+          .from("ml_items")
+          .select("item_id, title, thumbnail, permalink, status, listing_type_id, category_id")
+          .eq("account_id", account.id)
+          .in("item_id", varItemIdsPage);
+        const parentMap = new Map((parentItems || []).map((i) => [i.item_id, i as unknown as Record<string, unknown>]));
+        for (const v of varsPageData || []) {
+          const variation = v as unknown as Record<string, unknown>;
+          variationRowsByPageId.set(variation.id as string, { variation, mlItem: parentMap.get(variation.item_id as string) ?? null });
+        }
+      }
+
+      for (const p of pageList) {
+        if (p.source === "item") {
+          const item = itemsById.get(p.id);
+          if (item) fullListings.push(buildRowFromItem(item));
+          continue;
+        }
+        const row = variationRowsByPageId.get(p.id);
+        if (!row) continue;
+        const { variation, mlItem } = row;
+        const rawProduct = variation.products as Record<string, unknown> | Record<string, unknown>[] | null;
+        let productCostPrice: number | null = null;
+        let productWeight: number | null = null;
+        let productSku: string | null = null;
+        let productTaxPercent: number | null = null;
+        let productExtraFeePercent: number | null = null;
+        if (rawProduct) {
+          const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
+          if (prod) {
+            productCostPrice = prod.cost_price != null ? Number(prod.cost_price) : null;
+            productWeight = prod.weight != null ? Number(prod.weight) : null;
+            productSku = prod.sku != null ? String(prod.sku) : null;
+            productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
+            productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
+          }
+        }
+        const rawJson = variation.raw_json as Record<string, unknown> | null;
+        let sku: string | null = null;
+        if (rawJson?.attributes && Array.isArray(rawJson.attributes)) {
+          const skuAttr = rawJson.attributes.find((a: { id?: string }) => a.id === "SELLER_SKU");
+          if (skuAttr && typeof (skuAttr as { value_name?: string }).value_name === "string") sku = (skuAttr as { value_name: string }).value_name;
+        }
+        if (!sku && rawJson?.seller_custom_field) sku = String(rawJson.seller_custom_field);
+        if (!sku && productSku) sku = productSku;
+        let variationName = "";
+        if (rawJson?.attribute_combinations && Array.isArray(rawJson.attribute_combinations)) {
+          variationName = rawJson.attribute_combinations.map((a: { value_name?: string }) => a.value_name || "").filter(Boolean).join(" / ");
+        }
+        const title = mlItem?.title || null;
+        fullListings.push({
+          id: variation.id as string,
+          item_id: variation.item_id as string,
+          variation_id: variation.variation_id as number,
+          title: variationName ? `${title || ""} - ${variationName}` : title,
+          thumbnail: mlItem?.thumbnail ?? null,
+          permalink: mlItem?.permalink ?? null,
+          status: mlItem?.status ?? null,
+          listing_type_id: mlItem?.listing_type_id ?? null,
+          category_id: mlItem?.category_id ?? null,
+          current_price: (variation.price as number) ?? 0,
+          sku,
+          product_id: variation.product_id as string | null,
+          cost_price: productCostPrice,
+          weight_kg: productWeight,
+          tax_percent: productTaxPercent,
+          extra_fee_percent: productExtraFeePercent,
+          account_id: variation.account_id as string,
+        });
+      }
+
+      return NextResponse.json({
+        listings: fullListings,
+        total: totalCount,
+        page,
+        limit,
+        sales: salesMap,
+        orders: ordersMap,
+      });
+    }
+
     const listings: PricingListingRow[] = [];
     let totalCount = 0;
 
