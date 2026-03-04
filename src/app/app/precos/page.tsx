@@ -665,6 +665,87 @@ export default function PrecosPage() {
     [isMercadoLider]
   );
 
+  /** Ajusta o preço novo para o mínimo aceito na promoção ML (desconto de 5%). */
+  const handleApplyMinDiscount = useCallback(
+    async (listing: ListingWithPricing) => {
+      const newPrice = Math.round(listing.current_price * 0.95 * 100) / 100;
+      setListings((prev) =>
+        prev.map((item) =>
+          item.id === listing.id && item.variation_id === listing.variation_id
+            ? { ...item, new_price: newPrice, dirty: true, calculating: true }
+            : item
+        )
+      );
+      try {
+        const res = await fetch("/api/pricing/calculate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: [
+              {
+                item_id: listing.item_id,
+                variation_id: listing.variation_id,
+                price: newPrice,
+                listing_type_id: listing.listing_type_id,
+                category_id: listing.category_id,
+                weight_kg: listing.weight_kg,
+                height_cm: listing.height_cm,
+                width_cm: listing.width_cm,
+                length_cm: listing.length_cm,
+              },
+            ],
+            is_mercado_lider: isMercadoLider,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const result = data.results?.[0] as { price: number; fee: number; shipping_cost: number } | undefined;
+          if (result) {
+            const listingWithNewPrice = { ...listing, new_price: newPrice };
+            setListings((prev) =>
+              prev.map((item) =>
+                item.id === listing.id && item.variation_id === listing.variation_id
+                  ? {
+                      ...item,
+                      new_price: newPrice,
+                      dirty: true,
+                      calculated: calculateFullPricing(listingWithNewPrice, result),
+                      calculating: false,
+                    }
+                  : item
+              )
+            );
+          } else {
+            setListings((prev) =>
+              prev.map((item) =>
+                item.id === listing.id && item.variation_id === listing.variation_id
+                  ? { ...item, new_price: newPrice, dirty: true, calculating: false }
+                  : item
+              )
+            );
+          }
+        } else {
+          setListings((prev) =>
+            prev.map((item) =>
+              item.id === listing.id && item.variation_id === listing.variation_id
+                ? { ...item, new_price: newPrice, dirty: true, calculating: false }
+                : item
+            )
+          );
+        }
+      } catch {
+        setListings((prev) =>
+          prev.map((item) =>
+            item.id === listing.id && item.variation_id === listing.variation_id
+              ? { ...item, new_price: newPrice, dirty: true, calculating: false }
+              : item
+          )
+        );
+      }
+    },
+    [isMercadoLider]
+  );
+
   const handleSearchSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     setSearch(searchInput.trim());
@@ -1322,12 +1403,15 @@ export default function PrecosPage() {
                           dirty={listing.dirty}
                         />
                         {listing.current_price > 0 && listing.new_price > 0 && !isValidForCampaign(listing) && (
-                          <span
-                            className="text-xs text-amber-600 whitespace-nowrap"
-                            title="Promoção no ML exige desconto ≥ 5% sobre o preço atual"
+                          <button
+                            type="button"
+                            onClick={() => handleApplyMinDiscount(listing)}
+                            disabled={listing.calculating}
+                            className="text-xs text-amber-600 underline hover:text-amber-700 disabled:opacity-50 whitespace-nowrap"
+                            title="Clique para ajustar ao desconto mínimo de 5% (preço = 95% do atual)"
                           >
-                            Desconto &lt; 5%
-                          </span>
+                            Ajustar para 5%
+                          </button>
                         )}
                       </div>
                     </td>
