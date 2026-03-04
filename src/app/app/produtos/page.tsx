@@ -320,9 +320,14 @@ export default function ProdutosPage() {
   const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-xl font-semibold">Cadastro de Produtos</h1>
+    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold text-slate-900 sm:text-xl">Cadastro de Produtos</h1>
+          <p className="mt-1 text-xs text-slate-600 sm:text-sm">
+            Organize seus produtos, custos e parâmetros usados nas demais telas.
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
           {unregisteredSkus.length > 0 && (
             <button
@@ -385,7 +390,7 @@ export default function ProdutosPage() {
         </div>
       )}
 
-      <div className="mb-4 flex gap-2 border-b border-gray-200">
+      <div className="mb-4 mt-2 flex gap-2 border-b border-slate-200">
         <button
           type="button"
           onClick={() => {
@@ -416,19 +421,22 @@ export default function ProdutosPage() {
         </button>
       </div>
 
-      <form onSubmit={handleSearchSubmit} className="mb-6 flex flex-wrap gap-3">
-        <input
-          type="text"
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Buscar por SKU ou título…"
-          className="rounded border border-gray-300 px-3 py-2 text-sm"
-        />
+      <form onSubmit={handleSearchSubmit} className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex flex-1 items-center gap-2 rounded-full bg-slate-50 px-3 py-1.5 ring-1 ring-slate-200">
+          <span className="text-xs text-slate-500">Buscar</span>
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="SKU ou título…"
+            className="h-7 flex-1 border-0 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+          />
+        </div>
         <button
           type="submit"
-          className="rounded bg-gray-200 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+          className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/15"
         >
-          Buscar
+          Aplicar filtros
         </button>
         {search && (
           <button
@@ -438,7 +446,7 @@ export default function ProdutosPage() {
               setSearchInput("");
               setPage(1);
             }}
-            className="text-sm text-gray-600 underline hover:text-gray-900"
+            className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-800 hover:underline"
           >
             Limpar
           </button>
@@ -458,38 +466,83 @@ export default function ProdutosPage() {
               summary={`${total} produto(s) — página ${page} de ${totalPages || 1}`}
               maxHeight="70vh"
             >
-              <thead>
+              <thead className="bg-slate-50">
                 <tr>
-                  <th className="p-2 font-medium text-gray-700">SKU</th>
-                  <th className="p-2 font-medium text-gray-700">Título</th>
-                  <th className="p-2 font-medium text-gray-700">Custo (R$)</th>
-                  <th className="p-2 font-medium text-gray-700">Imposto (%)</th>
-                  <th className="p-2 font-medium text-gray-700">Taxa Extra (%)</th>
-                  <th className="p-2 font-medium text-gray-700">Desp. Fixas (R$)</th>
-                  <th className="p-2 font-medium text-gray-700">Altura (cm)</th>
-                  <th className="p-2 font-medium text-gray-700">Largura (cm)</th>
-                  <th className="p-2 font-medium text-gray-700">Comprimento (cm)</th>
-                  <th className="p-2 font-medium text-gray-700">Peso (kg)</th>
-                  <th className="p-2 font-medium text-gray-700">Criado em</th>
-                  <th className="p-2 font-medium text-gray-700">Ações</th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    SKU
+                  </th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Título
+                  </th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Custo (R$)
+                  </th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Imposto (%)
+                  </th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Taxa Extra (%)
+                  </th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Desp. Fixas (R$)
+                  </th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Altura (cm)
+                  </th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Largura (cm)
+                  </th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Comprimento (cm)
+                  </th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Peso (kg)
+                  </th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Criado em
+                  </th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Ações
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {products.map((product) => (
-                  <tr key={product.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="p-2 font-mono text-sm">{product.sku}</td>
-                    <td className="max-w-[240px] truncate p-2" title={product.title}>
-                      {product.title}
+                  <tr
+                    key={product.id}
+                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5"
+                  >
+                    <td className="p-2 font-mono text-xs text-slate-700">{product.sku}</td>
+                    <td className="max-w-[240px] p-2" title={product.title}>
+                      <span className="line-clamp-2 text-sm font-medium text-slate-900">
+                        {product.title}
+                      </span>
                     </td>
-                    <td className="p-2 text-right">{product.cost_price != null ? Number(product.cost_price).toFixed(2) : "—"}</td>
-                    <td className="p-2 text-right">{product.tax_percent != null ? Number(product.tax_percent).toFixed(2) : "—"}</td>
-                    <td className="p-2 text-right">{product.extra_fee_percent != null ? Number(product.extra_fee_percent).toFixed(2) : "—"}</td>
-                    <td className="p-2 text-right">{product.fixed_expenses != null ? Number(product.fixed_expenses).toFixed(2) : "—"}</td>
-                    <td className="p-2 text-right">{product.height ?? "—"}</td>
-                    <td className="p-2 text-right">{product.width ?? "—"}</td>
-                    <td className="p-2 text-right">{product.length ?? "—"}</td>
-                    <td className="p-2 text-right">{product.weight ?? "—"}</td>
-                    <td className="p-2 text-gray-500 text-sm">
+                    <td className="p-2 text-right text-sm text-slate-700">
+                      {product.cost_price != null ? Number(product.cost_price).toFixed(2) : "—"}
+                    </td>
+                    <td className="p-2 text-right text-sm text-slate-700">
+                      {product.tax_percent != null ? Number(product.tax_percent).toFixed(2) : "—"}
+                    </td>
+                    <td className="p-2 text-right text-sm text-slate-700">
+                      {product.extra_fee_percent != null ? Number(product.extra_fee_percent).toFixed(2) : "—"}
+                    </td>
+                    <td className="p-2 text-right text-sm text-slate-700">
+                      {product.fixed_expenses != null ? Number(product.fixed_expenses).toFixed(2) : "—"}
+                    </td>
+                    <td className="p-2 text-right text-sm text-slate-700">
+                      {product.height ?? "—"}
+                    </td>
+                    <td className="p-2 text-right text-sm text-slate-700">
+                      {product.width ?? "—"}
+                    </td>
+                    <td className="p-2 text-right text-sm text-slate-700">
+                      {product.length ?? "—"}
+                    </td>
+                    <td className="p-2 text-right text-sm text-slate-700">
+                      {product.weight ?? "—"}
+                    </td>
+                    <td className="p-2 text-xs text-slate-500">
                       {new Date(product.created_at).toLocaleDateString()}
                     </td>
                     <td className="p-2">
@@ -516,26 +569,47 @@ export default function ProdutosPage() {
             </AppTable>
 
             {totalPages > 1 && (
-              <div className="mt-6 flex justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  className="rounded border border-gray-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
-                >
-                  Anterior
-                </button>
-                <span className="py-1 text-sm text-gray-600">
-                  Página {page} de {totalPages}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                  className="rounded border border-gray-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
-                >
-                  Próxima
-                </button>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-500">
+                  Mostrando página {page} de {totalPages} · {total} produto(s)
+                </p>
+                <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setPage(1)}
+                    disabled={page === 1}
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    «
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Anterior
+                  </button>
+                  <span className="px-2 text-xs font-semibold text-slate-800">
+                    {page}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Próxima
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage(totalPages)}
+                    disabled={page === totalPages}
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    »
+                  </button>
+                </div>
               </div>
             )}
           </>
@@ -550,28 +624,57 @@ export default function ProdutosPage() {
             summary={`${total} produto(s) com anúncios — página ${page} de ${totalPages || 1}`}
             maxHeight="70vh"
           >
-            <thead>
+            <thead className="bg-slate-50">
               <tr>
-                <th className="p-2 font-medium text-gray-700">SKU</th>
-                <th className="p-2 font-medium text-gray-700">Título</th>
-                <th className="p-2 font-medium text-gray-700 text-center">Anúncios</th>
-                <th className="p-2 font-medium text-gray-700 text-center">Variações</th>
-                <th className="p-2 font-medium text-gray-700 text-center">Total</th>
-                <th className="p-2 font-medium text-gray-700 text-center">Ativos</th>
-                <th className="p-2 font-medium text-gray-700 text-right">Preço Mín</th>
-                <th className="p-2 font-medium text-gray-700 text-right">Preço Máx</th>
-                <th className="p-2 font-medium text-gray-700 text-right">Preço Médio</th>
-                <th className="p-2 font-medium text-gray-700 text-right">Custo</th>
-                <th className="p-2 font-medium text-gray-700 text-right">Estoque</th>
-                <th className="p-2 font-medium text-gray-700 text-right">Vendidos</th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  SKU
+                </th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Título
+                </th>
+                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Anúncios
+                </th>
+                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Variações
+                </th>
+                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Total
+                </th>
+                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Ativos
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Preço Mín
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Preço Máx
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Preço Médio
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Custo
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Estoque
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Vendidos
+                </th>
               </tr>
             </thead>
             <tbody>
               {stats.map((stat) => (
-                <tr key={stat.product_id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="p-2 font-mono text-sm">{stat.sku}</td>
-                  <td className="max-w-[200px] truncate p-2" title={stat.title}>
-                    {stat.title}
+                <tr
+                  key={stat.product_id}
+                  className="border-b border-slate-100 bg-white/50 hover:bg-primary/5"
+                >
+                  <td className="p-2 font-mono text-xs text-slate-700">{stat.sku}</td>
+                  <td className="max-w-[200px] p-2" title={stat.title}>
+                    <span className="line-clamp-2 text-sm font-medium text-slate-900">
+                      {stat.title}
+                    </span>
                   </td>
                   <td className="p-2 text-center">{stat.total_items}</td>
                   <td className="p-2 text-center">{stat.total_variations}</td>
@@ -601,26 +704,47 @@ export default function ProdutosPage() {
           </AppTable>
 
           {totalPages > 1 && (
-            <div className="mt-6 flex justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                className="rounded border border-gray-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
-              >
-                Anterior
-              </button>
-              <span className="py-1 text-sm text-gray-600">
-                Página {page} de {totalPages}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                className="rounded border border-gray-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
-              >
-                Próxima
-              </button>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">
+                Mostrando página {page} de {totalPages} · {total} produto(s) com anúncios
+              </p>
+              <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setPage(1)}
+                  disabled={page === 1}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Anterior
+                </button>
+                <span className="px-2 text-xs font-semibold text-slate-800">
+                  {page}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Próxima
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(totalPages)}
+                  disabled={page === totalPages}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  »
+                </button>
+              </div>
             </div>
           )}
         </>

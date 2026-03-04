@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, Fragment } from "react";
+import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import { AppTable } from "@/components/AppTable";
 
 interface MLAccount {
@@ -37,6 +37,8 @@ interface JobState {
   errors: number;
 }
 
+type SortField = "item_id" | "title" | "status" | "price" | "updated_at";
+
 export default function AnunciosPage() {
   const [account, setAccount] = useState<MLAccount | null>(null);
   const [items, setItems] = useState<ItemRow[]>([]);
@@ -59,6 +61,8 @@ export default function AnunciosPage() {
   const [singleSyncing, setSingleSyncing] = useState(false);
   const [singleError, setSingleError] = useState<string | null>(null);
   const [copiedMlb, setCopiedMlb] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<SortField>("updated_at");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
   const copyMlb = useCallback((itemId: string) => {
     navigator.clipboard.writeText(itemId).then(() => {
@@ -201,6 +205,53 @@ export default function AnunciosPage() {
 
   const totalPages = Math.ceil(total / pageSize);
 
+  const sortedItems = useMemo(() => {
+    const data = [...items];
+    data.sort((a, b) => {
+      const dir = sortDirection === "asc" ? 1 : -1;
+      const av = a[sortField];
+      const bv = b[sortField];
+
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1 * dir;
+      if (bv == null) return -1 * dir;
+
+      if (sortField === "price") {
+        return (Number(av) - Number(bv)) * dir;
+      }
+
+      if (sortField === "updated_at") {
+        return (new Date(av as string).getTime() - new Date(bv as string).getTime()) * dir;
+      }
+
+      return String(av).localeCompare(String(bv)) * dir;
+    });
+    return data;
+  }, [items, sortField, sortDirection]);
+
+  function toggleSort(field: SortField) {
+    setPage(1);
+    setSortField((prevField) => {
+      if (prevField === field) {
+        setSortDirection((prevDir) => (prevDir === "asc" ? "desc" : "asc"));
+        return prevField;
+      }
+      setSortDirection("asc");
+      return field;
+    });
+  }
+
+  function renderSortIcon(field: SortField) {
+    if (sortField !== field) {
+      return <span className="ml-1 text-xs text-slate-400">↕</span>;
+    }
+    return (
+      <span className="ml-1 text-xs text-primary">
+        {sortDirection === "asc" ? "↑" : "↓"}
+      </span>
+    );
+  }
+
   if (loading) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-6">
@@ -224,175 +275,253 @@ export default function AnunciosPage() {
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <h1 className="mb-6 text-xl font-semibold">Anúncios</h1>
-
-      {/* Ações: Sync todos + Sync por MLB */}
-      <div className="mb-6 flex flex-wrap gap-4">
-        <button
-          type="button"
-          onClick={handleSyncAll}
-          disabled={syncing}
-          className="rounded bg-brand-blue px-4 py-2 font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
-        >
-          {syncing ? "Sincronizando…" : "Importar / Sincronizar todos"}
-        </button>
-
-        <div className="flex flex-1 flex-wrap items-center gap-2">
-          <input
-            type="text"
-            value={singleMlb}
-            onChange={(e) => setSingleMlb(e.target.value)}
-            placeholder="MLB123456789"
-            className="rounded border border-gray-300 px-3 py-2 text-sm"
-          />
-          <button
-            type="button"
-            onClick={handleSyncSingle}
-            disabled={singleSyncing || !singleMlb.trim()}
-            className="rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-          >
-            {singleSyncing ? "Sincronizando…" : "Importar anúncio"}
-          </button>
-          {singleError && <span className="text-sm text-red-600">{singleError}</span>}
+    <div className="space-y-4">
+      <div className="rounded-app bg-white/80 p-4 shadow-sm ring-1 ring-slate-200 backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-lg font-semibold text-slate-900 sm:text-xl">Anúncios</h1>
+            <p className="mt-1 text-xs text-slate-600 sm:text-sm">
+              Visualize rapidamente seus anúncios, atacado configurado e status no Mercado Livre.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSyncAll}
+              disabled={syncing}
+              className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/10">
+                {syncing ? "…" : "⟳"}
+              </span>
+              {syncing ? "Sincronizando anúncios..." : "Importar / sincronizar todos"}
+            </button>
+            <div className="flex flex-wrap items-center gap-2 rounded-full bg-slate-50 px-3 py-1.5 text-xs shadow-sm ring-1 ring-slate-200">
+              <span className="text-[11px] font-medium text-slate-600">Sincronizar anúncio específico</span>
+              <input
+                type="text"
+                value={singleMlb}
+                onChange={(e) => setSingleMlb(e.target.value)}
+                placeholder="MLB123456789"
+                className="w-28 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-mono text-slate-800 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <button
+                type="button"
+                onClick={handleSyncSingle}
+                disabled={singleSyncing || !singleMlb.trim()}
+                className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-slate-800 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {singleSyncing ? "Sincronizando…" : "Importar"}
+              </button>
+            </div>
+          </div>
         </div>
+        {singleError && (
+          <p className="mt-2 text-xs text-rose-600">
+            {singleError}
+          </p>
+        )}
+        {syncing && job && (
+          <div className="mt-3 rounded-app bg-slate-50 px-3 py-2 text-xs text-slate-700 ring-1 ring-slate-200">
+            <span className="font-semibold">Job: </span>
+            <span className="uppercase tracking-wide">{job.status}</span>
+            {job.total > 0 && (
+              <>
+                {" · "}
+                {job.processed}/{job.total} processados
+                {job.ok > 0 && <> · {job.ok} ok</>}
+                {job.errors > 0 && <> · {job.errors} erros</>}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
-      {syncing && job && (
-        <div className="mb-4 rounded bg-gray-50 p-3 text-sm text-gray-700">
-          <span className="font-medium">Status: </span>
-          <span>{job.status}</span>
-          {job.total > 0 && (
-            <>
-              {" — "}
-              {job.processed}/{job.total} processados
-              {job.ok > 0 && <>, {job.ok} ok</>}
-              {job.errors > 0 && <>, {job.errors} erros</>}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Filtros */}
-      <form onSubmit={handleSearchSubmit} className="mb-6 flex flex-wrap gap-3">
-        <input
-          type="text"
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Buscar por título, MLB ou família…"
-          className="rounded border border-gray-300 px-3 py-2 text-sm"
-        />
-        <button
-          type="submit"
-          className="rounded bg-gray-200 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
-        >
-          Buscar
-        </button>
-        <select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
-            setPage(1);
-          }}
-          className="rounded border border-gray-300 px-3 py-2 text-sm"
-        >
-          <option value="">Todos os status</option>
-          <option value="active">Ativo</option>
-          <option value="paused">Pausado</option>
-          <option value="closed">Fechado</option>
-        </select>
-        <label className="flex items-center gap-2 rounded border border-gray-300 bg-white px-3 py-2 text-sm">
-          <input
-            type="checkbox"
-            checked={mlbuOnly}
+      <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 backdrop-blur">
+        {/* Filtros */}
+        <form onSubmit={handleSearchSubmit} className="mb-4 flex flex-wrap items-center gap-3">
+          <div className="flex flex-1 items-center gap-2 rounded-full bg-slate-50 px-3 py-1.5 ring-1 ring-slate-200">
+            <span className="text-xs text-slate-500">Buscar</span>
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Título, MLB ou família…"
+              className="h-7 flex-1 border-0 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+            />
+          </div>
+          <select
+            value={statusFilter}
             onChange={(e) => {
-              setMlbuOnly(e.target.checked);
+              setStatusFilter(e.target.value);
               setPage(1);
             }}
-            className="rounded border-gray-300"
-          />
-          <span>Só MLBU</span>
-        </label>
-        <div className="flex items-center gap-1">
-          <label className="text-sm text-gray-600">Cód. MLBU:</label>
-          <input
-            type="text"
-            value={mlbuCodeInput}
-            onChange={(e) => setMlbuCodeInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), setPage(1))}
-            placeholder="ex: MLAU123"
-            className="w-28 rounded border border-gray-300 px-2 py-1 text-sm font-mono"
-          />
-        </div>
-        {(search || statusFilter || mlbuOnly || mlbuCodeInput) && (
+            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="">Todos os status</option>
+            <option value="active">Ativo</option>
+            <option value="paused">Pausado</option>
+            <option value="closed">Fechado</option>
+          </select>
+          <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 shadow-sm">
+            <input
+              type="checkbox"
+              checked={mlbuOnly}
+              onChange={(e) => {
+                setMlbuOnly(e.target.checked);
+                setPage(1);
+              }}
+              className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary"
+            />
+            <span>Só MLBU</span>
+          </label>
+          <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs shadow-sm">
+            <span className="text-slate-500">Cód. MLBU</span>
+            <input
+              type="text"
+              value={mlbuCodeInput}
+              onChange={(e) => setMlbuCodeInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), setPage(1))}
+              placeholder="ex: MLAU123"
+              className="w-24 border-0 bg-transparent font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none"
+            />
+          </div>
           <button
-            type="button"
-            onClick={() => {
-              setSearch("");
-              setSearchInput("");
-              setStatusFilter("");
-              setMlbuOnly(false);
-              setMlbuCodeInput("");
-              setPage(1);
-            }}
-            className="text-sm text-gray-600 underline hover:text-gray-900"
+            type="submit"
+            className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/15"
           >
-            Limpar filtros
+            Aplicar filtros
           </button>
-        )}
-      </form>
+          {(search || statusFilter || mlbuOnly || mlbuCodeInput) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                setSearchInput("");
+                setStatusFilter("");
+                setMlbuOnly(false);
+                setMlbuCodeInput("");
+                setPage(1);
+              }}
+              className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-800 hover:underline"
+            >
+              Limpar
+            </button>
+          )}
+        </form>
 
-      {/* Tabela de anúncios */}
-      {itemsLoading ? (
-        <p className="text-gray-500">Carregando anúncios…</p>
-      ) : items.length === 0 ? (
-        <p className="text-gray-500">
-          Nenhum anúncio sincronizado. Use &quot;Importar / Sincronizar todos&quot; ou
-          importe um anúncio pelo MLB.
-        </p>
-      ) : (
-        <>
-          <AppTable
-            summary={`${total} anúncio(s) — página ${page} de ${totalPages || 1}`}
-            maxHeight="70vh"
-          >
-            <thead>
-              <tr>
-                <th className="p-2 font-medium text-gray-700">Imagem</th>
-                  <th className="p-2 font-medium text-gray-700">MLB</th>
-                  <th className="p-2 font-medium text-gray-700">Título</th>
-                  <th className="p-2 font-medium text-gray-700" title="MLBU = User Product. Família = agrupamento no modelo MLBU.">
+        {/* Tabela de anúncios */}
+        {itemsLoading ? (
+          <p className="text-sm text-slate-500">Carregando anúncios…</p>
+        ) : items.length === 0 ? (
+          <p className="text-sm text-slate-500">
+            Nenhum anúncio sincronizado. Use &quot;Importar / sincronizar todos&quot; ou importe um anúncio pelo MLB.
+          </p>
+        ) : (
+          <>
+            <AppTable
+              summary={`${total} anúncio(s) — página ${page} de ${totalPages || 1}`}
+              maxHeight="70vh"
+            >
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Imagem
+                  </th>
+                  <th
+                    className="cursor-pointer p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    onClick={() => toggleSort("item_id")}
+                  >
+                    MLB
+                    {renderSortIcon("item_id")}
+                  </th>
+                  <th
+                    className="cursor-pointer p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    onClick={() => toggleSort("title")}
+                  >
+                    Título
+                    {renderSortIcon("title")}
+                  </th>
+                  <th
+                    className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    title="MLBU = User Product. Família = agrupamento no modelo MLBU."
+                  >
                     Modelo / Família
                   </th>
-                  <th className="p-2 font-medium text-gray-700">Status</th>
-                  <th className="p-2 font-medium text-gray-700">Preço R$</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">R$ Atac. 1</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Qt. Atac. 1</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">R$ Atac. 2</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Qt. Atac. 2</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">R$ Atac. 3</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Qt. Atac. 3</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">R$ Atac. 4</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Qt. Atac. 4</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">R$ Atac. 5</th>
-                  <th className="whitespace-nowrap p-2 font-medium text-gray-700">Qt. Atac. 5</th>
-                  <th className="p-2 font-medium text-gray-700">Variações</th>
-                  <th className="p-2 font-medium text-gray-700">Atualizado</th>
-                  <th className="p-2 font-medium text-gray-700">Link</th>
+                  <th
+                    className="cursor-pointer p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    onClick={() => toggleSort("status")}
+                  >
+                    Status
+                    {renderSortIcon("status")}
+                  </th>
+                  <th
+                    className="cursor-pointer whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    onClick={() => toggleSort("price")}
+                  >
+                    Preço R$
+                    {renderSortIcon("price")}
+                  </th>
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    R$ Atac. 1
+                  </th>
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Qt. Atac. 1
+                  </th>
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    R$ Atac. 2
+                  </th>
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Qt. Atac. 2
+                  </th>
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    R$ Atac. 3
+                  </th>
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Qt. Atac. 3
+                  </th>
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    R$ Atac. 4
+                  </th>
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Qt. Atac. 4
+                  </th>
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    R$ Atac. 5
+                  </th>
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Qt. Atac. 5
+                  </th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Variações
+                  </th>
+                  <th
+                    className="cursor-pointer p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    onClick={() => toggleSort("updated_at")}
+                  >
+                    Atualizado
+                    {renderSortIcon("updated_at")}
+                  </th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    Link
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
-                  <tr key={item.item_id} className="border-b border-gray-100 hover:bg-gray-50">
+                {sortedItems.map((item) => (
+                  <tr
+                    key={item.item_id}
+                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5"
+                  >
                     <td className="p-2">
                       {item.thumbnail ? (
                         <img
                           src={item.thumbnail.replace(/^http:/, "https:")}
                           alt=""
-                          className="h-12 w-12 rounded object-contain"
+                          className="h-12 w-12 rounded-lg border border-slate-100 bg-slate-50 object-contain"
                         />
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-xs text-slate-400">—</span>
                       )}
                     </td>
                     <td
@@ -401,22 +530,24 @@ export default function AnunciosPage() {
                       onClick={() => copyMlb(item.item_id)}
                       onKeyDown={(e) => e.key === "Enter" && copyMlb(item.item_id)}
                       title="Clique para copiar"
-                      className="cursor-pointer select-none font-mono text-gray-600 hover:bg-gray-100 p-2 rounded"
+                      className="cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100"
                     >
                       {copiedMlb === item.item_id ? (
-                        <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
+                        <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
                       ) : (
                         item.item_id
                       )}
                     </td>
-                    <td className="max-w-[240px] truncate p-2" title={item.title ?? ""}>
-                      {item.title ?? "—"}
+                    <td className="max-w-[260px] p-2" title={item.title ?? ""}>
+                      <span className="line-clamp-2 text-sm font-medium text-slate-900">
+                        {item.title ?? "—"}
+                      </span>
                     </td>
                     <td className="p-2">
                       <div className="flex flex-wrap items-center gap-1.5">
                         {item.user_product_id && (
                           <span
-                            className="inline-flex items-center rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-800"
+                            className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 ring-1 ring-indigo-100"
                             title="User Product (MLBU)"
                           >
                             MLBU
@@ -429,7 +560,7 @@ export default function AnunciosPage() {
                         )}
                         {item.family_name && (
                           <span
-                            className="max-w-[100px] truncate inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700"
+                            className="inline-flex max-w-[120px] items-center truncate rounded-full bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700 ring-1 ring-slate-100"
                             title={`Família: ${item.family_name}`}
                           >
                             {item.family_name}
@@ -439,13 +570,13 @@ export default function AnunciosPage() {
                           <button
                             type="button"
                             onClick={() => setFamilyModal({ familyId: item.family_id!, familyName: item.family_name ?? "" })}
-                            className="text-xs text-brand-blue hover:underline"
+                            className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
                           >
                             Ver família
                           </button>
                         )}
                         {!item.user_product_id && !item.family_name && (
-                          <span className="text-gray-400 text-xs">—</span>
+                          <span className="text-xs text-slate-400">—</span>
                         )}
                       </div>
                     </td>
@@ -453,10 +584,10 @@ export default function AnunciosPage() {
                       <span
                         className={`rounded px-2 py-0.5 text-xs font-medium ${
                           item.status === "active"
-                            ? "bg-green-100 text-green-800"
+                            ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
                             : item.status === "paused"
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-gray-100 text-gray-700"
+                              ? "bg-amber-50 text-amber-800 ring-1 ring-amber-100"
+                              : "bg-slate-50 text-slate-700 ring-1 ring-slate-100"
                         }`}
                       >
                         {item.status ?? "—"}
@@ -474,7 +605,7 @@ export default function AnunciosPage() {
                               type="text"
                               placeholder="0,00"
                               readOnly
-                              className="w-20 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-sm"
+                              className="w-20 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs"
                               value={tier?.amount != null ? Number(tier.amount).toFixed(2) : ""}
                             />
                           </td>
@@ -484,15 +615,17 @@ export default function AnunciosPage() {
                               placeholder={i === 0 ? "1" : ""}
                               min={1}
                               readOnly
-                              className="w-16 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-sm"
+                              className="w-16 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs"
                               value={tier?.min_purchase_unit ?? ""}
                             />
                           </td>
                         </Fragment>
                       );
                     })}
-                    <td className="p-2">{item.has_variations ? "Sim" : "Não"}</td>
-                    <td className="p-2 text-gray-500">
+                    <td className="p-2 text-xs text-slate-700">
+                      {item.has_variations ? "Sim" : "Não"}
+                    </td>
+                    <td className="p-2 text-xs text-slate-500">
                       {item.updated_at ? new Date(item.updated_at).toLocaleString() : "—"}
                     </td>
                     <td className="p-2">
@@ -501,45 +634,67 @@ export default function AnunciosPage() {
                           href={item.permalink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-brand-blue hover:underline"
+                          className="inline-flex items-center rounded-full bg-primary/10 px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/15"
                         >
-                          ML
+                          Ver no ML
                         </a>
                       ) : (
-                        "—"
+                        <span className="text-xs text-slate-400">—</span>
                       )}
                     </td>
                   </tr>
                 ))}
               </tbody>
-          </AppTable>
+            </AppTable>
 
-          {/* Paginação */}
-          {totalPages > 1 && (
-            <div className="mt-6 flex justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                className="rounded border border-gray-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
-              >
-                Anterior
-              </button>
-              <span className="py-1 text-sm text-gray-600">
-                Página {page} de {totalPages}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                className="rounded border border-gray-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
-              >
-                Próxima
-              </button>
-            </div>
-          )}
-        </>
-      )}
+            {/* Paginação */}
+            {totalPages > 1 && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-500">
+                  Mostrando página {page} de {totalPages} · {total} anúncio(s)
+                </p>
+                <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setPage(1)}
+                    disabled={page === 1}
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    «
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Anterior
+                  </button>
+                  <span className="px-2 text-xs font-semibold text-slate-800">
+                    {page}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Próxima
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage(totalPages)}
+                    disabled={page === totalPages}
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    »
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Modal: itens da família */}
       {familyModal && (

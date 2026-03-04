@@ -740,10 +740,10 @@ function AtacadoPageContent() {
 
   if (!accountsLoaded) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
+      <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200">
         <div className="flex flex-col items-center justify-center py-8">
-          <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-brand-blue"></div>
-          <p className="text-gray-500">Carregando…</p>
+          <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-primary"></div>
+          <p className="text-sm text-slate-500">Carregando…</p>
         </div>
       </div>
     );
@@ -751,7 +751,7 @@ function AtacadoPageContent() {
 
   if (accounts.length === 0) {
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-6">
+      <div className="rounded-app bg-amber-50 p-4 shadow-sm ring-1 ring-amber-200">
         <p className="text-amber-800">
           Conecte sua conta do Mercado Livre em{" "}
           <a href="/app/configuracao" className="font-medium underline">
@@ -764,8 +764,15 @@ function AtacadoPageContent() {
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <h1 className="mb-6 text-xl font-semibold">Editor de Preço de Atacado</h1>
+    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold text-slate-900 sm:text-xl">Editor de Preço de Atacado</h1>
+          <p className="mt-1 text-xs text-slate-600 sm:text-sm">
+            Defina faixas de quantidade e preços de atacado para seus anúncios.
+          </p>
+        </div>
+      </div>
 
       {message && (
         <div
@@ -778,13 +785,13 @@ function AtacadoPageContent() {
       )}
 
       {/* Seletor de conta e ações */}
-      <div className="mb-4 flex flex-wrap items-center gap-4">
+      <div className="mb-4 flex flex-wrap items-center gap-4 rounded-app bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
         <div>
-          <label className="mr-2 text-sm text-gray-600">Conta:</label>
+          <label className="mr-2 text-xs font-medium text-slate-600">Conta Mercado Livre</label>
           <select
             value={accountId}
             onChange={(e) => setAccountId(e.target.value)}
-            className="rounded border border-gray-300 px-2 py-1 text-sm"
+            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           >
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
@@ -809,7 +816,7 @@ function AtacadoPageContent() {
               setRefJob({ status: "queued" });
             }
           }}
-          className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {refJobId && (refJob?.status === "queued" || refJob?.status === "running")
             ? "Atualizando referências…"
@@ -819,14 +826,14 @@ function AtacadoPageContent() {
           type="button"
           onClick={saveAll}
           disabled={saving || editedCount === 0}
-          className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+          className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
         >
           {saving ? "Salvando…" : "Salvar alterações"}
         </button>
         <button
           type="button"
           onClick={exportCsv}
-          className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
         >
           Exportar CSV
         </button>
@@ -841,7 +848,7 @@ function AtacadoPageContent() {
           type="button"
           onClick={openImportCsv}
           disabled={importLoading}
-          className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {importLoading ? "Processando…" : "Importar CSV"}
         </button>
@@ -849,7 +856,7 @@ function AtacadoPageContent() {
           type="button"
           onClick={startApply}
           disabled={applyLoading || saving || !accountId}
-          className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+          className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {applyLoading ? (editedCount > 0 ? "Salvando e aplicando…" : "Aplicando…") : "Aplicar Preços no Mercado Livre"}
         </button>
@@ -857,19 +864,19 @@ function AtacadoPageContent() {
           Aplicar envia os preços de atacado salvos para o Mercado Livre. Alterações não salvas serão salvas automaticamente ao clicar.
         </span>
         {editedCount > 0 && (
-          <span className="text-sm text-amber-700">{editedCount} linha(s) alterada(s)</span>
+        <span className="text-xs font-medium text-amber-700">{editedCount} linha(s) alterada(s)</span>
         )}
       </div>
 
       {/* Filtros */}
-      <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
+      <div className="mb-6 rounded-app border border-slate-200 bg-slate-50 p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-medium text-gray-700">Filtros</h3>
+          <h3 className="text-sm font-semibold text-slate-800">Filtros</h3>
           {hasActiveFilters && (
             <button
               type="button"
               onClick={clearFilters}
-              className="text-xs text-gray-500 hover:text-gray-700 hover:underline"
+              className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-800 hover:underline"
             >
               Limpar filtros
             </button>
@@ -883,51 +890,51 @@ function AtacadoPageContent() {
           className="flex flex-wrap items-end gap-4"
         >
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">MLB</label>
+            <label className="text-xs text-slate-500">MLB</label>
             <input
               type="text"
               value={filterMlb}
               onChange={(e) => setFilterMlb(e.target.value)}
               placeholder="ex: MLB123"
-              className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm font-mono"
+              className="w-32 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono text-slate-800 shadow-sm"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">MLBU</label>
+            <label className="text-xs text-slate-500">MLBU</label>
             <input
               type="text"
               value={filterMlbu}
               onChange={(e) => setFilterMlbu(e.target.value)}
               placeholder="ex: MLBU123"
-              className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm font-mono"
+              className="w-32 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono text-slate-800 shadow-sm"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">Título</label>
+            <label className="text-xs text-slate-500">Título</label>
             <input
               type="text"
               value={filterTitle}
               onChange={(e) => setFilterTitle(e.target.value)}
               placeholder="Buscar no título"
-              className="w-48 rounded border border-gray-300 px-2 py-1.5 text-sm"
+              className="w-48 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 shadow-sm"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">SKU</label>
+            <label className="text-xs text-slate-500">SKU</label>
             <input
               type="text"
               value={filterSku}
               onChange={(e) => setFilterSku(e.target.value)}
               placeholder="ex: SKU-001"
-              className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm font-mono"
+              className="w-32 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono text-slate-800 shadow-sm"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">Variação</label>
+            <label className="text-xs text-slate-500">Variação</label>
             <select
               value={filterVariation}
               onChange={(e) => setFilterVariation(e.target.value as "" | "com" | "sem")}
-              className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm"
+              className="w-32 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 shadow-sm"
             >
               <option value="">Todas</option>
               <option value="com">Com variação</option>
@@ -935,11 +942,11 @@ function AtacadoPageContent() {
             </select>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">Status</label>
+            <label className="text-xs text-slate-500">Status</label>
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="w-36 rounded border border-gray-300 px-2 py-1.5 text-sm"
+              className="w-36 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 shadow-sm"
             >
               <option value="">Todos</option>
               <option value="mlbu">Só MLBU</option>
@@ -950,20 +957,20 @@ function AtacadoPageContent() {
             </select>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">&nbsp;</label>
+            <label className="text-xs text-slate-500">&nbsp;</label>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={hideVariations}
                 onChange={(e) => setHideVariations(e.target.checked)}
-                className="rounded border-gray-300"
+                className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary"
               />
-              <span className="text-sm text-gray-700">Só anúncios</span>
+              <span className="text-xs text-slate-700">Só anúncios</span>
             </label>
           </div>
           <button
             type="submit"
-            className="rounded bg-brand-blue px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-blue-dark"
+            className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary-dark"
           >
             Filtrar
           </button>
@@ -971,43 +978,43 @@ function AtacadoPageContent() {
         {hasActiveFilters && (
           <div className="mt-3 flex flex-wrap gap-2">
             {filtersApplied.mlb && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
                 MLB: {filtersApplied.mlb}
                 <button type="button" onClick={() => { setFilterMlb(""); setFiltersApplied((p) => ({ ...p, mlb: "" })); }} className="hover:text-blue-600">×</button>
               </span>
             )}
             {filtersApplied.mlbu && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-800">
+              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
                 MLBU: {filtersApplied.mlbu}
                 <button type="button" onClick={() => { setFilterMlbu(""); setFiltersApplied((p) => ({ ...p, mlbu: "" })); }} className="hover:text-indigo-600">×</button>
               </span>
             )}
             {filtersApplied.title && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-800">
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
                 Título: {filtersApplied.title}
                 <button type="button" onClick={() => { setFilterTitle(""); setFiltersApplied((p) => ({ ...p, title: "" })); }} className="hover:text-green-600">×</button>
               </span>
             )}
             {filtersApplied.sku && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
                 SKU: {filtersApplied.sku}
                 <button type="button" onClick={() => { setFilterSku(""); setFiltersApplied((p) => ({ ...p, sku: "" })); }} className="hover:text-amber-600">×</button>
               </span>
             )}
             {filtersApplied.variation && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-800">
+              <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
                 Variação: {filtersApplied.variation === "com" ? "Com" : "Sem"}
                 <button type="button" onClick={() => { setFilterVariation(""); setFiltersApplied((p) => ({ ...p, variation: "" })); }} className="hover:text-purple-600">×</button>
               </span>
             )}
             {filtersApplied.status && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-800">
+              <span className="inline-flex items-center gap-1 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-800">
                 Status: {filtersApplied.status.replace(/_/g, " ")}
                 <button type="button" onClick={() => { setFilterStatus(""); setFiltersApplied((p) => ({ ...p, status: "" })); }} className="hover:text-gray-600">×</button>
               </span>
             )}
             {filtersApplied.hideVariations && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs text-teal-800">
+              <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800">
                 Só anúncios
                 <button type="button" onClick={() => { setHideVariations(false); setFiltersApplied((p) => ({ ...p, hideVariations: false })); }} className="hover:text-teal-600">×</button>
               </span>
@@ -1161,12 +1168,12 @@ function AtacadoPageContent() {
 
       {loadingRows ? (
         <div className="flex flex-col items-center justify-center py-12">
-          <div className="mb-4 h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-brand-blue"></div>
-          <p className="text-gray-600 font-medium">Carregando anúncios…</p>
-          <p className="text-sm text-gray-400 mt-1">Isso pode levar alguns segundos</p>
+          <div className="mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-primary"></div>
+          <p className="font-medium text-slate-600">Carregando anúncios…</p>
+          <p className="mt-1 text-sm text-slate-400">Isso pode levar alguns segundos</p>
         </div>
       ) : rows.length === 0 ? (
-        <p className="text-gray-500">
+        <p className="text-sm text-slate-500">
           Nenhum item encontrado. Sincronize anúncios em{" "}
           <a href="/app/anuncios" className="text-brand-blue hover:underline">
             Anúncios
@@ -1179,24 +1186,53 @@ function AtacadoPageContent() {
             summary={`${rows.length} linha(s) — página ${page} de ${totalPages}`}
             maxHeight="70vh"
           >
-            <thead>
+            <thead className="bg-slate-50">
               <tr>
-                <th className="whitespace-nowrap p-2 font-medium">MLB</th>
-                <th className="whitespace-nowrap p-2 font-medium" title="Código User Product (MLBU)">MLBU</th>
-                <th className="p-2 font-medium">Título</th>
-                <th className="p-2 font-medium" title="Indica se o anúncio possui variações">Variação</th>
-                <th className="p-2 font-medium" title="SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.">
+                <th className="whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  MLB
+                </th>
+                <th
+                  className="whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                  title="Código User Product (MLBU)"
+                >
+                  MLBU
+                </th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Título
+                </th>
+                <th
+                  className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                  title="Indica se o anúncio possui variações"
+                >
+                  Variação
+                </th>
+                <th
+                  className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                  title="SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação."
+                >
                   SKU
                 </th>
-                <th className="p-2 font-medium">Preço R$</th>
-                <th className="p-2 font-medium">Competitividade</th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Preço R$
+                </th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Competitividade
+                </th>
                 {[1, 2, 3, 4, 5].map((i) => (
-                  <th key={i} colSpan={2} className="whitespace-nowrap p-2 font-medium text-center">
+                  <th
+                    key={i}
+                    colSpan={2}
+                    className="whitespace-nowrap p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600"
+                  >
                     T{i}
                   </th>
                 ))}
-                <th className="p-2 font-medium">Status</th>
-                <th className="p-2 font-medium">Ações</th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Status
+                </th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Ações
+                </th>
               </tr>
             </thead>
               <tbody>
@@ -1205,26 +1241,47 @@ function AtacadoPageContent() {
           </AppTable>
 
           {totalPages > 1 && (
-            <div className="mt-4 flex justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                className="rounded border border-gray-300 px-3 py-1 text-sm disabled:opacity-50"
-              >
-                Anterior
-              </button>
-              <span className="py-1 text-sm text-gray-600">
-                Página {page} de {totalPages}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                className="rounded border border-gray-300 px-3 py-1 text-sm disabled:opacity-50"
-              >
-                Próxima
-              </button>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">
+                Mostrando página {page} de {totalPages} · {totalItems} anúncio(s)
+              </p>
+              <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setPage(1)}
+                  disabled={page === 1}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Anterior
+                </button>
+                <span className="px-2 text-xs font-semibold text-slate-800">
+                  {page}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Próxima
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(totalPages)}
+                  disabled={page === totalPages}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  »
+                </button>
+              </div>
             </div>
           )}
         </>

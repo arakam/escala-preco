@@ -992,14 +992,14 @@ export default function PrecosPage() {
 
   if (loading && listings.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="text-gray-500">Carregando…</p>
+      <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200">
+        <p className="text-sm text-slate-500">Carregando…</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
+    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200">
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       {campaignOpen && (
@@ -1067,10 +1067,10 @@ export default function PrecosPage() {
         </div>
       )}
 
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">Calculadora de Preços</h1>
+            <h1 className="text-lg font-semibold text-slate-900 sm:text-xl">Calculadora de Preços</h1>
             <button
               type="button"
               onClick={() => setHelpOpen(true)}
@@ -1082,17 +1082,17 @@ export default function PrecosPage() {
               </svg>
             </button>
           </div>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-1 text-xs text-slate-600 sm:text-sm">
             Simule preços de venda e veja o valor líquido a receber
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 rounded border border-gray-300 bg-white px-3 py-2 text-sm">
+          <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 shadow-sm">
             <input
               type="checkbox"
               checked={isMercadoLider}
               onChange={(e) => setIsMercadoLider(e.target.checked)}
-              className="rounded border-gray-300"
+              className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary"
               disabled={reputationLoading}
             />
             <span>Mercado Líder (calcular frete)</span>
@@ -1101,7 +1101,7 @@ export default function PrecosPage() {
             type="button"
             onClick={handleCalculateAll}
             disabled={calculating || listings.length === 0}
-            className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+            className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
             {calculating ? "Calculando…" : "Calcular Todos"}
           </button>
@@ -1109,7 +1109,7 @@ export default function PrecosPage() {
             type="button"
             onClick={handleSavePlannedPrices}
             disabled={saving || dirtyCount === 0}
-            className="rounded border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+            className="rounded-full border border-emerald-600 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Salvando…" : "Salvar preços alterados"}
           </button>
@@ -1117,7 +1117,7 @@ export default function PrecosPage() {
             type="button"
             onClick={handleOpenCampaign}
             disabled={listings.length === 0 || selectedCount === 0}
-            className="rounded border border-indigo-600 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+            className="rounded-full border border-indigo-600 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-700 shadow-sm hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Criar campanha ML ({selectedCount})
           </button>
@@ -1155,26 +1155,32 @@ export default function PrecosPage() {
         </div>
       )}
 
-      <form onSubmit={handleSearchSubmit} className="mb-6 flex flex-wrap gap-3">
-        <input
-          type="text"
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Buscar por título ou MLB…"
-          className="rounded border border-gray-300 px-3 py-2 text-sm"
-        />
-        <input
-          type="text"
-          value={skuFilter}
-          onChange={(e) => setSkuFilter(e.target.value)}
-          placeholder="Filtrar por SKU…"
-          className="rounded border border-gray-300 px-3 py-2 text-sm"
-        />
+      <form onSubmit={handleSearchSubmit} className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex flex-1 items-center gap-2 rounded-full bg-slate-50 px-3 py-1.5 ring-1 ring-slate-200">
+          <span className="text-xs text-slate-500">Buscar</span>
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Título ou MLB…"
+            className="h-7 flex-1 border-0 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+          />
+        </div>
+        <div className="flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1.5 ring-1 ring-slate-200">
+          <span className="text-xs text-slate-500">SKU</span>
+          <input
+            type="text"
+            value={skuFilter}
+            onChange={(e) => setSkuFilter(e.target.value)}
+            placeholder="Filtrar por SKU…"
+            className="w-24 border-0 bg-transparent font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none"
+          />
+        </div>
         <button
           type="submit"
-          className="rounded bg-gray-200 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+          className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/15"
         >
-          Buscar
+          Aplicar filtros
         </button>
         <select
           value={statusFilter}
@@ -1182,14 +1188,14 @@ export default function PrecosPage() {
             setStatusFilter(e.target.value);
             setPage(1);
           }}
-          className="rounded border border-gray-300 px-3 py-2 text-sm"
+          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         >
           <option value="">Todos os status</option>
           <option value="active">Ativo</option>
           <option value="paused">Pausado</option>
           <option value="closed">Fechado</option>
         </select>
-        <label className="flex items-center gap-2 rounded border border-gray-300 bg-white px-3 py-2 text-sm">
+        <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 shadow-sm">
           <input
             type="checkbox"
             checked={linkedOnly}
@@ -1197,11 +1203,11 @@ export default function PrecosPage() {
               setLinkedOnly(e.target.checked);
               setPage(1);
             }}
-            className="rounded border-gray-300"
+            className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary"
           />
           <span>Só vinculados</span>
         </label>
-        <span className="text-sm text-gray-500">Lucratividade:</span>
+        <span className="text-xs text-slate-500">Lucratividade:</span>
         <div className="flex flex-wrap gap-1">
           {(
             [
@@ -1216,7 +1222,7 @@ export default function PrecosPage() {
               key={value || "all"}
               type="button"
               onClick={() => setProfitFilter(value)}
-              className={`rounded px-2 py-1 text-sm font-medium ${
+              className={`rounded-full px-2 py-1 text-xs font-medium ${
                 profitFilter === value
                   ? "bg-brand-blue text-white"
                   : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
@@ -1239,7 +1245,7 @@ export default function PrecosPage() {
               setSortBy("");
               setPage(1);
             }}
-            className="text-sm text-gray-600 underline hover:text-gray-900"
+            className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-800 hover:underline"
           >
             Limpar filtros
           </button>
@@ -1275,11 +1281,11 @@ export default function PrecosPage() {
       )}
 
       {loading ? (
-        <p className="text-gray-500">Carregando anúncios…</p>
+        <p className="text-sm text-slate-500">Carregando anúncios…</p>
       ) : listings.length === 0 ? (
-        <p className="text-gray-500">Nenhum anúncio encontrado com os filtros selecionados.</p>
+        <p className="text-sm text-slate-500">Nenhum anúncio encontrado com os filtros selecionados.</p>
       ) : filteredListings.length === 0 ? (
-        <p className="text-gray-500">
+        <p className="text-sm text-slate-500">
           Nenhum anúncio nesta faixa de lucratividade. Calcule os preços ou escolha outro filtro.
         </p>
       ) : (
@@ -1292,9 +1298,9 @@ export default function PrecosPage() {
             }
             maxHeight="70vh"
           >
-            <thead>
+            <thead className="bg-slate-50">
               <tr>
-                <th className="p-2 font-medium text-gray-700">
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
                   <input
                     type="checkbox"
                     className="rounded border-gray-300"
@@ -1302,12 +1308,20 @@ export default function PrecosPage() {
                     onChange={handleToggleSelectAll}
                   />
                 </th>
-                <th className="p-2 font-medium text-gray-700">Imagem</th>
-                <th className="p-2 font-medium text-gray-700">MLB</th>
-                <th className="p-2 font-medium text-gray-700">Título</th>
-                <th className="p-2 font-medium text-gray-700">SKU</th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Imagem
+                </th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  MLB
+                </th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Título
+                </th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  SKU
+                </th>
                 <th
-                  className="p-2 font-medium text-gray-700 text-right cursor-pointer select-none hover:bg-gray-100 rounded"
+                  className="cursor-pointer select-none rounded p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100"
                   title="Clique para ordenar por vendas (30 dias)"
                   onClick={() => {
                     const next = sortBy === "" ? "sales_desc" : sortBy === "sales_desc" ? "sales_asc" : "";
@@ -1319,24 +1333,42 @@ export default function PrecosPage() {
                   {sortBy === "sales_desc" && " ↓"}
                   {sortBy === "sales_asc" && " ↑"}
                 </th>
-                <th className="p-2 font-medium text-gray-700 text-right" title="Número de pedidos pagos (30 dias)">
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600" title="Número de pedidos pagos (30 dias)">
                   Pedidos (30d)
                 </th>
-                <th className="p-2 font-medium text-gray-700 text-right">Custo</th>
-                <th className="p-2 font-medium text-gray-700 text-right">Preço Atual</th>
-                <th className="p-2 font-medium text-gray-700 text-right" title="Promoção ML exige desconto ≥ 5%">
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Custo
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Preço Atual
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600" title="Promoção ML exige desconto ≥ 5%">
                   Preço Novo
                 </th>
-                <th className="p-2 font-medium text-gray-700 text-right">Taxa ML</th>
-                <th className="p-2 font-medium text-gray-700 text-right">Frete</th>
-                <th className="p-2 font-medium text-gray-700 text-right" title="Imposto sobre o preço">Imposto</th>
-                <th className="p-2 font-medium text-gray-700 text-right" title="Taxa extra sobre o preço">Taxa Extra</th>
-                <th className="p-2 font-medium text-gray-700 text-right" title="Despesas fixas em R$ (cadastrado no produto)">Desp. Fixas</th>
-                <th className="p-2 font-medium text-gray-700 text-right font-semibold">
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Taxa ML
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Frete
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600" title="Imposto sobre o preço">
+                  Imposto
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600" title="Taxa extra sobre o preço">
+                  Taxa Extra
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600" title="Despesas fixas em R$ (cadastrado no produto)">
+                  Desp. Fixas
+                </th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Vai Receber
                 </th>
-                <th className="p-2 font-medium text-gray-700 text-right">Lucro</th>
-                <th className="p-2 font-medium text-gray-700">Link</th>
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Lucro
+                </th>
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Link
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -1355,7 +1387,7 @@ export default function PrecosPage() {
                 return (
                   <tr
                     key={`${listing.id}-${listing.variation_id ?? "item"}`}
-                    className="border-b border-gray-100 hover:bg-gray-50"
+                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5"
                   >
                     <td className="p-2 text-center">
                       <input
@@ -1370,10 +1402,10 @@ export default function PrecosPage() {
                         <img
                           src={listing.thumbnail.replace(/^http:/, "https:")}
                           alt=""
-                          className="h-10 w-10 rounded object-contain"
+                          className="h-10 w-10 rounded-lg border border-slate-100 bg-slate-50 object-contain"
                         />
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-xs text-slate-400">—</span>
                       )}
                     </td>
                     <td
@@ -1382,10 +1414,10 @@ export default function PrecosPage() {
                       onClick={() => handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
                       onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
                       title="Clique para copiar"
-                      className="cursor-pointer select-none font-mono text-xs text-gray-600 hover:bg-gray-100 p-2 rounded"
+                      className="cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100"
                     >
                       {copiedCell === `mlb-${listing.id}-${listing.variation_id ?? "n"}` ? (
-                        <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
+                        <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
                       ) : (
                         listing.item_id
                       )}
@@ -1399,9 +1431,11 @@ export default function PrecosPage() {
                       className="max-w-[200px] truncate p-2 text-sm"
                       title={listing.title ?? ""}
                     >
-                      {listing.title ?? "—"}
+                      <span className="line-clamp-2 text-sm font-medium text-slate-900">
+                        {listing.title ?? "—"}
+                      </span>
                     </td>
-                    <td className="p-2 font-mono text-xs text-gray-600">
+                    <td className="p-2 font-mono text-xs text-slate-700">
                       {listing.sku ? (
                         <span
                           role="button"
@@ -1409,10 +1443,10 @@ export default function PrecosPage() {
                           onClick={() => handleCopyToClipboard(listing.sku!, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
                           onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(listing.sku!, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
                           title="Clique para copiar"
-                          className="cursor-pointer select-none block max-w-full truncate hover:bg-gray-100 p-2 rounded -m-2"
+                          className="cursor-pointer select-none block max-w-full truncate rounded-md bg-slate-50 px-2 py-1 text-left hover:bg-slate-100"
                         >
                           {copiedCell === `sku-${listing.id}-${listing.variation_id ?? "n"}` ? (
-                            <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
+                            <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
                           ) : (
                             listing.sku
                           )}
@@ -1636,12 +1670,12 @@ export default function PrecosPage() {
                           href={listing.permalink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-brand-blue hover:underline text-sm"
+                          className="inline-flex items-center rounded-full bg-primary/10 px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/15"
                         >
-                          ML
+                          Ver no ML
                         </a>
                       ) : (
-                        "—"
+                        <span className="text-xs text-slate-400">—</span>
                       )}
                     </td>
                   </tr>
@@ -1651,26 +1685,49 @@ export default function PrecosPage() {
           </AppTable>
 
           {totalPages > 1 && (
-            <div className="mt-6 flex justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                className="rounded border border-gray-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
-              >
-                Anterior
-              </button>
-              <span className="py-1 text-sm text-gray-600">
-                Página {page} de {totalPages}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                className="rounded border border-gray-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
-              >
-                Próxima
-              </button>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">
+                {profitFilter
+                  ? `${filteredListings.length} de ${listings.length} itens nesta página (filtro de lucro aplicado) · página ${page} de ${totalPages}`
+                  : `Mostrando página ${page} de ${totalPages} · ${total} anúncio(s)`}
+              </p>
+              <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setPage(1)}
+                  disabled={page === 1}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Anterior
+                </button>
+                <span className="px-2 text-xs font-semibold text-slate-800">
+                  {page}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Próxima
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(totalPages)}
+                  disabled={page === totalPages}
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  »
+                </button>
+              </div>
             </div>
           )}
         </>
