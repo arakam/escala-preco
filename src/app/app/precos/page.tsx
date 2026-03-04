@@ -259,6 +259,7 @@ export default function PrecosPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [skuFilter, setSkuFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [linkedOnly, setLinkedOnly] = useState(false);
   const [calculating, setCalculating] = useState(false);
@@ -281,6 +282,8 @@ export default function PrecosPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [campaignOpen, setCampaignOpen] = useState(false);
   const [campaignName, setCampaignName] = useState("");
+  /** Célula copiada (ex: "mlb-id" ou "sku-id") para mostrar "Copiado!" como na tela de anúncios */
+  const [copiedCell, setCopiedCell] = useState<string | null>(null);
   const [campaignStart, setCampaignStart] = useState("");
   const [campaignFinish, setCampaignFinish] = useState("");
   const [campaignLoading, setCampaignLoading] = useState(false);
@@ -751,6 +754,31 @@ export default function PrecosPage() {
     [isMercadoLider]
   );
 
+  const handleCopyToClipboard = useCallback((value: string, cellKey: string) => {
+    if (!value) return;
+    const done = () => {
+      setCopiedCell(cellKey);
+      setTimeout(() => setCopiedCell(null), 1800);
+    };
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(value).then(done).catch(() => {});
+      return;
+    }
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      done();
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const handleSearchSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     setSearch(searchInput.trim());
@@ -790,24 +818,34 @@ export default function PrecosPage() {
   }, []);
 
   const filteredListings = useMemo(() => {
-    if (!profitFilter) return listings;
-    return listings.filter((listing) => {
-      const pct = getProfitPercent(listing);
-      if (pct == null) return false;
-      switch (profitFilter) {
-        case "high":
-          return pct > 20;
-        case "medium":
-          return pct > 10 && pct <= 20;
-        case "low":
-          return pct > 0 && pct <= 10;
-        case "negative":
-          return pct <= 0;
-        default:
-          return true;
-      }
-    });
-  }, [listings, profitFilter, getProfitPercent]);
+    let base = listings;
+
+    if (profitFilter) {
+      base = base.filter((listing) => {
+        const pct = getProfitPercent(listing);
+        if (pct == null) return false;
+        switch (profitFilter) {
+          case "high":
+            return pct > 20;
+          case "medium":
+            return pct > 10 && pct <= 20;
+          case "low":
+            return pct > 0 && pct <= 10;
+          case "negative":
+            return pct <= 0;
+          default:
+            return true;
+        }
+      });
+    }
+
+    const skuTerm = skuFilter.trim().toLowerCase();
+    if (skuTerm) {
+      base = base.filter((listing) => (listing.sku ?? "").toLowerCase().includes(skuTerm));
+    }
+
+    return base;
+  }, [listings, profitFilter, skuFilter, getProfitPercent]);
 
   const sortedListings = useMemo(() => {
     return filteredListings;
@@ -1124,6 +1162,13 @@ export default function PrecosPage() {
           placeholder="Buscar por título ou MLB…"
           className="rounded border border-gray-300 px-3 py-2 text-sm"
         />
+        <input
+          type="text"
+          value={skuFilter}
+          onChange={(e) => setSkuFilter(e.target.value)}
+          placeholder="Filtrar por SKU…"
+          className="rounded border border-gray-300 px-3 py-2 text-sm"
+        />
         <button
           type="submit"
           className="rounded bg-gray-200 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
@@ -1180,12 +1225,13 @@ export default function PrecosPage() {
             </button>
           ))}
         </div>
-        {(search || statusFilter || linkedOnly || profitFilter || sortBy) && (
+        {(search || skuFilter || statusFilter || linkedOnly || profitFilter || sortBy) && (
           <button
             type="button"
             onClick={() => {
               setSearch("");
               setSearchInput("");
+              setSkuFilter("");
               setStatusFilter("active");
               setLinkedOnly(false);
               setProfitFilter("");
@@ -1329,8 +1375,19 @@ export default function PrecosPage() {
                         <span className="text-gray-400">—</span>
                       )}
                     </td>
-                    <td className="p-2 font-mono text-xs text-gray-600">
-                      {listing.item_id}
+                    <td
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
+                      onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
+                      title="Clique para copiar"
+                      className="cursor-pointer select-none font-mono text-xs text-gray-600 hover:bg-gray-100 p-2 rounded"
+                    >
+                      {copiedCell === `mlb-${listing.id}-${listing.variation_id ?? "n"}` ? (
+                        <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
+                      ) : (
+                        listing.item_id
+                      )}
                       {listing.variation_id && (
                         <span className="block text-gray-400">
                           var: {listing.variation_id}
@@ -1344,7 +1401,24 @@ export default function PrecosPage() {
                       {listing.title ?? "—"}
                     </td>
                     <td className="p-2 font-mono text-xs text-gray-600">
-                      {listing.sku ?? "—"}
+                      {listing.sku ? (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => handleCopyToClipboard(listing.sku!, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
+                          onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(listing.sku!, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
+                          title="Clique para copiar"
+                          className="cursor-pointer select-none block max-w-full truncate hover:bg-gray-100 p-2 rounded -m-2"
+                        >
+                          {copiedCell === `sku-${listing.id}-${listing.variation_id ?? "n"}` ? (
+                            <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
+                          ) : (
+                            listing.sku
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
                     </td>
                     <td
                       className="p-2 text-right text-sm tabular-nums"
