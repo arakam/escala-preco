@@ -24,10 +24,10 @@ export function AppTable({ children, summary, maxHeight = "70vh", className = ""
   return (
     <div className={`w-full ${className}`}>
       {summary != null && (
-        <div className="mb-3 text-sm text-gray-600">{summary}</div>
+        <div className="mb-3 text-sm text-secondary dark:text-slate-400">{summary}</div>
       )}
       <div
-        className="w-full overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-sm"
+        className="w-full overflow-x-auto overflow-y-auto rounded-app border border-stroke bg-white shadow-card dark:border-slate-700 dark:bg-slate-800"
         style={maxHeight ? { maxHeight } : undefined}
       >
         <table className="app-table min-w-full text-left text-sm">

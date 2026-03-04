@@ -103,3 +103,29 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ product }, { status: 201 });
 }
+
+export async function DELETE(request: NextRequest) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+  }
+
+  const { error } = await supabase
+    .from("products")
+    .delete()
+    .eq("user_id", user.id);
+
+  if (error) {
+    console.error("Erro ao excluir todos os produtos:", error);
+    return NextResponse.json(
+      { error: "Erro ao excluir todos os produtos" },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ success: true });
+}

@@ -12,6 +12,9 @@ interface CalculateRequest {
     listing_type_id: string;
     category_id: string;
     weight_kg?: number | null;
+    height_cm?: number | null;
+    width_cm?: number | null;
+    length_cm?: number | null;
   }[];
   is_mercado_lider?: boolean;
 }
@@ -101,6 +104,25 @@ export async function POST(req: NextRequest) {
   
   console.log("[Pricing calculate] is_mercado_lider:", isMercadoLider, "shipping ranges count:", shippingRanges?.length ?? 0);
 
+  /** Peso efetivo para frete: o maior entre peso real e peso volumétrico (largura * altura * comprimento)/6000, como o ML usa. */
+  const getEffectiveWeightKg = (
+    weightKg: number | null | undefined,
+    heightCm: number | null | undefined,
+    widthCm: number | null | undefined,
+    lengthCm: number | null | undefined
+  ): number | null => {
+    const real = weightKg != null && weightKg > 0 ? weightKg : null;
+    const h = heightCm != null && heightCm > 0 ? heightCm : null;
+    const w = widthCm != null && widthCm > 0 ? widthCm : null;
+    const l = lengthCm != null && lengthCm > 0 ? lengthCm : null;
+    const volumetric =
+      h != null && w != null && l != null ? (h * w * l) / 6000 : null;
+    if (real != null && volumetric != null) return Math.max(real, volumetric);
+    if (real != null) return real;
+    if (volumetric != null) return volumetric;
+    return null;
+  };
+
   const getShippingCost = (weightKg: number | null | undefined, price: number): number => {
     if (!isMercadoLider) {
       return 0;
@@ -150,9 +172,13 @@ export async function POST(req: NextRequest) {
     try {
       const price = Math.round(item.price * 100) / 100;
       const weightKg = item.weight_kg != null ? Number(item.weight_kg) : null;
-      
-      console.log(`[Pricing calculate] Processing ${item.item_id}: price=${price}, weight_kg=${weightKg}, listing_type_id=${item.listing_type_id}, category_id=${item.category_id}`);
-      
+      const heightCm = item.height_cm != null ? Number(item.height_cm) : null;
+      const widthCm = item.width_cm != null ? Number(item.width_cm) : null;
+      const lengthCm = item.length_cm != null ? Number(item.length_cm) : null;
+      const effectiveWeightKg = getEffectiveWeightKg(weightKg, heightCm, widthCm, lengthCm);
+
+      console.log(`[Pricing calculate] Processing ${item.item_id}: price=${price}, weight_kg=${weightKg}, effective_kg=${effectiveWeightKg}, listing_type_id=${item.listing_type_id}, category_id=${item.category_id}`);
+
       if (price <= 0) {
         results.push({
           item_id: item.item_id,
@@ -172,21 +198,21 @@ export async function POST(req: NextRequest) {
           variation_id: item.variation_id ?? null,
           price,
           fee: 0,
-          shipping_cost: getShippingCost(weightKg, price),
-          net_amount: price - getShippingCost(weightKg, price),
+          shipping_cost: getShippingCost(effectiveWeightKg, price),
+          net_amount: price - getShippingCost(effectiveWeightKg, price),
         });
         continue;
       }
 
       const feeResult = await fetchSaleFee(accessToken, siteId, item.listing_type_id, price, item.category_id);
-      
+
       if (!feeResult) {
         console.warn(`[Pricing calculate] No fee result for ${item.item_id}, listing_type_id=${item.listing_type_id}, category_id=${item.category_id}, price=${price}`);
       }
-      
+
       const fee = feeResult?.fee ?? 0;
 
-      const shippingCost = getShippingCost(weightKg, price);
+      const shippingCost = getShippingCost(effectiveWeightKg, price);
 
       const netAmount = Math.round((price - fee - shippingCost) * 100) / 100;
 

@@ -7,8 +7,8 @@ export default function AppLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-gray-100">
-      <header className="overflow-visible border-b border-blue-800/50 bg-gradient-to-r from-blue-900 via-[#2563eb] to-blue-800">
+    <div className="min-h-screen" style={{ backgroundColor: "var(--body-bg)" }}>
+      <header className="overflow-visible border-b border-primary-darker/50 bg-gradient-to-r from-primary-darker via-primary to-primary-dark">
         <div className="flex h-14 w-full items-center justify-between px-4 py-2">
           <Link href="/app" className="flex items-center gap-2">
             <Image
@@ -19,34 +19,34 @@ export default function AppLayout({
               className="h-16 w-auto object-contain brightness-0 invert sm:h-[4.5rem]"
             />
           </Link>
-          <nav className="flex items-center gap-5">
-            <Link href="/app" className="text-sm font-medium text-blue-100 transition hover:text-white">
+          <nav className="flex items-center gap-1">
+            <Link href="/app" className="rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white">
               Início
             </Link>
-            <Link href="/app/anuncios" className="text-sm font-medium text-blue-100 transition hover:text-white">
+            <Link href="/app/anuncios" className="rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white">
               Anúncios
             </Link>
-            <Link href="/app/atacado" className="text-sm font-medium text-blue-100 transition hover:text-white">
+            <Link href="/app/atacado" className="rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white">
               Atacado
             </Link>
-            <Link href="/app/produtos" className="text-sm font-medium text-blue-100 transition hover:text-white">
+            <Link href="/app/produtos" className="rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white">
               Produtos
             </Link>
-            <Link href="/app/precos" className="text-sm font-medium text-blue-100 transition hover:text-white">
+            <Link href="/app/precos" className="rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white">
               Preço
             </Link>
-            <Link href="/app/configuracao" className="text-sm font-medium text-blue-100 transition hover:text-white">
+            <Link href="/app/configuracao" className="rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white">
               Configuração
             </Link>
             <form action="/api/auth/logout" method="post">
-              <button type="submit" className="text-sm font-medium text-blue-100 transition hover:text-orange-200">
+              <button type="submit" className="rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-orange-200">
                 Sair
               </button>
             </form>
           </nav>
         </div>
       </header>
-      <main className="w-full px-4 py-4">{children}</main>
+      <main className="w-full px-4 py-6" style={{ color: "var(--body-text)" }}>{children}</main>
     </div>
   );
 }

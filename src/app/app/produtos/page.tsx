@@ -57,6 +57,9 @@ export default function ProdutosPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<Product | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ success: boolean; imported?: number; errors?: string[] } | null>(null);
@@ -223,6 +226,23 @@ export default function ProdutosPage() {
     }
   }
 
+  async function handleDeleteAll() {
+    setDeletingAll(true);
+
+    try {
+      const res = await fetch("/api/products", { method: "DELETE" });
+      if (res.ok) {
+        setDeleteAllOpen(false);
+        setPage(1);
+        loadProducts();
+      }
+    } catch {
+      // ignore
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
   async function handleExport() {
     window.location.href = "/api/products/export";
   }
@@ -334,6 +354,13 @@ export default function ProdutosPage() {
             className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Exportar CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => setDeleteAllOpen(true)}
+            className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
+          >
+            Excluir todos os produtos
           </button>
           <button
             type="button"
@@ -788,6 +815,51 @@ export default function ProdutosPage() {
                 className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
               >
                 {deleting ? "Excluindo…" : "Excluir"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar exclusão em massa */}
+      {deleteAllOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setDeleteAllOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirmar exclusão de todos os produtos"
+        >
+          <div
+            className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="mb-4 text-lg font-semibold text-gray-900">Excluir todos os produtos</h2>
+            <p className="mb-3 text-sm text-gray-700 font-medium">
+              Esta ação irá remover <span className="font-semibold">todos os produtos da sua base</span>.
+            </p>
+            <p className="mb-4 text-sm text-gray-600">
+              Os anúncios do Mercado Livre <span className="font-semibold">não serão apagados</span>, apenas ficarão
+              <span className="font-semibold"> desvinculados dos produtos</span>.
+            </p>
+            <p className="mb-6 text-xs text-gray-500">
+              Depois você poderá importar ou vincular novamente os produtos a partir dos anúncios.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteAllOpen(false)}
+                className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteAll}
+                disabled={deletingAll}
+                className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deletingAll ? "Excluindo…" : "Excluir tudo"}
               </button>
             </div>
           </div>

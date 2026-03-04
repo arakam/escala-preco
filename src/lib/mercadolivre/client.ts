@@ -237,20 +237,48 @@ export async function putItem(
   return { ok: false, status: res.status, body: text, json };
 }
 
+/** Resposta de GET /items/{itemId}/prices (API de preços do ML). */
+export interface MLItemPricesResponse {
+  id: string;
+  prices: Array<{
+    id: string;
+    type?: string;
+    amount?: number;
+    regular_amount?: number | null;
+    currency_id?: string;
+    conditions?: { min_purchase_unit?: number; context_restrictions?: string[] };
+  }>;
+}
+
 /**
  * GET /items/{itemId}/prices — lista preços do item (inclui preço por quantidade com show-all-prices).
+ * Documentação: https://developers.mercadolivre.com.br/pt_br/api-de-precos
  */
 export async function getItemPrices(
   itemId: string,
   accessToken: string,
   options: { showAllPrices?: boolean } = {}
-): Promise<{ id: string; prices: Array<{ id: string; type?: string; amount?: number; conditions?: { min_purchase_unit?: number } }> } | null> {
+): Promise<MLItemPricesResponse | null> {
   const url = `https://api.mercadolibre.com/items/${itemId}/prices`;
   const res = await fetchWithRetry(url, accessToken, {
     headers: options.showAllPrices ? { "show-all-prices": "true" } : undefined,
   });
   if (!res.ok) return null;
-  return (await res.json()) as { id: string; prices: Array<{ id: string; type?: string; amount?: number; conditions?: { min_purchase_unit?: number } }> };
+  return (await res.json()) as MLItemPricesResponse;
+}
+
+/**
+ * Extrai o preço padrão (standard) da resposta GET /items/{id}/prices.
+ * Preço standard = preço original sem promoções (recomendado pela API de preços do ML).
+ * Retorna null se não houver preço do tipo "standard".
+ */
+export function getStandardPriceAmount(
+  response: MLItemPricesResponse | null
+): number | null {
+  if (!response?.prices?.length) return null;
+  const standard = response.prices.find((p) => p.type === "standard");
+  if (standard?.amount != null) return Number(standard.amount);
+  return null;
 }
 
 /**

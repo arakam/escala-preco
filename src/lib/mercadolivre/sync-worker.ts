@@ -8,7 +8,7 @@
  *   preenchidos; sem array variations (has_variations = false). Atualização de preço/atacado por item_id.
  */
 import type { MLItemDetail, MLVariationDetail } from "./client";
-import { fetchAllItemIds, fetchItemDetail, fetchVariationDetail, getItemPrices, runWithConcurrency } from "./client";
+import { fetchAllItemIds, fetchItemDetail, fetchVariationDetail, getItemPrices, getStandardPriceAmount, runWithConcurrency } from "./client";
 import { getValidAccessToken } from "./refresh";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
@@ -163,7 +163,10 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     await runWithConcurrency(itemIds, CONCURRENCY, async (itemId) => {
       try {
         const item = await fetchItemDetail(itemId, accessToken);
+        const pricesResponse = await getItemPrices(itemId, accessToken, { showAllPrices: true });
+        const standardPrice = getStandardPriceAmount(pricesResponse);
         const row = mapItemToRow(accountId, item);
+        row.price = standardPrice ?? row.price;
         const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
           onConflict: "account_id,item_id",
         });
@@ -171,7 +174,6 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
           throw itemErr;
         }
 
-        const pricesResponse = await getItemPrices(itemId, accessToken, { showAllPrices: true });
         const wholesaleTiers = buildWholesaleTiers(pricesResponse);
         await (supabase as any)
           .from("ml_items")
@@ -269,13 +271,14 @@ export async function syncSingleItem(
 
   try {
     const item = await fetchItemDetail(itemIdClean, accessToken);
+    const pricesResponse = await getItemPrices(itemIdClean, accessToken, { showAllPrices: true });
+    const standardPrice = getStandardPriceAmount(pricesResponse);
     const row = mapItemToRow(accountId, item);
+    row.price = standardPrice ?? row.price;
     const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
       onConflict: "account_id,item_id",
     });
     if (itemErr) throw itemErr;
-
-    const pricesResponse = await getItemPrices(itemIdClean, accessToken, { showAllPrices: true });
     const wholesaleTiers = buildWholesaleTiers(pricesResponse);
     await (supabase as any)
       .from("ml_items")

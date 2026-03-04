@@ -19,6 +19,9 @@ export interface PricingListingRow {
   product_id: string | null;
   cost_price: number | null;
   weight_kg: number | null;
+  height_cm: number | null;
+  width_cm: number | null;
+  length_cm: number | null;
   tax_percent: number | null;
   extra_fee_percent: number | null;
   account_id: string;
@@ -154,6 +157,9 @@ export async function GET(req: NextRequest) {
         const rawProduct = item.products as Record<string, unknown> | Record<string, unknown>[] | null;
         let productCostPrice: number | null = null;
         let productWeight: number | null = null;
+        let productHeight: number | null = null;
+        let productWidth: number | null = null;
+        let productLength: number | null = null;
         let productSku: string | null = null;
         let productTaxPercent: number | null = null;
         let productExtraFeePercent: number | null = null;
@@ -162,6 +168,9 @@ export async function GET(req: NextRequest) {
           if (prod) {
             productCostPrice = prod.cost_price != null ? Number(prod.cost_price) : null;
             productWeight = prod.weight != null ? Number(prod.weight) : null;
+            productHeight = prod.height != null ? Number(prod.height) : null;
+            productWidth = prod.width != null ? Number(prod.width) : null;
+            productLength = prod.length != null ? Number(prod.length) : null;
             productSku = prod.sku != null ? String(prod.sku) : null;
             productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
             productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
@@ -190,6 +199,9 @@ export async function GET(req: NextRequest) {
           product_id: item.product_id as string | null,
           cost_price: productCostPrice,
           weight_kg: productWeight,
+          height_cm: productHeight,
+          width_cm: productWidth,
+          length_cm: productLength,
           tax_percent: productTaxPercent,
           extra_fee_percent: productExtraFeePercent,
           account_id: item.account_id as string,
@@ -202,7 +214,7 @@ export async function GET(req: NextRequest) {
           .from("ml_items")
           .select(`
             id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id, account_id,
-            products:product_id (id, sku, cost_price, weight, tax_percent, extra_fee_percent)
+            products:product_id (id, sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent)
           `)
           .in("id", itemIdsPage);
         itemsById = new Map((itemsPageData || []).map((i) => [i.id, i as unknown as Record<string, unknown>]));
@@ -214,7 +226,7 @@ export async function GET(req: NextRequest) {
           .from("ml_variations")
           .select(`
             id, item_id, variation_id, price, raw_json, product_id, account_id,
-            products:product_id (id, sku, cost_price, weight, tax_percent, extra_fee_percent)
+            products:product_id (id, sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent)
           `)
           .in("id", variationIdsPage);
         const varItemIdsPage = Array.from(new Set((varsPageData || []).map((v) => v.item_id)));
@@ -242,6 +254,9 @@ export async function GET(req: NextRequest) {
         const rawProduct = variation.products as Record<string, unknown> | Record<string, unknown>[] | null;
         let productCostPrice: number | null = null;
         let productWeight: number | null = null;
+        let productHeight: number | null = null;
+        let productWidth: number | null = null;
+        let productLength: number | null = null;
         let productSku: string | null = null;
         let productTaxPercent: number | null = null;
         let productExtraFeePercent: number | null = null;
@@ -250,6 +265,9 @@ export async function GET(req: NextRequest) {
           if (prod) {
             productCostPrice = prod.cost_price != null ? Number(prod.cost_price) : null;
             productWeight = prod.weight != null ? Number(prod.weight) : null;
+            productHeight = prod.height != null ? Number(prod.height) : null;
+            productWidth = prod.width != null ? Number(prod.width) : null;
+            productLength = prod.length != null ? Number(prod.length) : null;
             productSku = prod.sku != null ? String(prod.sku) : null;
             productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
             productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
@@ -295,6 +313,9 @@ export async function GET(req: NextRequest) {
           product_id: variation.product_id as string | null,
           cost_price: productCostPrice,
           weight_kg: productWeight,
+          height_cm: productHeight,
+          width_cm: productWidth,
+          length_cm: productLength,
           tax_percent: productTaxPercent,
           extra_fee_percent: productExtraFeePercent,
           account_id: variation.account_id as string,
@@ -335,6 +356,9 @@ export async function GET(req: NextRequest) {
           sku,
           cost_price,
           weight,
+          height,
+          width,
+          length,
           tax_percent,
           extra_fee_percent
         )
@@ -369,6 +393,9 @@ export async function GET(req: NextRequest) {
       const rawProduct = item.products as Record<string, unknown> | Record<string, unknown>[] | null;
       let productCostPrice: number | null = null;
       let productWeight: number | null = null;
+      let productHeight: number | null = null;
+      let productWidth: number | null = null;
+      let productLength: number | null = null;
       let productSku: string | null = null;
       let productTaxPercent: number | null = null;
       let productExtraFeePercent: number | null = null;
@@ -378,6 +405,9 @@ export async function GET(req: NextRequest) {
         if (prod) {
           productCostPrice = prod.cost_price != null ? Number(prod.cost_price) : null;
           productWeight = prod.weight != null ? Number(prod.weight) : null;
+          productHeight = prod.height != null ? Number(prod.height) : null;
+          productWidth = prod.width != null ? Number(prod.width) : null;
+          productLength = prod.length != null ? Number(prod.length) : null;
           productSku = prod.sku != null ? String(prod.sku) : null;
           productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
           productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
@@ -415,6 +445,9 @@ export async function GET(req: NextRequest) {
         product_id: item.product_id,
         cost_price: productCostPrice,
         weight_kg: productWeight,
+        height_cm: productHeight,
+        width_cm: productWidth,
+        length_cm: productLength,
         tax_percent: productTaxPercent,
         extra_fee_percent: productExtraFeePercent,
         account_id: item.account_id,
@@ -436,6 +469,9 @@ export async function GET(req: NextRequest) {
           sku,
           cost_price,
           weight,
+          height,
+          width,
+          length,
           tax_percent,
           extra_fee_percent
         )
@@ -470,6 +506,9 @@ export async function GET(req: NextRequest) {
         const rawProduct = variation.products as Record<string, unknown> | Record<string, unknown>[] | null;
         let productCostPrice: number | null = null;
         let productWeight: number | null = null;
+        let productHeight: number | null = null;
+        let productWidth: number | null = null;
+        let productLength: number | null = null;
         let productSku: string | null = null;
         let productTaxPercent: number | null = null;
         let productExtraFeePercent: number | null = null;
@@ -479,6 +518,9 @@ export async function GET(req: NextRequest) {
           if (prod) {
             productCostPrice = prod.cost_price != null ? Number(prod.cost_price) : null;
             productWeight = prod.weight != null ? Number(prod.weight) : null;
+            productHeight = prod.height != null ? Number(prod.height) : null;
+            productWidth = prod.width != null ? Number(prod.width) : null;
+            productLength = prod.length != null ? Number(prod.length) : null;
             productSku = prod.sku != null ? String(prod.sku) : null;
             productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
             productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
@@ -534,6 +576,9 @@ export async function GET(req: NextRequest) {
           product_id: variation.product_id,
           cost_price: productCostPrice,
           weight_kg: productWeight,
+          height_cm: productHeight,
+          width_cm: productWidth,
+          length_cm: productLength,
           tax_percent: productTaxPercent,
           extra_fee_percent: productExtraFeePercent,
           account_id: variation.account_id,

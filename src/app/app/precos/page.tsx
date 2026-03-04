@@ -18,6 +18,9 @@ interface PricingListing {
   product_id: string | null;
   cost_price: number | null;
   weight_kg: number | null;
+  height_cm: number | null;
+  width_cm: number | null;
+  length_cm: number | null;
   tax_percent: number | null;
   extra_fee_percent: number | null;
   account_id: string;
@@ -193,7 +196,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <h3 className="mb-2 font-medium text-gray-900">Mercado Líder</h3>
             <p>
               Se sua conta é Mercado Líder, marque a opção para incluir o custo de frete no cálculo.
-              O frete é calculado com base no peso do produto cadastrado.
+              O frete usa o maior entre peso real e peso volumétrico (altura × largura × comprimento ÷ 6000), como no Mercado Livre.
             </p>
           </section>
 
@@ -399,6 +402,9 @@ export default function PrecosPage() {
           listing_type_id: item.listing_type_id!,
           category_id: item.category_id!,
           weight_kg: item.weight_kg,
+          height_cm: item.height_cm,
+          width_cm: item.width_cm,
+          length_cm: item.length_cm,
         }));
 
       if (itemsToCalculate.length === 0) return;
@@ -488,6 +494,9 @@ export default function PrecosPage() {
           listing_type_id: item.listing_type_id!,
           category_id: item.category_id!,
           weight_kg: item.weight_kg,
+          height_cm: item.height_cm,
+          width_cm: item.width_cm,
+          length_cm: item.length_cm,
         }));
 
       if (itemsToCalculate.length === 0) {
@@ -619,6 +628,9 @@ export default function PrecosPage() {
                 listing_type_id: listing.listing_type_id,
                 category_id: listing.category_id,
                 weight_kg: listing.weight_kg,
+                height_cm: listing.height_cm,
+                width_cm: listing.width_cm,
+                length_cm: listing.length_cm,
               },
             ],
             is_mercado_lider: isMercadoLider,
@@ -717,6 +729,13 @@ export default function PrecosPage() {
 
   const selectedCount = useMemo(() => selectedIds.size, [selectedIds]);
 
+  /** Mercado Livre exige desconto ≥ 5% na promoção: preço novo deve ser ≤ 95% do preço atual. */
+  const isValidForCampaign = useCallback((listing: ListingWithPricing): boolean => {
+    if (listing.current_price <= 0 || listing.new_price <= 0) return false;
+    const minNewPrice = listing.current_price * 0.95;
+    return listing.new_price <= minNewPrice;
+  }, []);
+
   const handleToggleSelectAll = useCallback(() => {
     if (selectedIds.size === sortedListings.length) {
       setSelectedIds(new Set());
@@ -740,6 +759,18 @@ export default function PrecosPage() {
   }, []);
 
   const handleOpenCampaign = useCallback(() => {
+    const selectedListings = listings.filter((l) => selectedIds.has(l.id));
+    const invalidForCampaign = selectedListings.filter((l) => !isValidForCampaign(l));
+    if (invalidForCampaign.length > 0) {
+      const names = invalidForCampaign.map((l) => l.title || l.item_id).slice(0, 5);
+      const more = invalidForCampaign.length > 5 ? ` e mais ${invalidForCampaign.length - 5}` : "";
+      setCampaignMessage({
+        type: "error",
+        text: `O Mercado Livre exige desconto ≥ 5% na promoção. ${invalidForCampaign.length} item(ns) selecionado(s) não atendem: ${names.join(", ")}${more}. Ajuste o preço ou desmarque-os.`,
+      });
+      return;
+    }
+    setCampaignMessage(null);
     const today = new Date();
     const toDateInput = (d: Date) => d.toISOString().slice(0, 10);
     const start = toDateInput(today);
@@ -750,11 +781,11 @@ export default function PrecosPage() {
     setCampaignFinish(finish);
     if (!campaignName) {
       const month = (today.getMonth() + 1).toString().padStart(2, "0");
-      const year = today.getFullYear();
-      setCampaignName(`Campanha preços ${month}/${year}`);
+      const year = today.getFullYear().toString().slice(-2);
+      setCampaignName(`EP ${month}-${year}`);
     }
     setCampaignOpen(true);
-  }, [campaignName]);
+  }, [campaignName, selectedIds, listings, isValidForCampaign]);
 
   const handleCreateCampaign = useCallback(async () => {
     if (!campaignName.trim()) {
@@ -771,7 +802,15 @@ export default function PrecosPage() {
     }
 
     const selectedListingsForCampaign = listings.filter((l) => selectedIds.has(l.id));
-    const items = selectedListingsForCampaign.map((l) => ({
+    const validListings = selectedListingsForCampaign.filter((l) => isValidForCampaign(l));
+    if (validListings.length === 0) {
+      setCampaignMessage({
+        type: "error",
+        text: "Nenhum item selecionado atende ao desconto mínimo de 5% do Mercado Livre. Ajuste o preço ou desmarque e selecione outros.",
+      });
+      return;
+    }
+    const items = validListings.map((l) => ({
       item_id: l.item_id,
       variation_id: l.variation_id,
     }));
@@ -807,9 +846,11 @@ export default function PrecosPage() {
       const errors = summary.errors ?? 0;
       const campaign = (data as { campaign?: { id?: string } }).campaign;
 
+      const excluded = selectedListingsForCampaign.length - validListings.length;
+      const excludedText = excluded > 0 ? ` ${excluded} ignorado(s) (desconto < 5%).` : "";
       setCampaignMessage({
         type: "ok",
-        text: `Campanha criada${campaign?.id ? ` (${campaign.id})` : ""}: ${applied} item(s) incluído(s), ${skipped} sem preço salvo, ${errors} com erro.`,
+        text: `Campanha criada${campaign?.id ? ` (${campaign.id})` : ""}: ${applied} item(s) incluído(s), ${skipped} sem preço salvo, ${errors} com erro.${excludedText}`,
       });
       setSelectedIds(new Set());
       setCampaignOpen(false);
@@ -822,7 +863,7 @@ export default function PrecosPage() {
     } finally {
       setCampaignLoading(false);
     }
-  }, [campaignName, campaignStart, campaignFinish, selectedIds, listings]);
+  }, [campaignName, campaignStart, campaignFinish, selectedIds, listings, isValidForCampaign]);
 
   if (loading && listings.length === 0) {
     return (
@@ -1150,7 +1191,9 @@ export default function PrecosPage() {
                 </th>
                 <th className="p-2 font-medium text-gray-700 text-right">Custo</th>
                 <th className="p-2 font-medium text-gray-700 text-right">Preço Atual</th>
-                <th className="p-2 font-medium text-gray-700 text-right">Preço Novo</th>
+                <th className="p-2 font-medium text-gray-700 text-right" title="Promoção ML exige desconto ≥ 5%">
+                  Preço Novo
+                </th>
                 <th className="p-2 font-medium text-gray-700 text-right">Taxa ML</th>
                 <th className="p-2 font-medium text-gray-700 text-right">Frete</th>
                 <th className="p-2 font-medium text-gray-700 text-right" title="Imposto sobre o preço">Imposto</th>
@@ -1265,18 +1308,28 @@ export default function PrecosPage() {
                       R$ {formatBRL(listing.current_price)}
                     </td>
                     <td className="p-2">
-                      <PriceInput
-                        value={listing.new_price}
-                        onChange={(newValue) =>
-                          handlePriceChange(
-                            listing.id,
-                            listing.variation_id,
-                            String(newValue)
-                          )
-                        }
-                        onCommit={() => handleCalculateSingle(listing)}
-                        dirty={listing.dirty}
-                      />
+                      <div className="flex flex-col items-end gap-0.5">
+                        <PriceInput
+                          value={listing.new_price}
+                          onChange={(newValue) =>
+                            handlePriceChange(
+                              listing.id,
+                              listing.variation_id,
+                              String(newValue)
+                            )
+                          }
+                          onCommit={() => handleCalculateSingle(listing)}
+                          dirty={listing.dirty}
+                        />
+                        {listing.current_price > 0 && listing.new_price > 0 && !isValidForCampaign(listing) && (
+                          <span
+                            className="text-xs text-amber-600 whitespace-nowrap"
+                            title="Promoção no ML exige desconto ≥ 5% sobre o preço atual"
+                          >
+                            Desconto &lt; 5%
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-2 text-right text-sm">
                       {listing.calculating ? (
