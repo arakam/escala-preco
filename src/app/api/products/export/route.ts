@@ -13,7 +13,7 @@ export async function GET() {
 
   const { data: products, error } = await supabase
     .from("products")
-    .select("sku, title, description, ean, height, width, length, weight, cost_price, sale_price")
+    .select("sku, title, description, ean, height, width, length, weight, cost_price, fixed_expenses")
     .eq("user_id", user.id)
     .order("sku", { ascending: true });
 
@@ -22,7 +22,7 @@ export async function GET() {
     return NextResponse.json({ error: "Erro ao exportar produtos" }, { status: 500 });
   }
 
-  const headers = ["SKU", "Titulo", "Descricao", "EAN", "Altura", "Largura", "Comprimento", "Peso", "PrecoCusto", "PrecoVenda"];
+  const headers = ["SKU", "Titulo", "Descricao", "EAN", "Altura", "Largura", "Comprimento", "Peso", "PrecoCusto", "DespFixas"];
   
   const escapeCSV = (value: string | number | null | undefined): string => {
     if (value === null || value === undefined) return "";
@@ -43,7 +43,7 @@ export async function GET() {
     escapeCSV(p.length),
     escapeCSV(p.weight),
     escapeCSV(p.cost_price),
-    escapeCSV(p.sale_price),
+    escapeCSV(p.fixed_expenses),
   ].join(";"));
 
   const csv = [headers.join(";"), ...rows].join("\n");

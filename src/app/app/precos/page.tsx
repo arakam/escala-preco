@@ -23,6 +23,7 @@ interface PricingListing {
   length_cm: number | null;
   tax_percent: number | null;
   extra_fee_percent: number | null;
+  fixed_expenses: number | null;
   account_id: string;
 }
 
@@ -32,6 +33,7 @@ interface CalculatedPricing {
   shipping_cost: number;
   tax_amount: number;
   extra_fee_amount: number;
+  fixed_expenses_amount: number;
   net_amount: number;
 }
 
@@ -116,12 +118,13 @@ function PriceInput({
 }
 
 function calculateFullPricing(
-  listing: { tax_percent: number | null; extra_fee_percent: number | null },
+  listing: { tax_percent: number | null; extra_fee_percent: number | null; fixed_expenses: number | null },
   result: { price: number; fee: number; shipping_cost: number }
 ): CalculatedPricing {
   const taxAmount = listing.tax_percent ? (result.price * listing.tax_percent / 100) : 0;
   const extraFeeAmount = listing.extra_fee_percent ? (result.price * listing.extra_fee_percent / 100) : 0;
-  const netAmount = result.price - result.fee - result.shipping_cost - taxAmount - extraFeeAmount;
+  const fixedExpensesAmount = listing.fixed_expenses != null && listing.fixed_expenses > 0 ? listing.fixed_expenses : 0;
+  const netAmount = result.price - result.fee - result.shipping_cost - taxAmount - extraFeeAmount - fixedExpensesAmount;
   
   return {
     price: result.price,
@@ -129,6 +132,7 @@ function calculateFullPricing(
     shipping_cost: result.shipping_cost,
     tax_amount: Math.round(taxAmount * 100) / 100,
     extra_fee_amount: Math.round(extraFeeAmount * 100) / 100,
+    fixed_expenses_amount: Math.round(fixedExpensesAmount * 100) / 100,
     net_amount: Math.round(netAmount * 100) / 100,
   };
 }
@@ -176,7 +180,8 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li><strong>Frete:</strong> Custo de frete (apenas para contas Mercado Líder)</li>
               <li><strong>Imposto:</strong> Valor do imposto calculado sobre o preço (% cadastrado no produto)</li>
               <li><strong>Taxa Extra:</strong> Taxa extra calculada sobre o preço (% cadastrado no produto)</li>
-              <li><strong>Vai Receber:</strong> Valor líquido após descontar taxa ML, frete, imposto e taxa extra</li>
+              <li><strong>Desp. Fixas:</strong> Despesas fixas em R$ (valor cadastrado no produto, descontado do líquido)</li>
+              <li><strong>Vai Receber:</strong> Valor líquido após descontar taxa ML, frete, imposto, taxa extra e despesas fixas</li>
               <li><strong>Lucro:</strong> Diferença entre o valor recebido e o custo do produto</li>
             </ul>
           </section>
@@ -210,14 +215,14 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </section>
 
           <section>
-            <h3 className="mb-2 font-medium text-gray-900">Imposto e Taxa Extra</h3>
+            <h3 className="mb-2 font-medium text-gray-900">Imposto, Taxa Extra e Desp. Fixas</h3>
             <p className="mb-2">
-              Os percentuais de imposto e taxa extra são cadastrados na página de Produtos.
-              Esses valores são calculados sobre o preço de venda e descontados para calcular o lucro real.
+              Imposto e taxa extra (percentuais) e despesas fixas (valor em R$) são cadastrados na página de Produtos.
+              Imposto e taxa extra são calculados sobre o preço de venda; despesas fixas são um valor fixo em R$ descontado do líquido.
             </p>
             <p className="text-gray-600">
-              Exemplo: Produto com 10% de imposto e 5% de taxa extra vendido a R$ 100,00:
-              <br />Imposto = R$ 10,00 | Taxa Extra = R$ 5,00
+              Exemplo: Produto com 10% de imposto, 5% de taxa extra e R$ 2,00 de desp. fixas vendido a R$ 100,00:
+              <br />Imposto = R$ 10,00 | Taxa Extra = R$ 5,00 | Desp. Fixas = R$ 2,00
             </p>
           </section>
 
@@ -226,7 +231,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <ul className="list-inside list-disc space-y-1">
               <li>Anúncios sem tipo de listagem (N/D) precisam ser sincronizados novamente</li>
               <li>Para ter o custo, vincule o anúncio a um produto na página de Produtos</li>
-              <li>Imposto e taxa extra são calculados apenas se cadastrados no produto vinculado</li>
+              <li>Imposto, taxa extra e desp. fixas são considerados apenas se cadastrados no produto vinculado</li>
               <li>Os preços salvos ficam vinculados ao MLB e ao SKU; ao reabrir a página, o &quot;Preço Novo&quot; virá do último valor salvo</li>
               <li>Esta ferramenta não altera os preços no Mercado Livre; ela apenas calcula e guarda o preço planejado</li>
             </ul>
@@ -1279,6 +1284,7 @@ export default function PrecosPage() {
                 <th className="p-2 font-medium text-gray-700 text-right">Frete</th>
                 <th className="p-2 font-medium text-gray-700 text-right" title="Imposto sobre o preço">Imposto</th>
                 <th className="p-2 font-medium text-gray-700 text-right" title="Taxa extra sobre o preço">Taxa Extra</th>
+                <th className="p-2 font-medium text-gray-700 text-right" title="Despesas fixas em R$ (cadastrado no produto)">Desp. Fixas</th>
                 <th className="p-2 font-medium text-gray-700 text-right font-semibold">
                   Vai Receber
                 </th>
@@ -1483,6 +1489,26 @@ export default function PrecosPage() {
                         >
                           {listing.calculated.extra_fee_amount > 0
                             ? `R$ ${formatBRL(listing.calculated.extra_fee_amount)}`
+                            : "—"}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="p-2 text-right text-sm">
+                      {listing.calculating ? (
+                        <span className="text-gray-400">…</span>
+                      ) : listing.calculated ? (
+                        <span
+                          className={
+                            listing.calculated.fixed_expenses_amount > 0
+                              ? "text-indigo-600"
+                              : "text-gray-400"
+                          }
+                          title={listing.fixed_expenses != null ? `R$ ${formatBRL(listing.fixed_expenses)}` : undefined}
+                        >
+                          {listing.calculated.fixed_expenses_amount > 0
+                            ? `R$ ${formatBRL(listing.calculated.fixed_expenses_amount)}`
                             : "—"}
                         </span>
                       ) : (

@@ -24,6 +24,7 @@ export interface PricingListingRow {
   length_cm: number | null;
   tax_percent: number | null;
   extra_fee_percent: number | null;
+  fixed_expenses: number | null;
   account_id: string;
 }
 
@@ -163,6 +164,7 @@ export async function GET(req: NextRequest) {
         let productSku: string | null = null;
         let productTaxPercent: number | null = null;
         let productExtraFeePercent: number | null = null;
+        let productFixedExpenses: number | null = null;
         if (rawProduct) {
           const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
           if (prod) {
@@ -174,6 +176,7 @@ export async function GET(req: NextRequest) {
             productSku = prod.sku != null ? String(prod.sku) : null;
             productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
             productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
+            productFixedExpenses = prod.fixed_expenses != null ? Number(prod.fixed_expenses) : null;
           }
         }
         const rawJson = item.raw_json as Record<string, unknown> | null;
@@ -204,6 +207,7 @@ export async function GET(req: NextRequest) {
           length_cm: productLength,
           tax_percent: productTaxPercent,
           extra_fee_percent: productExtraFeePercent,
+          fixed_expenses: productFixedExpenses,
           account_id: item.account_id as string,
         };
       };
@@ -214,7 +218,7 @@ export async function GET(req: NextRequest) {
           .from("ml_items")
           .select(`
             id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id, account_id,
-            products:product_id (id, sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent)
+            products:product_id (id, sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
           `)
           .in("id", itemIdsPage);
         itemsById = new Map((itemsPageData || []).map((i) => [i.id, i as unknown as Record<string, unknown>]));
@@ -226,7 +230,7 @@ export async function GET(req: NextRequest) {
           .from("ml_variations")
           .select(`
             id, item_id, variation_id, price, raw_json, product_id, account_id,
-            products:product_id (id, sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent)
+            products:product_id (id, sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
           `)
           .in("id", variationIdsPage);
         const varItemIdsPage = Array.from(new Set((varsPageData || []).map((v) => v.item_id)));
@@ -260,6 +264,7 @@ export async function GET(req: NextRequest) {
         let productSku: string | null = null;
         let productTaxPercent: number | null = null;
         let productExtraFeePercent: number | null = null;
+        let productFixedExpenses: number | null = null;
         if (rawProduct) {
           const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
           if (prod) {
@@ -271,6 +276,7 @@ export async function GET(req: NextRequest) {
             productSku = prod.sku != null ? String(prod.sku) : null;
             productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
             productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
+            productFixedExpenses = prod.fixed_expenses != null ? Number(prod.fixed_expenses) : null;
           }
         }
         const rawJson = variation.raw_json as Record<string, unknown> | null;
@@ -318,6 +324,7 @@ export async function GET(req: NextRequest) {
           length_cm: productLength,
           tax_percent: productTaxPercent,
           extra_fee_percent: productExtraFeePercent,
+          fixed_expenses: productFixedExpenses,
           account_id: variation.account_id as string,
         });
       }
@@ -360,7 +367,8 @@ export async function GET(req: NextRequest) {
           width,
           length,
           tax_percent,
-          extra_fee_percent
+          extra_fee_percent,
+          fixed_expenses
         )
       `, { count: "exact" })
       .eq("account_id", account.id)
@@ -399,6 +407,7 @@ export async function GET(req: NextRequest) {
       let productSku: string | null = null;
       let productTaxPercent: number | null = null;
       let productExtraFeePercent: number | null = null;
+      let productFixedExpenses: number | null = null;
       
       if (rawProduct) {
         const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
@@ -411,6 +420,7 @@ export async function GET(req: NextRequest) {
           productSku = prod.sku != null ? String(prod.sku) : null;
           productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
           productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
+          productFixedExpenses = prod.fixed_expenses != null ? Number(prod.fixed_expenses) : null;
         }
       }
       
@@ -450,6 +460,7 @@ export async function GET(req: NextRequest) {
         length_cm: productLength,
         tax_percent: productTaxPercent,
         extra_fee_percent: productExtraFeePercent,
+        fixed_expenses: productFixedExpenses,
         account_id: item.account_id,
       });
     }
@@ -473,7 +484,8 @@ export async function GET(req: NextRequest) {
           width,
           length,
           tax_percent,
-          extra_fee_percent
+          extra_fee_percent,
+          fixed_expenses
         )
       `, { count: "exact" })
       .eq("account_id", account.id);
@@ -512,6 +524,7 @@ export async function GET(req: NextRequest) {
         let productSku: string | null = null;
         let productTaxPercent: number | null = null;
         let productExtraFeePercent: number | null = null;
+        let productFixedExpenses: number | null = null;
         
         if (rawProduct) {
           const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
@@ -524,6 +537,7 @@ export async function GET(req: NextRequest) {
             productSku = prod.sku != null ? String(prod.sku) : null;
             productTaxPercent = prod.tax_percent != null ? Number(prod.tax_percent) : null;
             productExtraFeePercent = prod.extra_fee_percent != null ? Number(prod.extra_fee_percent) : null;
+            productFixedExpenses = prod.fixed_expenses != null ? Number(prod.fixed_expenses) : null;
           }
         }
         
@@ -581,6 +595,7 @@ export async function GET(req: NextRequest) {
           length_cm: productLength,
           tax_percent: productTaxPercent,
           extra_fee_percent: productExtraFeePercent,
+          fixed_expenses: productFixedExpenses,
           account_id: variation.account_id,
         });
       }

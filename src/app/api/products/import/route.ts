@@ -11,9 +11,9 @@ interface ParsedProduct {
   length: number | null;
   weight: number | null;
   cost_price: number | null;
-  sale_price: number | null;
   tax_percent: number | null;
   extra_fee_percent: number | null;
+  fixed_expenses: number | null;
 }
 
 function detectSeparator(headerLine: string): string {
@@ -72,7 +72,7 @@ function parsePrice(value: string): number | null {
   return parseNumber(value, 9999999999);
 }
 
-const EXPECTED_HEADERS = ["sku", "titulo", "altura", "largura", "comprimento", "peso", "precocusto", "precovenda", "imposto", "taxaextra"];
+const EXPECTED_HEADERS = ["sku", "titulo", "altura", "largura", "comprimento", "peso", "precocusto", "imposto", "taxaextra", "despfixas"];
 
 const VALID_HEADER_ALIASES: Record<string, string[]> = {
   sku: ["sku"],
@@ -82,9 +82,9 @@ const VALID_HEADER_ALIASES: Record<string, string[]> = {
   comprimento: ["comprimento", "length", "profundidade"],
   peso: ["peso", "weight"],
   precocusto: ["precocusto", "cost_price", "custo", "preco_custo"],
-  precovenda: ["precovenda", "sale_price", "venda", "preco", "preco_venda"],
   imposto: ["imposto", "tax_percent", "tax", "impostos"],
   taxaextra: ["taxaextra", "extra_fee_percent", "extra_fee", "taxa_extra", "extra"],
+  despfixas: ["despfixas", "fixed_expenses", "despesas_fixas", "desp_fixas"],
 };
 
 function normalizeHeader(header: string): string | null {
@@ -166,9 +166,9 @@ export async function POST(request: NextRequest) {
     length: normalized.get("comprimento") ?? -1,
     weight: normalized.get("peso") ?? -1,
     cost_price: normalized.get("precocusto") ?? -1,
-    sale_price: normalized.get("precovenda") ?? -1,
     tax_percent: normalized.get("imposto") ?? -1,
     extra_fee_percent: normalized.get("taxaextra") ?? -1,
+    fixed_expenses: normalized.get("despfixas") ?? -1,
   };
 
   const products: ParsedProduct[] = [];
@@ -200,9 +200,9 @@ export async function POST(request: NextRequest) {
       length: colIndex.length >= 0 ? parseDimension(values[colIndex.length]) : null,
       weight: colIndex.weight >= 0 ? parseDimension(values[colIndex.weight]) : null,
       cost_price: colIndex.cost_price >= 0 ? parsePrice(values[colIndex.cost_price]) : null,
-      sale_price: colIndex.sale_price >= 0 ? parsePrice(values[colIndex.sale_price]) : null,
       tax_percent: colIndex.tax_percent >= 0 ? parseNumber(values[colIndex.tax_percent], 100) : null,
       extra_fee_percent: colIndex.extra_fee_percent >= 0 ? parseNumber(values[colIndex.extra_fee_percent], 100) : null,
+      fixed_expenses: colIndex.fixed_expenses >= 0 ? parsePrice(values[colIndex.fixed_expenses]) : null,
     });
   }
 

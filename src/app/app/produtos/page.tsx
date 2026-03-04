@@ -14,9 +14,9 @@ interface ProductFormData {
   length: string;
   weight: string;
   cost_price: string;
-  sale_price: string;
   tax_percent: string;
   extra_fee_percent: string;
+  fixed_expenses: string;
 }
 
 const emptyForm: ProductFormData = {
@@ -29,9 +29,9 @@ const emptyForm: ProductFormData = {
   length: "",
   weight: "",
   cost_price: "",
-  sale_price: "",
   tax_percent: "",
   extra_fee_percent: "",
+  fixed_expenses: "",
 };
 
 type ViewMode = "products" | "stats";
@@ -142,9 +142,9 @@ export default function ProdutosPage() {
       length: product.length?.toString() ?? "",
       weight: product.weight?.toString() ?? "",
       cost_price: product.cost_price?.toString() ?? "",
-      sale_price: product.sale_price?.toString() ?? "",
       tax_percent: product.tax_percent?.toString() ?? "",
       extra_fee_percent: product.extra_fee_percent?.toString() ?? "",
+      fixed_expenses: product.fixed_expenses?.toString() ?? "",
     });
     setFormError(null);
     setModalOpen(true);
@@ -177,9 +177,9 @@ export default function ProdutosPage() {
       length: form.length ? parseFloat(form.length.replace(",", ".")) : null,
       weight: form.weight ? parseFloat(form.weight.replace(",", ".")) : null,
       cost_price: form.cost_price ? parseFloat(form.cost_price.replace(",", ".")) : null,
-      sale_price: form.sale_price ? parseFloat(form.sale_price.replace(",", ".")) : null,
       tax_percent: form.tax_percent ? parseFloat(form.tax_percent.replace(",", ".")) : null,
       extra_fee_percent: form.extra_fee_percent ? parseFloat(form.extra_fee_percent.replace(",", ".")) : null,
+      fixed_expenses: form.fixed_expenses ? parseFloat(form.fixed_expenses.replace(",", ".")) : null,
     };
 
     try {
@@ -463,9 +463,9 @@ export default function ProdutosPage() {
                   <th className="p-2 font-medium text-gray-700">SKU</th>
                   <th className="p-2 font-medium text-gray-700">Título</th>
                   <th className="p-2 font-medium text-gray-700">Custo (R$)</th>
-                  <th className="p-2 font-medium text-gray-700">Venda (R$)</th>
                   <th className="p-2 font-medium text-gray-700">Imposto (%)</th>
                   <th className="p-2 font-medium text-gray-700">Taxa Extra (%)</th>
+                  <th className="p-2 font-medium text-gray-700">Desp. Fixas (R$)</th>
                   <th className="p-2 font-medium text-gray-700">Altura (cm)</th>
                   <th className="p-2 font-medium text-gray-700">Largura (cm)</th>
                   <th className="p-2 font-medium text-gray-700">Comprimento (cm)</th>
@@ -482,9 +482,9 @@ export default function ProdutosPage() {
                       {product.title}
                     </td>
                     <td className="p-2 text-right">{product.cost_price != null ? Number(product.cost_price).toFixed(2) : "—"}</td>
-                    <td className="p-2 text-right font-medium">{product.sale_price != null ? Number(product.sale_price).toFixed(2) : "—"}</td>
                     <td className="p-2 text-right">{product.tax_percent != null ? Number(product.tax_percent).toFixed(2) : "—"}</td>
                     <td className="p-2 text-right">{product.extra_fee_percent != null ? Number(product.extra_fee_percent).toFixed(2) : "—"}</td>
+                    <td className="p-2 text-right">{product.fixed_expenses != null ? Number(product.fixed_expenses).toFixed(2) : "—"}</td>
                     <td className="p-2 text-right">{product.height ?? "—"}</td>
                     <td className="p-2 text-right">{product.width ?? "—"}</td>
                     <td className="p-2 text-right">{product.length ?? "—"}</td>
@@ -730,16 +730,6 @@ export default function ProdutosPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Preço de Venda (R$)</label>
-                  <input
-                    type="text"
-                    value={form.sale_price}
-                    onChange={(e) => setForm({ ...form, sale_price: e.target.value })}
-                    placeholder="0,00"
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
-                  />
-                </div>
-                <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">Imposto (%)</label>
                   <input
                     type="text"
@@ -755,6 +745,16 @@ export default function ProdutosPage() {
                     type="text"
                     value={form.extra_fee_percent}
                     onChange={(e) => setForm({ ...form, extra_fee_percent: e.target.value })}
+                    placeholder="0,00"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Desp. Fixas (R$)</label>
+                  <input
+                    type="text"
+                    value={form.fixed_expenses}
+                    onChange={(e) => setForm({ ...form, fixed_expenses: e.target.value })}
                     placeholder="0,00"
                     className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
                   />
@@ -899,7 +899,7 @@ export default function ProdutosPage() {
             <form onSubmit={handleImport} className="p-4">
               <p className="mb-4 text-sm text-gray-600">
                 O arquivo CSV deve conter a coluna <strong>SKU</strong> (obrigatório),
-                e opcionalmente: Titulo, Altura, Largura, Comprimento, Peso, PrecoCusto, PrecoVenda, Imposto, TaxaExtra.
+                e opcionalmente: Titulo, Altura, Largura, Comprimento, Peso, PrecoCusto, Imposto, TaxaExtra, DespFixas.
               </p>
               <p className="mb-4 text-sm text-gray-600">
                 Produtos com SKU existente serão atualizados.

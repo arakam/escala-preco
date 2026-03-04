@@ -86,6 +86,7 @@ export async function POST(request: NextRequest) {
       sale_price: body.sale_price ?? null,
       tax_percent: body.tax_percent ?? null,
       extra_fee_percent: body.extra_fee_percent ?? null,
+      fixed_expenses: body.fixed_expenses ?? null,
     })
     .select()
     .single();
