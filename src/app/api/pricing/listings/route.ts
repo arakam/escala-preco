@@ -46,6 +46,7 @@ export async function GET(req: NextRequest) {
   const linkedOnly = url.searchParams.get("linked") === "1";
   const orderBy = url.searchParams.get("order_by")?.trim() || "";
   const orderBySales = orderBy === "sales_desc" || orderBy === "sales_asc";
+  const skuFilter = url.searchParams.get("sku")?.trim() || "";
 
   const offset = (page - 1) * limit;
 
@@ -98,12 +99,24 @@ export async function GET(req: NextRequest) {
 
       let allItemsQuery = adminSupabase
         .from("ml_items")
-        .select("id, item_id")
+        .select(
+          `
+            id,
+            item_id,
+            product_id,
+            products:product_id (
+              sku
+            )
+          `
+        )
         .eq("account_id", account.id)
         .eq("has_variations", false);
       if (statusFilter) allItemsQuery = allItemsQuery.eq("status", statusFilter);
       if (linkedOnly) allItemsQuery = allItemsQuery.not("product_id", "is", null);
       if (search) allItemsQuery = allItemsQuery.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
+      if (skuFilter) {
+        allItemsQuery = allItemsQuery.ilike("products.sku", `%${skuFilter}%`);
+      }
       const { data: allItemsData, error: allItemsErr } = await allItemsQuery.order("title", { ascending: true });
       if (allItemsErr) {
         console.error("[Pricing listings] order_by sales items error:", allItemsErr);
@@ -113,9 +126,22 @@ export async function GET(req: NextRequest) {
 
       let allVarsQuery = adminSupabase
         .from("ml_variations")
-        .select("id, item_id, variation_id")
+        .select(
+          `
+            id,
+            item_id,
+            variation_id,
+            product_id,
+            products:product_id (
+              sku
+            )
+          `
+        )
         .eq("account_id", account.id);
       if (linkedOnly) allVarsQuery = allVarsQuery.not("product_id", "is", null);
+      if (skuFilter) {
+        allVarsQuery = allVarsQuery.ilike("products.sku", `%${skuFilter}%`);
+      }
       const { data: allVarsData, error: allVarsErr } = await allVarsQuery.order("item_id", { ascending: true });
       if (allVarsErr) {
         console.error("[Pricing listings] order_by sales variations error:", allVarsErr);
@@ -386,6 +412,10 @@ export async function GET(req: NextRequest) {
       itemsQuery = itemsQuery.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
     }
 
+    if (skuFilter) {
+      itemsQuery = itemsQuery.ilike("products.sku", `%${skuFilter}%`);
+    }
+
     const { data: itemsData, error: itemsError, count: itemsCount } = await itemsQuery
       .order("title", { ascending: true })
       .range(offset, offset + limit - 1);
@@ -492,6 +522,10 @@ export async function GET(req: NextRequest) {
 
     if (linkedOnly) {
       variationsQuery = variationsQuery.not("product_id", "is", null);
+    }
+
+    if (skuFilter) {
+      variationsQuery = variationsQuery.ilike("products.sku", `%${skuFilter}%`);
     }
 
     const { data: variationsData, error: variationsError } = await variationsQuery

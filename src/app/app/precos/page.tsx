@@ -315,6 +315,7 @@ export default function PrecosPage() {
     if (statusFilter) params.set("status", statusFilter);
     if (linkedOnly) params.set("linked", "1");
     if (sortBy === "sales_desc" || sortBy === "sales_asc") params.set("order_by", sortBy);
+    if (skuFilter) params.set("sku", skuFilter);
 
     try {
       const [listingsRes, plannedRes] = await Promise.all([
@@ -358,7 +359,7 @@ export default function PrecosPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, search, statusFilter, linkedOnly, sortBy]);
+  }, [page, pageSize, search, statusFilter, linkedOnly, sortBy, skuFilter]);
 
   useEffect(() => {
     loadReputation();
@@ -472,7 +473,7 @@ export default function PrecosPage() {
   
   useEffect(() => {
     if (!loading && listings.length > 0 && !calculating) {
-      const key = `${page}-${search}-${statusFilter}-${linkedOnly}`;
+      const key = `${page}-${search}-${statusFilter}-${linkedOnly}-${skuFilter}`;
       if (lastCalculatedKey.current !== key) {
         const hasUncalculated = listings.some((l) => !l.calculated && l.listing_type_id);
         if (hasUncalculated) {
@@ -485,7 +486,7 @@ export default function PrecosPage() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, listings.length, calculating, page, search, statusFilter, linkedOnly]);
+  }, [loading, listings.length, calculating, page, search, statusFilter, linkedOnly, skuFilter]);
 
   const calculatePrices = useCallback(
     async (items: ListingWithPricing[]) => {
