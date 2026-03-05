@@ -107,6 +107,19 @@ function MercadoLivreContent() {
     }
   }, [searchParams]);
 
+  const loadItems = useCallback(async (accountId: string) => {
+    setItemsLoading((prev) => ({ ...prev, [accountId]: true }));
+    const params = new URLSearchParams({ page: "1" });
+    if (mlbuOnly) params.set("mlbu", "1");
+    if (mlbuCodeInput.trim()) params.set("mlbu_code", mlbuCodeInput.trim());
+    const res = await fetch(`/api/mercadolivre/${accountId}/items?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      setItemsByAccount((prev) => ({ ...prev, [accountId]: data.items ?? [] }));
+    }
+    setItemsLoading((prev) => ({ ...prev, [accountId]: false }));
+  }, [mlbuOnly, mlbuCodeInput]);
+
   const pollJob = useCallback(async (jobId: string, accountId: string) => {
     const res = await fetch(`/api/jobs/${jobId}`);
     if (!res.ok) return null;
@@ -124,19 +137,6 @@ function MercadoLivreContent() {
     }
     return null;
   }, [loadItems]);
-
-  const loadItems = useCallback(async (accountId: string) => {
-    setItemsLoading((prev) => ({ ...prev, [accountId]: true }));
-    const params = new URLSearchParams({ page: "1" });
-    if (mlbuOnly) params.set("mlbu", "1");
-    if (mlbuCodeInput.trim()) params.set("mlbu_code", mlbuCodeInput.trim());
-    const res = await fetch(`/api/mercadolivre/${accountId}/items?${params}`);
-    if (res.ok) {
-      const data = await res.json();
-      setItemsByAccount((prev) => ({ ...prev, [accountId]: data.items ?? [] }));
-    }
-    setItemsLoading((prev) => ({ ...prev, [accountId]: false }));
-  }, [mlbuOnly, mlbuCodeInput]);
 
   useEffect(() => {
     if (!syncing) return;
