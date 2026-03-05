@@ -127,7 +127,9 @@ export default function AnunciosPage() {
     const j = data.job as JobState;
     if (j) {
       setJob(j);
-      if (j.status === "success" || j.status === "failed" || j.status === "partial") {
+      const isTerminal = j.status === "success" || j.status === "failed" || j.status === "partial";
+      const allProcessed = j.total > 0 && j.processed >= j.total;
+      if (isTerminal || (j.status === "running" && allProcessed)) {
         setSyncing(false);
         loadItems();
         return true;
@@ -322,16 +324,33 @@ export default function AnunciosPage() {
           </p>
         )}
         {syncing && job && (
-          <div className="mt-3 rounded-app bg-slate-50 px-3 py-2 text-xs text-slate-700 ring-1 ring-slate-200">
-            <span className="font-semibold">Job: </span>
-            <span className="uppercase tracking-wide">{job.status}</span>
-            {job.total > 0 && (
-              <>
-                {" · "}
-                {job.processed}/{job.total} processados
-                {job.ok > 0 && <> · {job.ok} ok</>}
-                {job.errors > 0 && <> · {job.errors} erros</>}
-              </>
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-app bg-slate-50 px-3 py-2 text-xs text-slate-700 ring-1 ring-slate-200">
+            <span>
+              <span className="font-semibold">Job: </span>
+              <span className="uppercase tracking-wide">{job.status}</span>
+              {job.total > 0 && (
+                <>
+                  {" · "}
+                  {job.processed}/{job.total} processados
+                  {job.ok > 0 && <> · {job.ok} ok</>}
+                  {job.errors > 0 && <> · {job.errors} erros</>}
+                </>
+              )}
+            </span>
+            {job.status === "running" && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await fetch(`/api/jobs/${job.id}`, { method: "PATCH" });
+                  } finally {
+                    setSyncing(false);
+                  }
+                }}
+                className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+              >
+                Considerar finalizado
+              </button>
             )}
           </div>
         )}
