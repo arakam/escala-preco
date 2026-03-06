@@ -388,7 +388,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Erro ao buscar anúncios" }, { status: 500 });
     }
 
-    const itemRefs: RowRef[] = (itemsIdData || []).map((i) => ({
+    type ItemIdRow = { id: string; title?: string | null };
+    const itemRefs: RowRef[] = ((itemsIdData || []) as unknown as ItemIdRow[]).map((i) => ({
       type: "item" as const,
       id: i.id,
       sortTitle: (i.title || "").toLowerCase(),
@@ -409,7 +410,9 @@ export async function GET(req: NextRequest) {
       console.error("[Pricing listings] variations ids error:", variationsIdErr);
     }
 
-    const varItemIds = Array.from(new Set((variationsIdData || []).map((v) => v.item_id)));
+    type VariationIdRow = { id: string; item_id: string };
+    const variationsRows = (variationsIdData || []) as unknown as VariationIdRow[];
+    const varItemIds = Array.from(new Set(variationsRows.map((v) => v.item_id)));
     let variationRefs: RowRef[] = [];
     if (varItemIds.length > 0) {
       const { data: parentItems } = await adminSupabase
@@ -418,7 +421,7 @@ export async function GET(req: NextRequest) {
         .eq("account_id", account.id)
         .in("item_id", varItemIds);
       const parentMap = new Map((parentItems || []).map((p) => [p.item_id, p]));
-      variationRefs = (variationsIdData || [])
+      variationRefs = variationsRows
         .filter((v) => {
           const p = parentMap.get(v.item_id);
           if (!p) return false;

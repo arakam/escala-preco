@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
@@ -13,7 +13,31 @@ interface MLAccount {
   ml_nickname: string | null;
 }
 
-export default function AppLayout({
+function AppLayoutFallback() {
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: "var(--body-bg)" }}>
+      <header className="sticky top-0 z-30 border-b border-primary-darker/50 bg-gradient-to-r from-primary-darker via-primary to-primary-dark shadow-md">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4">
+          <Link href="/app" className="flex items-center gap-2">
+            <Image
+              src="/logo.png"
+              alt="Escala Preço"
+              width={360}
+              height={100}
+              className="h-10 w-auto object-contain brightness-0 invert sm:h-14"
+            />
+          </Link>
+          <div className="h-9 w-32 animate-pulse rounded-app bg-white/10" />
+        </div>
+      </header>
+      <main className="w-full px-3 py-4 sm:px-4 sm:py-6" style={{ color: "var(--body-text)" }}>
+        <div className="h-24 w-full animate-pulse rounded-app bg-stroke/50" />
+      </main>
+    </div>
+  );
+}
+
+function AppLayoutInner({
   children,
 }: {
   children: React.ReactNode;
@@ -189,9 +213,23 @@ export default function AppLayout({
         className="w-full px-3 py-4 sm:px-4 sm:py-6"
         style={{ color: "var(--body-text)" }}
       >
-        {children}
+        <Suspense fallback={<div className="min-h-24 animate-pulse rounded-app bg-stroke/50" />}>
+          {children}
+        </Suspense>
       </main>
     </div>
+  );
+}
+
+export default function AppLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <Suspense fallback={<AppLayoutFallback />}>
+      <AppLayoutInner>{children}</AppLayoutInner>
+    </Suspense>
   );
 }
 
