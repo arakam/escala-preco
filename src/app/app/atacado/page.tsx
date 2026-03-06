@@ -784,22 +784,8 @@ function AtacadoPageContent() {
         </div>
       )}
 
-      {/* Seletor de conta e ações */}
+      {/* Ações */}
       <div className="mb-4 flex flex-wrap items-center gap-4 rounded-app bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
-        <div>
-          <label className="mr-2 text-xs font-medium text-slate-600">Conta Mercado Livre</label>
-          <select
-            value={accountId}
-            onChange={(e) => setAccountId(e.target.value)}
-            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.ml_nickname || a.id}
-              </option>
-            ))}
-          </select>
-        </div>
         <button
           type="button"
           disabled={!!refJobId && (refJob?.status === "queued" || refJob?.status === "running")}

@@ -2,7 +2,16 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+
+const STORAGE_KEY = "escalapreco_dashboard_account_id";
+
+interface MLAccount {
+  id: string;
+  ml_user_id: number;
+  ml_nickname: string | null;
+}
 
 export default function AppLayout({
   children,
@@ -10,6 +19,55 @@ export default function AppLayout({
   children: React.ReactNode;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [accounts, setAccounts] = useState<MLAccount[]>([]);
+  const [accountId, setAccountId] = useState<string>("");
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const loadAccounts = useCallback(async () => {
+    const res = await fetch("/api/mercadolivre/accounts");
+    if (res.ok) {
+      const data = await res.json();
+      const list = data.accounts ?? [];
+      setAccounts(list);
+      if (list.length > 0 && !accountId) {
+        const fromUrl = searchParams.get("accountId");
+        const fromStorage =
+          typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+        const next = fromUrl ?? fromStorage ?? list[0].id;
+        setAccountId(next);
+        if (typeof window !== "undefined" && next) {
+          localStorage.setItem(STORAGE_KEY, next);
+        }
+      }
+    }
+  }, [accountId, searchParams]);
+
+  useEffect(() => {
+    loadAccounts();
+  }, [loadAccounts]);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("accountId");
+    if (fromUrl && fromUrl !== accountId) setAccountId(fromUrl);
+  }, [searchParams]);
+
+  // Sincroniza URL com a conta salva quando a página não tem accountId (ex.: /app/anuncios)
+  useEffect(() => {
+    if (!accountId || !pathname) return;
+    const inUrl = searchParams.get("accountId");
+    if (inUrl === accountId) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("accountId", accountId);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só queremos rodar quando accountId/pathname mudam, não searchParams
+  }, [accountId, pathname]);
+
+  const currentAccount = accounts.find((a) => a.id === accountId);
+  const accountLabel = currentAccount
+    ? currentAccount.ml_nickname || `Conta ${currentAccount.ml_user_id}` || currentAccount.id.slice(0, 8)
+    : "";
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "var(--body-bg)" }}>
@@ -24,6 +82,15 @@ export default function AppLayout({
               className="h-10 w-auto object-contain brightness-0 invert sm:h-14"
             />
           </Link>
+
+          {/* Conta ML fixa no header - só exibição (uma conta) - desktop */}
+          {accountLabel && (
+            <div className="hidden max-w-[180px] truncate md:block">
+              <span className="rounded-app border border-white/20 bg-white/10 px-3 py-1.5 text-sm font-medium text-white backdrop-blur">
+                {accountLabel}
+              </span>
+            </div>
+          )}
 
           {/* Navegação desktop */}
           <nav className="hidden items-center gap-1 md:flex">
@@ -71,6 +138,14 @@ export default function AppLayout({
         {/* Menu mobile */}
         {isMenuOpen && (
           <div className="border-t border-primary-darker/40 bg-primary-darker/95 backdrop-blur md:hidden">
+            {accountLabel && (
+              <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
+                <span className="text-xs font-medium text-white/70">Conta Mercado Livre</span>
+                <p className="truncate rounded-app border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white backdrop-blur">
+                  {accountLabel}
+                </p>
+              </div>
+            )}
             <nav className="mx-auto flex w-full max-w-6xl flex-col gap-1 px-4 py-3">
               <MobileNavLink href="/app" onClick={() => setIsMenuOpen(false)}>
                 <HomeIcon />

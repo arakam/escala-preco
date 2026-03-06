@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
+import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
+
+const STORAGE_KEY = "escalapreco_dashboard_account_id";
 
 interface MLAccount {
   id: string;
@@ -40,7 +43,9 @@ interface JobState {
 type SortField = "item_id" | "title" | "status" | "price" | "updated_at";
 
 export default function AnunciosPage() {
-  const [account, setAccount] = useState<MLAccount | null>(null);
+  const searchParams = useSearchParams();
+  const [accounts, setAccounts] = useState<MLAccount[]>([]);
+  const [accountId, setAccountId] = useState<string>("");
   const [items, setItems] = useState<ItemRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -64,6 +69,8 @@ export default function AnunciosPage() {
   const [sortField, setSortField] = useState<SortField>("updated_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
+  const account = accounts.find((a) => a.id === accountId) ?? accounts[0] ?? null;
+
   const copyMlb = useCallback((itemId: string) => {
     navigator.clipboard.writeText(itemId).then(() => {
       setCopiedMlb(itemId);
@@ -71,15 +78,34 @@ export default function AnunciosPage() {
     });
   }, []);
 
-  const loadAccount = useCallback(async () => {
+  const loadAccounts = useCallback(async () => {
     const res = await fetch("/api/mercadolivre/accounts");
     if (res.ok) {
       const data = await res.json();
-      const accounts = data.accounts ?? [];
-      setAccount(accounts[0] ?? null);
+      const list = data.accounts ?? [];
+      setAccounts(list);
+      if (list.length > 0 && !accountId) {
+        const fromUrl = searchParams.get("accountId");
+        const fromStorage =
+          typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+        const next = fromUrl ?? fromStorage ?? list[0].id;
+        setAccountId(next);
+        if (typeof window !== "undefined" && next) {
+          localStorage.setItem(STORAGE_KEY, next);
+        }
+      }
     }
     setLoading(false);
-  }, []);
+  }, [accountId, searchParams]);
+
+  useEffect(() => {
+    loadAccounts();
+  }, [loadAccounts]);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("accountId");
+    if (fromUrl && fromUrl !== accountId) setAccountId(fromUrl);
+  }, [searchParams]);
 
   const loadItems = useCallback(async () => {
     if (!account) return;
@@ -97,10 +123,6 @@ export default function AnunciosPage() {
     }
     setItemsLoading(false);
   }, [account, page, search, statusFilter, mlbuOnly, mlbuCodeInput]);
-
-  useEffect(() => {
-    loadAccount();
-  }, [loadAccount]);
 
   useEffect(() => {
     if (account) loadItems();
