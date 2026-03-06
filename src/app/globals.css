@@ -173,6 +173,23 @@ body {
   font-size: 0.875rem;
 }
 
+/* Colunas congeladas (sticky) na tabela de preços — position/left/minWidth vêm do inline style */
+.pricing-table-with-sticky .app-table thead th.sticky-col {
+  z-index: 20;
+  box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.08);
+  background: #f8fafc;
+}
+.dark .pricing-table-with-sticky .app-table thead th.sticky-col { background: #1e293b; }
+
+.pricing-table-with-sticky .app-table tbody td.sticky-col {
+  z-index: 1;
+  box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.06);
+  background: #fff;
+}
+.pricing-table-with-sticky .app-table tbody tr:hover td.sticky-col { background: #f8fafc; }
+.dark .pricing-table-with-sticky .app-table tbody td.sticky-col { background: var(--card-bg); }
+.dark .pricing-table-with-sticky .app-table tbody tr:hover td.sticky-col { background: #334155; }
+
 /* ========== Tabs ========== */
 .tabs-list {
   @apply flex flex-wrap gap-0 border-b border-stroke dark:border-slate-700;
