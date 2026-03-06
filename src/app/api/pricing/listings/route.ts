@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url);
   const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
-  const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") || "50", 10)));
+  const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get("limit") || "50", 10)));
   const search = url.searchParams.get("search")?.trim() || "";
   const statusFilter = url.searchParams.get("status")?.trim() || "";
   const linkedOnly = url.searchParams.get("linked") === "1";
@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
   const skuFilter = url.searchParams.get("sku")?.trim() || "";
 
   const offset = (page - 1) * limit;
+  const MAX_COMBINED_IDS = 15000;
 
   const { data: account, error: accountError } = await supabase
     .from("ml_accounts")
@@ -365,69 +366,89 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const listings: PricingListingRow[] = [];
-    let totalCount = 0;
+    // Busca geral: lista combinada (itens + variações) com filtros, depois paginar
+    type RowRef = { type: "item"; id: string; sortTitle: string } | { type: "variation"; id: string; sortTitle: string; item_id: string };
 
-    let itemsQuery = adminSupabase
+    let itemsIdQuery = adminSupabase
       .from("ml_items")
-      .select(`
-        id,
-        item_id,
-        title,
-        thumbnail,
-        permalink,
-        status,
-        listing_type_id,
-        category_id,
-        price,
-        has_variations,
-        raw_json,
-        product_id,
-        account_id,
-        products:product_id (
-          id,
-          sku,
-          cost_price,
-          weight,
-          height,
-          width,
-          length,
-          tax_percent,
-          extra_fee_percent,
-          fixed_expenses
-        )
-      `, { count: "exact" })
+      .select(skuFilter ? "id, title, products:product_id(sku)" : "id, title")
       .eq("account_id", account.id)
       .eq("has_variations", false);
+    if (statusFilter) itemsIdQuery = itemsIdQuery.eq("status", statusFilter);
+    if (linkedOnly) itemsIdQuery = itemsIdQuery.not("product_id", "is", null);
+    if (search) itemsIdQuery = itemsIdQuery.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
+    if (skuFilter) itemsIdQuery = itemsIdQuery.ilike("products.sku", `%${skuFilter}%`);
 
-    if (statusFilter) {
-      itemsQuery = itemsQuery.eq("status", statusFilter);
-    }
-
-    if (linkedOnly) {
-      itemsQuery = itemsQuery.not("product_id", "is", null);
-    }
-
-    if (search) {
-      itemsQuery = itemsQuery.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
-    }
-
-    if (skuFilter) {
-      itemsQuery = itemsQuery.ilike("products.sku", `%${skuFilter}%`);
-    }
-
-    const { data: itemsData, error: itemsError, count: itemsCount } = await itemsQuery
+    const { data: itemsIdData, error: itemsIdErr } = await itemsIdQuery
       .order("title", { ascending: true })
-      .range(offset, offset + limit - 1);
+      .range(0, MAX_COMBINED_IDS - 1);
 
-    if (itemsError) {
-      console.error("[Pricing listings] items error:", itemsError);
+    if (itemsIdErr) {
+      console.error("[Pricing listings] items ids error:", itemsIdErr);
       return NextResponse.json({ error: "Erro ao buscar anúncios" }, { status: 500 });
     }
 
-    totalCount = itemsCount || 0;
+    const itemRefs: RowRef[] = (itemsIdData || []).map((i) => ({
+      type: "item" as const,
+      id: i.id,
+      sortTitle: (i.title || "").toLowerCase(),
+    }));
 
-    for (const item of itemsData || []) {
+    let variationsIdQuery = adminSupabase
+      .from("ml_variations")
+      .select(skuFilter ? "id, item_id, products:product_id(sku)" : "id, item_id")
+      .eq("account_id", account.id);
+    if (linkedOnly) variationsIdQuery = variationsIdQuery.not("product_id", "is", null);
+    if (skuFilter) variationsIdQuery = variationsIdQuery.ilike("products.sku", `%${skuFilter}%`);
+
+    const { data: variationsIdData, error: variationsIdErr } = await variationsIdQuery
+      .order("item_id", { ascending: true })
+      .range(0, MAX_COMBINED_IDS - 1);
+
+    if (variationsIdErr) {
+      console.error("[Pricing listings] variations ids error:", variationsIdErr);
+    }
+
+    const varItemIds = Array.from(new Set((variationsIdData || []).map((v) => v.item_id)));
+    let variationRefs: RowRef[] = [];
+    if (varItemIds.length > 0) {
+      const { data: parentItems } = await adminSupabase
+        .from("ml_items")
+        .select("item_id, title, status")
+        .eq("account_id", account.id)
+        .in("item_id", varItemIds);
+      const parentMap = new Map((parentItems || []).map((p) => [p.item_id, p]));
+      variationRefs = (variationsIdData || [])
+        .filter((v) => {
+          const p = parentMap.get(v.item_id);
+          if (!p) return false;
+          if (statusFilter && p.status !== statusFilter) return false;
+          if (search) {
+            const title = (p.title || "").toLowerCase();
+            const match = title.includes(search.toLowerCase()) || v.item_id.toLowerCase().includes(search.toLowerCase());
+            if (!match) return false;
+          }
+          return true;
+        })
+        .map((v) => {
+          const p = parentMap.get(v.item_id);
+          return { type: "variation" as const, id: v.id, sortTitle: (p?.title || "").toLowerCase(), item_id: v.item_id };
+        });
+    }
+
+    const combined: RowRef[] = [...itemRefs, ...variationRefs].sort((a, b) => {
+      const c = a.sortTitle.localeCompare(b.sortTitle, "pt-BR");
+      if (c !== 0) return c;
+      return a.id.localeCompare(b.id);
+    });
+    const totalCount = combined.length;
+    const pageRefs = combined.slice(offset, offset + limit);
+    const itemIdsPage = pageRefs.filter((r): r is RowRef & { type: "item" } => r.type === "item").map((r) => r.id);
+    const variationIdsPage = pageRefs.filter((r): r is RowRef & { type: "variation" } => r.type === "variation").map((r) => r.id);
+
+    const listings: PricingListingRow[] = [];
+
+    const buildItemRow = (item: Record<string, unknown>): PricingListingRow => {
       const rawProduct = item.products as Record<string, unknown> | Record<string, unknown>[] | null;
       let productCostPrice: number | null = null;
       let productWeight: number | null = null;
@@ -438,7 +459,6 @@ export async function GET(req: NextRequest) {
       let productTaxPercent: number | null = null;
       let productExtraFeePercent: number | null = null;
       let productFixedExpenses: number | null = null;
-      
       if (rawProduct) {
         const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
         if (prod) {
@@ -453,36 +473,27 @@ export async function GET(req: NextRequest) {
           productFixedExpenses = prod.fixed_expenses != null ? Number(prod.fixed_expenses) : null;
         }
       }
-      
       const rawJson = item.raw_json as Record<string, unknown> | null;
-      
       let sku: string | null = null;
       if (rawJson?.attributes && Array.isArray(rawJson.attributes)) {
         const skuAttr = rawJson.attributes.find((a: { id?: string }) => a.id === "SELLER_SKU");
-        if (skuAttr && typeof (skuAttr as { value_name?: string }).value_name === "string") {
-          sku = (skuAttr as { value_name: string }).value_name;
-        }
+        if (skuAttr && typeof (skuAttr as { value_name?: string }).value_name === "string") sku = (skuAttr as { value_name: string }).value_name;
       }
-      if (!sku && rawJson?.seller_custom_field) {
-        sku = String(rawJson.seller_custom_field);
-      }
-      if (!sku && productSku) {
-        sku = productSku;
-      }
-
-      listings.push({
-        id: item.id,
-        item_id: item.item_id,
+      if (!sku && rawJson?.seller_custom_field) sku = String(rawJson.seller_custom_field);
+      if (!sku && productSku) sku = productSku;
+      return {
+        id: item.id as string,
+        item_id: item.item_id as string,
         variation_id: null,
-        title: item.title,
-        thumbnail: item.thumbnail,
-        permalink: item.permalink,
-        status: item.status,
-        listing_type_id: item.listing_type_id,
-        category_id: item.category_id,
-        current_price: item.price ?? 0,
+        title: item.title as string | null,
+        thumbnail: item.thumbnail as string | null,
+        permalink: item.permalink as string | null,
+        status: item.status as string | null,
+        listing_type_id: item.listing_type_id as string | null,
+        category_id: item.category_id as string | null,
+        current_price: (item.price as number) ?? 0,
         sku,
-        product_id: item.product_id,
+        product_id: item.product_id as string | null,
         cost_price: productCostPrice,
         weight_kg: productWeight,
         height_cm: productHeight,
@@ -491,64 +502,52 @@ export async function GET(req: NextRequest) {
         tax_percent: productTaxPercent,
         extra_fee_percent: productExtraFeePercent,
         fixed_expenses: productFixedExpenses,
-        account_id: item.account_id,
-      });
+        account_id: item.account_id as string,
+      };
+    };
+
+    if (itemIdsPage.length > 0) {
+      const { data: itemsPageData } = await adminSupabase
+        .from("ml_items")
+        .select(`
+          id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id, account_id,
+          products:product_id (id, sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
+        `)
+        .eq("account_id", account.id)
+        .in("id", itemIdsPage);
+      const itemsById = new Map((itemsPageData || []).map((i) => [i.id, i as unknown as Record<string, unknown>]));
+      for (const ref of pageRefs) {
+        if (ref.type !== "item") continue;
+        const item = itemsById.get(ref.id);
+        if (item) listings.push(buildItemRow(item));
+      }
     }
 
-    let variationsQuery = adminSupabase
-      .from("ml_variations")
-      .select(`
-        id,
-        item_id,
-        variation_id,
-        price,
-        raw_json,
-        product_id,
-        account_id,
-        products:product_id (
-          id,
-          sku,
-          cost_price,
-          weight,
-          height,
-          width,
-          length,
-          tax_percent,
-          extra_fee_percent,
-          fixed_expenses
-        )
-      `, { count: "exact" })
-      .eq("account_id", account.id);
-
-    if (linkedOnly) {
-      variationsQuery = variationsQuery.not("product_id", "is", null);
-    }
-
-    if (skuFilter) {
-      variationsQuery = variationsQuery.ilike("products.sku", `%${skuFilter}%`);
-    }
-
-    const { data: variationsData, error: variationsError } = await variationsQuery
-      .order("item_id", { ascending: true })
-      .range(0, limit - 1);
-
-    if (variationsError) {
-      console.error("[Pricing listings] variations error:", variationsError);
-    }
-
-    if (variationsData && variationsData.length > 0) {
-      const itemIds = Array.from(new Set(variationsData.map((v) => v.item_id)));
+    if (variationIdsPage.length > 0) {
+      const { data: varsPageData } = await adminSupabase
+        .from("ml_variations")
+        .select(`
+          id, item_id, variation_id, price, raw_json, product_id, account_id,
+          products:product_id (id, sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
+        `)
+        .in("id", variationIdsPage);
+      const varItemIdsPage = Array.from(new Set((varsPageData || []).map((v) => v.item_id)));
       const { data: parentItems } = await adminSupabase
         .from("ml_items")
         .select("item_id, title, thumbnail, permalink, status, listing_type_id, category_id")
         .eq("account_id", account.id)
-        .in("item_id", itemIds);
-
-      const itemsMap = new Map(
-        (parentItems || []).map((item) => [item.item_id, item])
-      );
-
-      for (const variation of variationsData) {
+        .in("item_id", varItemIdsPage);
+      const parentMap = new Map((parentItems || []).map((i) => [i.item_id, i as unknown as Record<string, unknown>]));
+      const variationRowsById = new Map<string, { variation: Record<string, unknown>; mlItem: Record<string, unknown> | null }>();
+      for (const v of varsPageData || []) {
+        const variation = v as unknown as Record<string, unknown>;
+        variationRowsById.set(variation.id as string, { variation, mlItem: parentMap.get(variation.item_id as string) ?? null });
+      }
+      for (const ref of pageRefs) {
+        if (ref.type !== "variation") continue;
+        const row = variationRowsById.get(ref.id);
+        if (!row) continue;
+        const { variation, mlItem } = row;
         const rawProduct = variation.products as Record<string, unknown> | Record<string, unknown>[] | null;
         let productCostPrice: number | null = null;
         let productWeight: number | null = null;
@@ -559,7 +558,6 @@ export async function GET(req: NextRequest) {
         let productTaxPercent: number | null = null;
         let productExtraFeePercent: number | null = null;
         let productFixedExpenses: number | null = null;
-        
         if (rawProduct) {
           const prod = Array.isArray(rawProduct) ? rawProduct[0] : rawProduct;
           if (prod) {
@@ -574,54 +572,32 @@ export async function GET(req: NextRequest) {
             productFixedExpenses = prod.fixed_expenses != null ? Number(prod.fixed_expenses) : null;
           }
         }
-        
-        const mlItem = itemsMap.get(variation.item_id);
         const rawJson = variation.raw_json as Record<string, unknown> | null;
-
-        if (statusFilter && mlItem?.status !== statusFilter) {
-          continue;
-        }
-
         let sku: string | null = null;
         if (rawJson?.attributes && Array.isArray(rawJson.attributes)) {
           const skuAttr = rawJson.attributes.find((a: { id?: string }) => a.id === "SELLER_SKU");
-          if (skuAttr && typeof (skuAttr as { value_name?: string }).value_name === "string") {
-            sku = (skuAttr as { value_name: string }).value_name;
-          }
+          if (skuAttr && typeof (skuAttr as { value_name?: string }).value_name === "string") sku = (skuAttr as { value_name: string }).value_name;
         }
-        if (!sku && rawJson?.seller_custom_field) {
-          sku = String(rawJson.seller_custom_field);
-        }
-        if (!sku && productSku) {
-          sku = productSku;
-        }
-
+        if (!sku && rawJson?.seller_custom_field) sku = String(rawJson.seller_custom_field);
+        if (!sku && productSku) sku = productSku;
         let variationName = "";
         if (rawJson?.attribute_combinations && Array.isArray(rawJson.attribute_combinations)) {
-          variationName = rawJson.attribute_combinations
-            .map((a: { value_name?: string }) => a.value_name || "")
-            .filter(Boolean)
-            .join(" / ");
+          variationName = rawJson.attribute_combinations.map((a: { value_name?: string }) => a.value_name || "").filter(Boolean).join(" / ");
         }
-
-        const title = mlItem?.title || null;
-        if (search && title && !title.toLowerCase().includes(search.toLowerCase()) && !variation.item_id.toLowerCase().includes(search.toLowerCase())) {
-          continue;
-        }
-
+        const title: string | null = (mlItem?.title as string | null | undefined) ?? null;
         listings.push({
-          id: variation.id,
-          item_id: variation.item_id,
-          variation_id: variation.variation_id,
+          id: variation.id as string,
+          item_id: variation.item_id as string,
+          variation_id: variation.variation_id as number,
           title: variationName ? `${title || ""} - ${variationName}` : title,
-          thumbnail: mlItem?.thumbnail || null,
-          permalink: mlItem?.permalink || null,
-          status: mlItem?.status || null,
-          listing_type_id: mlItem?.listing_type_id || null,
-          category_id: mlItem?.category_id || null,
-          current_price: variation.price ?? 0,
+          thumbnail: (mlItem?.thumbnail as string | null | undefined) ?? null,
+          permalink: (mlItem?.permalink as string | null | undefined) ?? null,
+          status: (mlItem?.status as string | null | undefined) ?? null,
+          listing_type_id: (mlItem?.listing_type_id as string | null | undefined) ?? null,
+          category_id: (mlItem?.category_id as string | null | undefined) ?? null,
+          current_price: (variation.price as number) ?? 0,
           sku,
-          product_id: variation.product_id,
+          product_id: variation.product_id as string | null,
           cost_price: productCostPrice,
           weight_kg: productWeight,
           height_cm: productHeight,
@@ -630,7 +606,7 @@ export async function GET(req: NextRequest) {
           tax_percent: productTaxPercent,
           extra_fee_percent: productExtraFeePercent,
           fixed_expenses: productFixedExpenses,
-          account_id: variation.account_id,
+          account_id: variation.account_id as string,
         });
       }
     }

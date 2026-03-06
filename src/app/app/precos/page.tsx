@@ -206,11 +206,12 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </section>
 
           <section>
-            <h3 className="mb-2 font-medium text-gray-900">Filtros</h3>
+            <h3 className="mb-2 font-medium text-gray-900">Filtros (busca geral)</h3>
             <ul className="list-inside list-disc space-y-1">
               <li><strong>Status:</strong> Filtre por anúncios ativos, pausados ou encerrados</li>
               <li><strong>Apenas vinculados:</strong> Mostra apenas anúncios com produto vinculado</li>
               <li><strong>Busca:</strong> Pesquise por título ou código MLB</li>
+              <li><strong>Lucratividade:</strong> Filtra em até 500 anúncios carregados (busca geral na amostra)</li>
             </ul>
           </section>
 
@@ -305,11 +306,15 @@ export default function PrecosPage() {
     }
   }, []);
 
+  /** Com filtro de lucro ativo, busca até 500 itens (busca geral) e pagina no cliente */
+  const limitForRequest = profitFilter ? 500 : pageSize;
+  const pageForRequest = profitFilter ? 1 : page;
+
   const loadListings = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({
-      page: String(page),
-      limit: String(pageSize),
+      page: String(pageForRequest),
+      limit: String(limitForRequest),
     });
     if (search) params.set("search", search);
     if (statusFilter) params.set("status", statusFilter);
@@ -359,7 +364,7 @@ export default function PrecosPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, search, statusFilter, linkedOnly, sortBy, skuFilter]);
+  }, [pageForRequest, limitForRequest, search, statusFilter, linkedOnly, sortBy, skuFilter]);
 
   useEffect(() => {
     loadReputation();
@@ -368,6 +373,10 @@ export default function PrecosPage() {
   useEffect(() => {
     loadListings();
   }, [loadListings]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [profitFilter]);
 
   useEffect(() => {
     if (loading || listings.length === 0) return;
@@ -794,8 +803,6 @@ export default function PrecosPage() {
     });
   }, []);
 
-  const totalPages = Math.ceil(total / pageSize);
-
   const dirtyCount = useMemo(
     () => listings.filter((l) => l.dirty).length,
     [listings]
@@ -848,9 +855,17 @@ export default function PrecosPage() {
     return base;
   }, [listings, profitFilter, skuFilter, getProfitPercent]);
 
+  /** Com filtro de lucro, paginação no cliente; senão usa total do servidor */
+  const totalPages = profitFilter
+    ? Math.max(1, Math.ceil(filteredListings.length / pageSize))
+    : Math.ceil(total / pageSize);
+
+  /** Com filtro de lucro, mostra só a fatia da página atual; senão mostra todos da página */
   const sortedListings = useMemo(() => {
-    return filteredListings;
-  }, [filteredListings]);
+    if (!profitFilter) return filteredListings;
+    const start = (page - 1) * pageSize;
+    return filteredListings.slice(start, start + pageSize);
+  }, [filteredListings, profitFilter, page, pageSize]);
 
   const selectedCount = useMemo(() => selectedIds.size, [selectedIds]);
 
