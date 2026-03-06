@@ -211,6 +211,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li><strong>Status:</strong> Filtre por anúncios ativos, pausados ou encerrados</li>
               <li><strong>Apenas vinculados:</strong> Mostra apenas anúncios com produto vinculado</li>
               <li><strong>Busca:</strong> Pesquise por título ou código MLB</li>
+              <li><strong>Só com vendas (30d):</strong> Exibe apenas anúncios com pelo menos 1 venda nos últimos 30 dias</li>
               <li><strong>Lucratividade:</strong> Filtra em até 500 anúncios carregados (busca geral na amostra)</li>
             </ul>
           </section>
@@ -279,6 +280,8 @@ export default function PrecosPage() {
   const [salesError, setSalesError] = useState(false);
   /** Ordenação: "" = padrão, "sales_desc" = mais vendas primeiro, "sales_asc" = menos vendas primeiro */
   const [sortBy, setSortBy] = useState<"" | "sales_desc" | "sales_asc">("");
+  /** Mostrar somente itens com vendas nos últimos 30 dias */
+  const [onlyWithSales30d, setOnlyWithSales30d] = useState(false);
   /** Itens selecionados para criar campanha ML (por id de listing) */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [campaignOpen, setCampaignOpen] = useState(false);
@@ -852,8 +855,12 @@ export default function PrecosPage() {
       base = base.filter((listing) => (listing.sku ?? "").toLowerCase().includes(skuTerm));
     }
 
+    if (onlyWithSales30d) {
+      base = base.filter((listing) => (salesData[listing.item_id] ?? 0) > 0);
+    }
+
     return base;
-  }, [listings, profitFilter, skuFilter, getProfitPercent]);
+  }, [listings, profitFilter, skuFilter, getProfitPercent, onlyWithSales30d, salesData]);
 
   /** Com filtro de lucro, paginação no cliente; senão usa total do servidor */
   const totalPages = profitFilter
@@ -1222,6 +1229,18 @@ export default function PrecosPage() {
           />
           <span>Só vinculados</span>
         </label>
+        <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 shadow-sm" title="Exibe apenas anúncios com pelo menos 1 venda nos últimos 30 dias">
+          <input
+            type="checkbox"
+            checked={onlyWithSales30d}
+            onChange={(e) => {
+              setOnlyWithSales30d(e.target.checked);
+              setPage(1);
+            }}
+            className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary"
+          />
+          <span>Só com vendas (30d)</span>
+        </label>
         <span className="text-xs text-slate-500">Lucratividade:</span>
         <div className="flex flex-wrap gap-1">
           {(
@@ -1247,7 +1266,7 @@ export default function PrecosPage() {
             </button>
           ))}
         </div>
-        {(search || skuFilter || statusFilter || linkedOnly || profitFilter || sortBy) && (
+        {(search || skuFilter || statusFilter || linkedOnly || onlyWithSales30d || profitFilter || sortBy) && (
           <button
             type="button"
             onClick={() => {
@@ -1256,6 +1275,7 @@ export default function PrecosPage() {
               setSkuFilter("");
               setStatusFilter("active");
               setLinkedOnly(false);
+              setOnlyWithSales30d(false);
               setProfitFilter("");
               setSortBy("");
               setPage(1);
@@ -1266,6 +1286,19 @@ export default function PrecosPage() {
           </button>
         )}
       </form>
+
+      {(search || skuFilter || statusFilter || linkedOnly || onlyWithSales30d || profitFilter || sortBy) && listings.length > 0 && (
+        <p className="mb-4 text-sm font-medium text-slate-700">
+          <span className="rounded-full bg-primary/10 px-3 py-1 text-primary">
+            {profitFilter ? filteredListings.length : total} itens atendem aos filtros
+          </span>
+          {totalPages > 1 && (
+            <span className="ml-2 text-xs font-normal text-slate-500">
+              · página {page} de {totalPages}
+            </span>
+          )}
+        </p>
+      )}
 
       {!hasLinkedItems && listings.length > 0 && (
         <div className="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-700">

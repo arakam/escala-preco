@@ -4,10 +4,11 @@ export interface SalesForItem {
 }
 
 const BATCH_SIZE = 10;
+const ORDERS_PAGE_LIMIT = 51; // API ML: máximo 51 por página em orders/search
 
 /**
  * Chama a API de orders do ML e retorna quantidade vendida e número de pedidos para o item.
- * Considera apenas pedidos com status "paid".
+ * Considera apenas pedidos com status "paid". Pagina automaticamente quando há mais de 51 pedidos.
  */
 async function fetchSalesForItem(
   accessToken: string,
@@ -16,50 +17,66 @@ async function fetchSalesForItem(
   dateFrom: string,
   dateTo: string
 ): Promise<SalesForItem> {
-  const url = new URL("https://api.mercadolibre.com/orders/search");
-  url.searchParams.set("seller", String(sellerId));
-  url.searchParams.set("item", itemId);
-  url.searchParams.set("date_created.from", dateFrom);
-  url.searchParams.set("date_created.to", dateTo);
-  url.searchParams.set("limit", "51"); // API ML: máximo 51 para orders/search
-
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    console.warn(`[ml/sales] orders/search ${res.status} for ${itemId}:`, errText.slice(0, 200));
-    return { quantity: 0, orders: 0 };
-  }
-
-  let data: {
-    results?: Array<{
-      status?: string;
-      order_items?: Array<{ item?: { id?: string }; quantity?: number }>;
-    }>;
-  };
-  try {
-    data = (await res.json()) as typeof data;
-  } catch {
-    return { quantity: 0, orders: 0 };
-  }
-
-  const results = data.results ?? [];
   let quantity = 0;
   let orders = 0;
-  for (const order of results) {
-    if (order.status !== "paid") continue;
-    const items = order.order_items ?? [];
-    let orderHasItem = false;
-    for (const oi of items) {
-      if (oi.item?.id === itemId && typeof oi.quantity === "number") {
-        quantity += oi.quantity;
-        orderHasItem = true;
-      }
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const url = new URL("https://api.mercadolibre.com/orders/search");
+    url.searchParams.set("seller", String(sellerId));
+    url.searchParams.set("item", itemId);
+    url.searchParams.set("date_created.from", dateFrom);
+    url.searchParams.set("date_created.to", dateTo);
+    url.searchParams.set("limit", String(ORDERS_PAGE_LIMIT));
+    url.searchParams.set("offset", String(offset));
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[ml/sales] orders/search ${res.status} for ${itemId}:`, errText.slice(0, 200));
+      break;
     }
-    if (orderHasItem) orders += 1;
+
+    let data: {
+      results?: Array<{
+        status?: string;
+        order_items?: Array<{ item?: { id?: string }; quantity?: number }>;
+      }>;
+      paging?: { total?: number; limit?: number; offset?: number };
+    };
+    try {
+      data = (await res.json()) as typeof data;
+    } catch {
+      break;
+    }
+
+    const results = data.results ?? [];
+    for (const order of results) {
+      if (order.status !== "paid") continue;
+      const items = order.order_items ?? [];
+      let orderHasItem = false;
+      for (const oi of items) {
+        if (oi.item?.id === itemId && typeof oi.quantity === "number") {
+          quantity += oi.quantity;
+          orderHasItem = true;
+        }
+      }
+      if (orderHasItem) orders += 1;
+    }
+
+    if (results.length < ORDERS_PAGE_LIMIT) {
+      hasMore = false;
+    } else {
+      offset += ORDERS_PAGE_LIMIT;
+      // evita loop infinito se a API continuar retornando páginas cheias (ex.: máx 1000 pedidos)
+      if (offset >= 1000) hasMore = false;
+    }
   }
+
   return { quantity, orders };
 }
 
