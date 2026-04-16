@@ -318,7 +318,7 @@ export default function PrecosPage() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [skuFilter, setSkuFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("active");
+  const [statusFilter, setStatusFilter] = useState("");
   const [linkedOnly, setLinkedOnly] = useState(false);
   const [calculating, setCalculating] = useState(false);
   const [isMercadoLider, setIsMercadoLider] = useState(false);
@@ -334,10 +334,17 @@ export default function PrecosPage() {
   const [ordersData, setOrdersData] = useState<Record<string, number>>({});
   const [salesLoading, setSalesLoading] = useState(false);
   const [salesError, setSalesError] = useState(false);
+  const [cacheRefreshing, setCacheRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [cacheEmpty, setCacheEmpty] = useState(false);
+  const [refreshingItemId, setRefreshingItemId] = useState<string | null>(null);
   /** Ordenação: "" = padrão, "sales_desc" = mais vendas primeiro, "sales_asc" = menos vendas primeiro */
   const [sortBy, setSortBy] = useState<"" | "sales_desc" | "sales_asc">("");
   /** Mostrar somente itens com vendas nos últimos 30 dias */
   const [onlyWithSales30d, setOnlyWithSales30d] = useState(false);
+  /** Com filtros no cliente: carregar até 2000 itens de uma vez (em vez de 500) */
+  const [loadAllResults, setLoadAllResults] = useState(false);
   /** Itens selecionados para criar campanha ML (por id de listing) */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [campaignOpen, setCampaignOpen] = useState(false);
@@ -372,9 +379,14 @@ export default function PrecosPage() {
     }
   }, []);
 
-  /** Com filtro de lucro ativo, busca até 500 itens (busca geral) e pagina no cliente */
-  const limitForRequest = profitFilter ? 500 : pageSize;
-  const pageForRequest = profitFilter ? 1 : page;
+  /** Com filtro de lucro ou "só com vendas 30d" ativo, busca mais itens e aplica filtros no cliente (paginação no cliente) */
+  const clientSideFiltering = !!(profitFilter || onlyWithSales30d);
+  const MAX_CLIENT_SIDE_LOAD = 10000;
+  const DEFAULT_CLIENT_SIDE_LOAD = 2000;
+  const limitForRequest = clientSideFiltering
+    ? (loadAllResults ? MAX_CLIENT_SIDE_LOAD : DEFAULT_CLIENT_SIDE_LOAD)
+    : pageSize;
+  const pageForRequest = clientSideFiltering ? 1 : page;
 
   const loadListings = useCallback(async () => {
     setLoading(true);
@@ -387,6 +399,7 @@ export default function PrecosPage() {
     if (linkedOnly) params.set("linked", "1");
     if (sortBy === "sales_desc" || sortBy === "sales_asc") params.set("order_by", sortBy);
     if (skuFilter) params.set("sku", skuFilter);
+    if (onlyWithSales30d) params.set("only_with_sales", "1");
 
     try {
       const [listingsRes, plannedRes] = await Promise.all([
@@ -415,22 +428,97 @@ export default function PrecosPage() {
       setListings(
         items.map((item) => {
           const key = `${item.item_id}:${item.variation_id ?? "n"}`;
+          const apiItem = item as PricingListing & {
+            planned_price?: number;
+            calculated_price?: number | null;
+            calculated_fee?: number | null;
+            calculated_shipping_cost?: number | null;
+            calculated_at?: string | null;
+          };
+          const fromApi = apiItem.planned_price;
           const savedPrice = plannedMap.get(key);
-          const newPrice = savedPrice ?? item.current_price;
+          const newPrice = fromApi ?? savedPrice ?? item.current_price;
+          let calculated: CalculatedPricing | undefined;
+          if (
+            apiItem.calculated_price != null &&
+            apiItem.calculated_fee != null &&
+            apiItem.calculated_shipping_cost != null
+          ) {
+            calculated = calculateFullPricing(item, {
+              price: apiItem.calculated_price,
+              fee: apiItem.calculated_fee,
+              shipping_cost: apiItem.calculated_shipping_cost,
+            });
+          }
           return {
             ...item,
             new_price: newPrice,
             dirty: false,
+            calculated,
           };
         })
       );
       setTotal(listingsData.total ?? 0);
+      setLastUpdatedAt((listingsData as { last_updated_at?: string | null }).last_updated_at ?? null);
+      setCacheEmpty((listingsData as { cache_empty?: boolean }).cache_empty ?? false);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [pageForRequest, limitForRequest, search, statusFilter, linkedOnly, sortBy, skuFilter]);
+  }, [pageForRequest, limitForRequest, search, statusFilter, linkedOnly, sortBy, skuFilter, onlyWithSales30d]);
+
+  const handleRefreshCache = useCallback(async () => {
+    setCacheRefreshing(true);
+    setRefreshError(null);
+    try {
+      const res = await fetch("/api/pricing/cache/refresh", { method: "POST" });
+      const data = res.ok ? await res.json().catch(() => ({})) : await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = (data as { error?: string }).error ?? "Falha ao atualizar o cache";
+        console.error("[precos] Refresh cache falhou:", res.status, data);
+        setRefreshError(msg);
+      }
+      await loadListings();
+    } catch (err) {
+      setRefreshError("Erro de conexão ao atualizar. Tente novamente.");
+      await loadListings();
+    } finally {
+      setCacheRefreshing(false);
+    }
+  }, [loadListings]);
+
+  const handleRefreshItem = useCallback(
+    async (itemId: string) => {
+      setRefreshingItemId(itemId);
+      try {
+        const res = await fetch("/api/pricing/cache/refresh-item", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ item_id: itemId }),
+        });
+        if (res.ok) await loadListings();
+      } finally {
+        setRefreshingItemId(null);
+      }
+    },
+    [loadListings]
+  );
+
+  const formatLastUpdated = useCallback((iso: string | null) => {
+    if (!iso) return null;
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return iso;
+    }
+  }, []);
+
+  /** Ao mudar filtros do servidor (ou sair do modo cliente), voltar a carregar só 500 quando em modo cliente */
+  useEffect(() => {
+    if (clientSideFiltering) setLoadAllResults(false);
+  }, [clientSideFiltering, search, statusFilter, linkedOnly, sortBy, skuFilter]);
 
   useEffect(() => {
     loadReputation();
@@ -442,38 +530,9 @@ export default function PrecosPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [profitFilter]);
+  }, [profitFilter, onlyWithSales30d]);
 
-  useEffect(() => {
-    if (loading || listings.length === 0) return;
-    if (sortBy === "sales_desc" || sortBy === "sales_asc") return;
-    const itemIds = Array.from(new Set(listings.map((l) => l.item_id)));
-    if (itemIds.length === 0) return;
-    setSalesLoading(true);
-    setSalesError(false);
-    fetch("/api/pricing/sales", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ item_ids: itemIds }),
-    })
-      .then((res) => {
-        if (!res.ok) {
-          setSalesError(true);
-          return { sales: {} };
-        }
-        return res.json();
-      })
-      .then((data: { sales?: Record<string, number>; orders?: Record<string, number> }) => {
-        setSalesData(data.sales ?? {});
-        setOrdersData(data.orders ?? {});
-      })
-      .catch(() => {
-        setSalesError(true);
-        setSalesData({});
-        setOrdersData({});
-      })
-      .finally(() => setSalesLoading(false));
-  }, [loading, listings, sortBy]);
+  /** Dados sempre vêm do cache (listings já inclui sales/orders). Não busca vendas em separado. */
 
   const doCalculate = useCallback(
     async (items: ListingWithPricing[], mercadoLider: boolean) => {
@@ -885,11 +944,15 @@ export default function PrecosPage() {
     [listings]
   );
 
+  /** % de lucro para exibição e filtros. Com calculated usa lucro líquido; senão usa margem bruta (preço - custo)/preço. */
   const getProfitPercent = useCallback((listing: ListingWithPricing): number | null => {
-    if (!listing.calculated || listing.cost_price == null) return null;
-    const profit = listing.calculated.net_amount - listing.cost_price;
-    if (listing.new_price <= 0) return null;
-    return (profit / listing.new_price) * 100;
+    if (listing.cost_price == null || listing.new_price <= 0) return null;
+    if (listing.calculated) {
+      const profit = listing.calculated.net_amount - listing.cost_price;
+      return (profit / listing.new_price) * 100;
+    }
+    const grossProfit = listing.new_price - listing.cost_price;
+    return (grossProfit / listing.new_price) * 100;
   }, []);
 
   const filteredListings = useMemo(() => {
@@ -926,8 +989,8 @@ export default function PrecosPage() {
     return base;
   }, [listings, profitFilter, skuFilter, getProfitPercent, onlyWithSales30d, salesData]);
 
-  /** Com filtro de lucro, paginação no cliente; senão usa total do servidor */
-  const totalPages = profitFilter
+  /** Com filtros que dependem do cliente (lucro ou vendas 30d), paginação no cliente; senão usa total do servidor */
+  const totalPages = clientSideFiltering
     ? Math.max(1, Math.ceil(filteredListings.length / pageSize))
     : Math.ceil(total / pageSize);
 
@@ -971,12 +1034,12 @@ export default function PrecosPage() {
     };
   }, [contextMenuCol]);
 
-  /** Com filtro de lucro, mostra só a fatia da página atual; senão mostra todos da página */
+  /** Com filtros no cliente (lucro ou vendas 30d), mostra só a fatia da página atual; senão mostra todos da página */
   const sortedListings = useMemo(() => {
-    if (!profitFilter) return filteredListings;
+    if (!clientSideFiltering) return filteredListings;
     const start = (page - 1) * pageSize;
     return filteredListings.slice(start, start + pageSize);
-  }, [filteredListings, profitFilter, page, pageSize]);
+  }, [filteredListings, clientSideFiltering, page, pageSize]);
 
   const selectedCount = useMemo(() => selectedIds.size, [selectedIds]);
 
@@ -1379,6 +1442,20 @@ export default function PrecosPage() {
             />
             <span>Mercado Líder (calcular frete)</span>
           </label>
+          {lastUpdatedAt != null && (
+            <span className="text-xs text-slate-500">
+              Última atualização: {formatLastUpdated(lastUpdatedAt)}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={handleRefreshCache}
+            disabled={cacheRefreshing || loading}
+            className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Atualiza anúncios, vínculos MLB-SKU e vendas 30d no cache"
+          >
+            {cacheRefreshing ? "Atualizando…" : "Atualizar dados"}
+          </button>
           <button
             type="button"
             onClick={handleCalculateAll}
@@ -1418,6 +1495,12 @@ export default function PrecosPage() {
         </div>
       )}
 
+      {refreshError && !cacheEmpty && (
+        <div className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">
+          {refreshError}
+          <button type="button" onClick={() => setRefreshError(null)} className="ml-2 underline">Fechar</button>
+        </div>
+      )}
       {campaignMessage && (
         <div
           className={`mb-4 rounded p-3 text-sm ${
@@ -1467,6 +1550,22 @@ export default function PrecosPage() {
 
       {loading ? (
         <p className="text-sm text-slate-500">Carregando anúncios…</p>
+      ) : cacheEmpty && !loading ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+          <p className="text-sm text-amber-800">Nenhum dado no cache.</p>
+          <p className="mt-1 text-xs text-amber-700">Clique em &quot;Atualizar dados&quot; para carregar os anúncios a partir do Mercado Livre.</p>
+          {refreshError && (
+            <p className="mt-2 text-xs font-medium text-red-600">{refreshError}</p>
+          )}
+          <button
+            type="button"
+            onClick={handleRefreshCache}
+            disabled={cacheRefreshing}
+            className="mt-3 rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            {cacheRefreshing ? "Atualizando…" : "Atualizar dados"}
+          </button>
+        </div>
       ) : listings.length === 0 ? (
         <p className="text-sm text-slate-500">Nenhum anúncio encontrado com os filtros selecionados.</p>
       ) : filteredListings.length === 0 ? (
@@ -1492,11 +1591,21 @@ export default function PrecosPage() {
           )}
           <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-slate-600">
-              <span className="font-medium text-slate-800">{profitFilter ? filteredListings.length : total}</span>
+              <span className="font-medium text-slate-800">{clientSideFiltering ? filteredListings.length : total}</span>
               {" anúncios filtrados de "}
               <span className="font-medium text-slate-800">{total}</span>
             </p>
             <div className="flex flex-wrap items-center gap-3">
+              {clientSideFiltering && total > listings.length && listings.length < MAX_CLIENT_SIDE_LOAD && (
+                <button
+                  type="button"
+                  onClick={() => setLoadAllResults(true)}
+                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  title="Carregar até 10.000 itens para aplicar os filtros em todo o resultado"
+                >
+                  Carregar todos (até 10.000)
+                </button>
+              )}
               <label className="flex items-center gap-2 text-xs text-slate-600">
                 <span>Linhas por página</span>
                 <select
@@ -1512,6 +1621,8 @@ export default function PrecosPage() {
                   <option value={50}>50</option>
                   <option value={100}>100</option>
                   <option value={200}>200</option>
+                  <option value={500}>500</option>
+                  <option value={1000}>1000</option>
                 </select>
               </label>
               {totalPages > 1 && (
@@ -1795,24 +1906,43 @@ export default function PrecosPage() {
                       )}
                     </td>
                     <td
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
-                      onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
-                      title="Clique para copiar"
-                      className={`cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100 ${stickyColumnStyles[2] ? "sticky-col" : ""}`}
+                      className={`p-2 ${stickyColumnStyles[2] ? "sticky-col" : ""}`}
                       style={stickyColumnStyles[2] ? { position: "sticky", left: stickyColumnStyles[2].left, minWidth: stickyColumnStyles[2].minWidth } : undefined}
                     >
-                      {copiedCell === `mlb-${listing.id}-${listing.variation_id ?? "n"}` ? (
-                        <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
-                      ) : (
-                        listing.item_id
-                      )}
-                      {listing.variation_id && (
-                        <span className="block text-gray-400">
-                          var: {listing.variation_id}
+                      <div className="flex items-center gap-1">
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
+                          onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
+                          title="Clique para copiar"
+                          className="cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100"
+                        >
+                          {copiedCell === `mlb-${listing.id}-${listing.variation_id ?? "n"}` ? (
+                            <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
+                          ) : (
+                            listing.item_id
+                          )}
+                          {listing.variation_id && (
+                            <span className="block text-gray-400">var: {listing.variation_id}</span>
+                          )}
                         </span>
-                      )}
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleRefreshItem(listing.item_id); }}
+                          disabled={refreshingItemId === listing.item_id}
+                          title="Atualizar este item no cache"
+                          className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600 disabled:opacity-50"
+                        >
+                          {refreshingItemId === listing.item_id ? (
+                            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+                          ) : (
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </td>
                     <td
                       className={`max-w-[200px] truncate p-2 text-sm ${stickyColumnStyles[3] ? "sticky-col" : ""}`}

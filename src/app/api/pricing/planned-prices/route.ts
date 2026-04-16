@@ -137,5 +137,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  try {
+    const { updatePricingCachePlannedPrices } = await import("@/lib/pricing-cache");
+    await updatePricingCachePlannedPrices(
+      account.id,
+      toUpsert.map((u) => ({
+        item_id: u.item_id,
+        variation_id: u.variation_id === -1 ? null : u.variation_id,
+        planned_price: u.planned_price,
+      }))
+    );
+  } catch {
+    // não falha a resposta; cache será atualizado no próximo refresh
+  }
+
   return NextResponse.json({ ok: true, saved: toUpsert.length });
 }

@@ -3,6 +3,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { fetchSaleFee } from "@/lib/mercadolivre/fees";
+import { createServiceClient } from "@/lib/supabase/service";
 
 interface CalculateRequest {
   items: {
@@ -232,6 +233,24 @@ export async function POST(req: NextRequest) {
         error: "Erro ao calcular",
       });
     }
+  }
+
+  // Persistir resultados no cache para consulta rápida e filtros de lucratividade
+  const now = new Date().toISOString();
+  const serviceSupabase = createServiceClient();
+  for (const item of results) {
+    const variationId = item.variation_id ?? -1;
+    await serviceSupabase
+      .from("pricing_cache")
+      .update({
+        calculated_price: item.price,
+        calculated_fee: item.fee,
+        calculated_shipping_cost: item.shipping_cost,
+        calculated_at: now,
+      })
+      .eq("account_id", account.id)
+      .eq("item_id", item.item_id)
+      .eq("variation_id", variationId);
   }
 
   return NextResponse.json({

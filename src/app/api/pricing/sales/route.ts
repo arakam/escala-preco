@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { getSalesMap } from "@/lib/mercadolivre/sales";
 
-const MAX_ITEMS = 100;
+const MAX_ITEMS = 500;
 
 /**
  * GET /api/pricing/sales?item_ids=MLB1,MLB2,... (máx 100; URL longa pode falhar em alguns servidores)

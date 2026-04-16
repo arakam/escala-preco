@@ -224,6 +224,13 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       ended_at: new Date().toISOString(),
     });
     console.log(`[sync ${jobId}] finished: ${finalStatus}, ok=${ok}, errors=${errors}`);
+
+    if (finalStatus !== "failed") {
+      const { refreshPricingCache } = await import("@/lib/pricing-cache");
+      refreshPricingCache(accountId).catch((err) =>
+        console.error("[sync] pricing cache refresh:", err)
+      );
+    }
   } catch (e) {
     console.error("[sync]", e);
     await updateJob(supabase, jobId, {
