@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
@@ -11,7 +10,6 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,8 +26,7 @@ export default function RegisterPage() {
       setError(err.message || "Erro ao cadastrar. Tente outro email.");
       return;
     }
-    router.push("/app");
-    router.refresh();
+    window.location.assign("/app");
   }
 
   return (

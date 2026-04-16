@@ -1,6 +1,6 @@
 /**
  * Worker de sincronização de anúncios ML.
- * Roda em background (setImmediate). Usa createServiceClient() para acessar banco.
+ * Roda em background após o POST (setImmediate na rota). Usa createServiceClient() para acessar banco.
  *
  * Contempla os dois modelos do Mercado Livre:
  * - Clássico: item com array variations (has_variations = true); preço/atacado por item ou por variação.

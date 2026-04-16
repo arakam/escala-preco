@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getActiveJob, createJob } from "@/lib/jobs";
+import { runSyncInBackground } from "@/lib/server/after-response";
 import { runSyncJob } from "@/lib/mercadolivre/sync-worker";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -40,11 +41,7 @@ export async function POST(
   }
 
   const { id: jobId } = await createJob(supabase, accountId);
-  setImmediate(() => {
-    runSyncJob(jobId, accountId).catch((e) => {
-      console.error("[sync] worker error:", e);
-    });
-  });
+  runSyncInBackground(() => runSyncJob(jobId, accountId));
 
   return NextResponse.json({ job_id: jobId });
 }

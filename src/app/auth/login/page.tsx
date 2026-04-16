@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
@@ -11,9 +11,15 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") ?? "/app";
+  const redirectRaw = searchParams.get("redirect") ?? "/app";
+
+  /** Evita open redirect; só caminhos relativos ao site. */
+  function safeRedirect(path: string): string {
+    const p = path.trim();
+    if (p.startsWith("/") && !p.startsWith("//")) return p;
+    return "/app";
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -21,13 +27,17 @@ function LoginForm() {
     setLoading(true);
     const supabase = createClient();
     const { error: err } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
     if (err) {
+      setLoading(false);
       setError(err.message || "Erro ao entrar. Verifique email e senha.");
       return;
     }
-    router.push(redirect);
-    router.refresh();
+    /*
+     * Navegação completa: após login os cookies de sessão precisam ir no próximo request.
+     * router.push() (SPA) costuma chegar ao /app antes do middleware enxergar a sessão → loop no login.
+     */
+    const next = safeRedirect(redirectRaw);
+    window.location.assign(next);
   }
 
   return (

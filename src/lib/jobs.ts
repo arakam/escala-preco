@@ -21,11 +21,65 @@ export interface JobRow {
   created_at: string;
 }
 
+/** Jobs presos após crash do processo, timeout de proxy ou deploy (VPS/serverless). */
+const STALE_RUNNING_MS = 8 * 60 * 1000;
+const STALE_QUEUED_MS = 5 * 60 * 1000;
+
+/**
+ * Marca como failed jobs running há muito tempo ou queued cujo worker nunca iniciou.
+ * Evita bloquear novas operações com getActiveJob.
+ */
+export async function expireStaleJobsForAccount(
+  supabase: SupabaseClient,
+  accountId: string,
+  type: JobType = "sync_items"
+): Promise<void> {
+  const now = new Date().toISOString();
+  const runningCutoff = new Date(Date.now() - STALE_RUNNING_MS).toISOString();
+  const queuedCutoff = new Date(Date.now() - STALE_QUEUED_MS).toISOString();
+
+  const { data: staleRunning } = await supabase
+    .from("ml_jobs")
+    .select("id")
+    .eq("account_id", accountId)
+    .eq("type", type)
+    .eq("status", "running")
+    .lt("started_at", runningCutoff);
+
+  for (const row of staleRunning ?? []) {
+    await updateJob(supabase, row.id, { status: "failed", ended_at: now });
+    await addJobLog(supabase, row.id, {
+      status: "error",
+      message:
+        "Operação interrompida (processo encerrado ou tempo excedido). Inicie novamente.",
+    });
+  }
+
+  const { data: staleQueued } = await supabase
+    .from("ml_jobs")
+    .select("id")
+    .eq("account_id", accountId)
+    .eq("type", type)
+    .eq("status", "queued")
+    .lt("created_at", queuedCutoff);
+
+  for (const row of staleQueued ?? []) {
+    await updateJob(supabase, row.id, { status: "failed", ended_at: now });
+    await addJobLog(supabase, row.id, {
+      status: "error",
+      message:
+        "Operação não iniciou a tempo. Tente novamente.",
+    });
+  }
+}
+
 export async function getActiveJob(
   supabase: SupabaseClient,
   accountId: string,
   type: JobType = "sync_items"
 ): Promise<JobRow | null> {
+  await expireStaleJobsForAccount(supabase, accountId, type);
+
   const { data } = await supabase
     .from("ml_jobs")
     .select("*")

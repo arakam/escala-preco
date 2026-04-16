@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
+import { SyncImportProgress } from "@/components/SyncImportProgress";
 
 interface MLAccountRow {
   id: string;
@@ -270,35 +271,27 @@ function MercadoLivreContent() {
                     </div>
                   </div>
                   {showProgress && job && (
-                    <div className="flex flex-wrap items-center gap-2 rounded bg-gray-50 p-2 text-sm text-gray-700">
-                      <span>
-                        <span className="font-medium">Status: </span>
-                        <span>{job.status}</span>
-                        {job.total > 0 && (
-                          <>
-                            {" — "}
-                            {job.processed}/{job.total} processados
-                            {job.ok > 0 && <>, {job.ok} ok</>}
-                            {job.errors > 0 && <>, {job.errors} erros</>}
-                          </>
-                        )}
-                      </span>
-                      {job.status === "running" && syncing === acc.id && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await fetch(`/api/jobs/${job.id}`, { method: "PATCH" });
-                            } finally {
-                              setSyncing(null);
-                            }
-                          }}
-                          className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-600 shadow-sm transition hover:bg-gray-50"
-                        >
-                          Considerar finalizado
-                        </button>
-                      )}
-                    </div>
+                    <SyncImportProgress
+                      job={job}
+                      tone="plain"
+                      actions={
+                        job.status === "running" && syncing === acc.id ? (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await fetch(`/api/jobs/${job.id}`, { method: "PATCH" });
+                              } finally {
+                                setSyncing(null);
+                              }
+                            }}
+                            className="rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
+                          >
+                            Encerrar e liberar nova importação
+                          </button>
+                        ) : undefined
+                      }
+                    />
                   )}
                   {expandedAccount === acc.id && (
                     <div className="mt-2">

@@ -36,7 +36,11 @@ export async function updateSession(request: NextRequest) {
   }
   if (user && (request.nextUrl.pathname === "/auth/login" || request.nextUrl.pathname === "/auth/register")) {
     const url = request.nextUrl.clone();
-    url.pathname = "/app";
+    const dest = request.nextUrl.searchParams.get("redirect");
+    const safe =
+      dest && dest.startsWith("/") && !dest.startsWith("//") ? dest : "/app";
+    url.pathname = safe;
+    url.search = "";
     const redirect = NextResponse.redirect(url);
     supabaseResponse.cookies.getAll().forEach((c) => redirect.cookies.set(c.name, c.value, cookieOpts));
     return redirect;
