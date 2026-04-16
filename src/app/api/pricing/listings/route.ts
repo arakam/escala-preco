@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const buildCacheQuery = (base: ReturnType<typeof serviceSupabase.from>) => {
-      let q = base.select("*").eq("account_id", account.id);
+      let q = base.select("*", { count: "exact" }).eq("account_id", account.id);
       if (statusFilter) q = q.eq("status", statusFilter);
       if (linkedOnly) q = q.not("product_id", "is", null);
       if (search) q = q.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
     const { data: cacheRows, error: cacheErr, count: totalCount } = await dataQuery.range(
       offset,
       offset + limit - 1
-    ).select("*", { count: "exact" });
+    );
 
     const { data: lastRow } = await serviceSupabase
       .from("pricing_cache")

@@ -2,9 +2,10 @@
  * Cliente Supabase com service role - APENAS para uso no servidor (workers, cron).
  * Bypassa RLS. Usar somente em contexto onde a autorização já foi feita (ex: job criado pelo user).
  */
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-let serviceClient: ReturnType<typeof createClient> | null = null;
+/** `ReturnType<typeof createClient>` colapsa o schema para `never` no TS 5.x; `SupabaseClient` usa defaults seguros. */
+let serviceClient: SupabaseClient | null = null;
 
 export function createServiceClient() {
   if (serviceClient) return serviceClient;
