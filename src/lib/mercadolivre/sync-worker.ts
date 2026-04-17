@@ -180,6 +180,9 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     syncLog(jobId, "listagem concluída; iniciando detalhamento por anúncio", {
       total,
       concurrency: CONCURRENCY,
+      /** Fila única de HTTP ao ML no client (padrão ligado; ML_HTTP_SERIAL=0 desliga) */
+      mlHttpSerialized:
+        process.env.ML_HTTP_SERIAL !== "0" && process.env.ML_HTTP_SERIAL !== "false",
       verbose: syncLogVerbose(),
       heartbeatMs: syncHeartbeatMs(),
     });

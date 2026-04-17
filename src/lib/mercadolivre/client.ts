@@ -26,6 +26,25 @@ async function waitMlGlobalCooldown() {
   await new Promise((r) => setTimeout(r, d));
 }
 
+/**
+ * Uma fila global por processo Node: só uma requisição HTTP ao ML por vez.
+ * Evita 429 quando vários anúncios /items, /prices e variações disparam ao mesmo tempo.
+ * Desative com ML_HTTP_SERIAL=0 (mais rápido, mais risco de 429).
+ */
+const ML_HTTP_SERIAL =
+  process.env.ML_HTTP_SERIAL !== "0" && process.env.ML_HTTP_SERIAL !== "false";
+
+let mlHttpChain: Promise<unknown> = Promise.resolve();
+
+function runMlHttpSerialized<T>(fn: () => Promise<T>): Promise<T> {
+  const p = mlHttpChain.then(() => fn());
+  mlHttpChain = p.then(
+    () => undefined,
+    () => undefined
+  );
+  return p as Promise<T>;
+}
+
 export interface ItemsSearchResponse {
   results: string[];
   paging: { total: number; offset: number; limit: number };
@@ -99,12 +118,17 @@ async function fetchWithRetry(
 
   async function oneFetch(): Promise<Response> {
     await waitMlGlobalCooldown();
-    return fetchWithTimeout(url, {
-      method: options.method ?? "GET",
-      headers,
-      body: options.body,
-      timeout,
-    });
+    const exec = () =>
+      fetchWithTimeout(url, {
+        method: options.method ?? "GET",
+        headers,
+        body: options.body,
+        timeout,
+      });
+    if (ML_HTTP_SERIAL) {
+      return runMlHttpSerialized(exec);
+    }
+    return exec();
   }
 
   let lastError: unknown;
