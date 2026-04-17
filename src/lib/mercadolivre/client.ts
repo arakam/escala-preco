@@ -8,7 +8,23 @@
 const DEFAULT_TIMEOUT_MS = 20000;
 const MAX_NETWORK_RETRIES = 4;
 /** Máximo de respostas 429 seguidas antes de desistir nesta requisição */
-const MAX_429_ROUNDS = 14;
+const MAX_429_ROUNDS = 10;
+
+/** Pausa compartilhada: vários workers em paralelo não devem martelar o ML ao mesmo tempo após 429 */
+let mlGlobalCooldownUntil = 0;
+
+function extendMlGlobalCooldown(ms: number) {
+  const until = Date.now() + ms;
+  mlGlobalCooldownUntil = Math.max(mlGlobalCooldownUntil, until);
+}
+
+async function waitMlGlobalCooldown() {
+  const now = Date.now();
+  if (mlGlobalCooldownUntil <= now) return;
+  const d = mlGlobalCooldownUntil - now;
+  console.warn(`[ML client] cooldown global pós-429: aguardando ${Math.round(d)}ms antes da próxima chamada`);
+  await new Promise((r) => setTimeout(r, d));
+}
 
 export interface ItemsSearchResponse {
   results: string[];
@@ -82,6 +98,7 @@ async function fetchWithRetry(
   };
 
   async function oneFetch(): Promise<Response> {
+    await waitMlGlobalCooldown();
     return fetchWithTimeout(url, {
       method: options.method ?? "GET",
       headers,
@@ -98,10 +115,12 @@ async function fetchWithRetry(
       while (res.status === 429 && r429 < MAX_429_ROUNDS) {
         r429++;
         const wait = Math.min(4000 * Math.pow(1.35, r429 - 1), 90_000);
+        const jitter = Math.floor(Math.random() * 800);
+        extendMlGlobalCooldown(wait + jitter);
         console.warn(
-          `[ML client] 429 em ${url.slice(0, 80)}… — aguardando ${Math.round(wait)}ms (${r429}/${MAX_429_ROUNDS})`
+          `[ML client] 429 em ${url.slice(0, 80)}… — pausa ${Math.round(wait + jitter)}ms (${r429}/${MAX_429_ROUNDS}) [cooldown global aplicado]`
         );
-        await new Promise((r) => setTimeout(r, wait + Math.floor(Math.random() * 800)));
+        await new Promise((r) => setTimeout(r, wait + jitter));
         res = await oneFetch();
       }
       if (res.status === 429) {

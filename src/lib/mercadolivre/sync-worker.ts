@@ -18,8 +18,19 @@ import {
   type JobStatus,
 } from "@/lib/jobs";
 
-/** Menos requisições paralelas reduz 429 e timeouts na API do ML */
-const CONCURRENCY = 3;
+/**
+ * Quantos anúncios processar em paralelo. O ML costuma retornar 429 com 2–3+.
+ * Padrão: 1 (mais lento, menos bloqueio). Defina ML_SYNC_CONCURRENCY=2 no .env se o limite da conta permitir.
+ */
+function getMlSyncConcurrency(): number {
+  const raw = process.env.ML_SYNC_CONCURRENCY;
+  if (raw === undefined || raw === "") return 1;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= 1 && n <= 15) return Math.floor(n);
+  return 1;
+}
+
+const CONCURRENCY = getMlSyncConcurrency();
 
 function looksLikeMlAuthError(e: unknown): boolean {
   const m = e instanceof Error ? e.message : String(e);
