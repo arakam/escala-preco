@@ -79,3 +79,27 @@ export async function getValidAccessToken(
   const refreshed = await refreshMLAccessToken(accountId, refreshToken, supabase);
   return refreshed ? refreshed.access_token : null;
 }
+
+/**
+ * Lê ml_tokens no banco e devolve access token válido (refresh se necessário).
+ * Use durante jobs longos quando o token pode expirar no meio da sincronização.
+ */
+export async function getLatestValidAccessToken(
+  accountId: string,
+  supabase: SupabaseClient
+): Promise<string | null> {
+  const { data: tokenData } = await supabase
+    .from("ml_tokens")
+    .select("access_token, refresh_token, expires_at")
+    .eq("account_id", accountId)
+    .single();
+  const row = tokenData as { access_token: string; refresh_token: string; expires_at: string } | null;
+  if (!row) return null;
+  return getValidAccessToken(
+    accountId,
+    row.access_token,
+    row.refresh_token,
+    row.expires_at,
+    supabase
+  );
+}

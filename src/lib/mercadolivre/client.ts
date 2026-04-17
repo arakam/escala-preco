@@ -5,9 +5,10 @@
  * Com timeout, retry e respeito a rate-limit (429).
  */
 
-const DEFAULT_TIMEOUT_MS = 15000;
-const MAX_RETRIES = 2;
-const RATE_LIMIT_BACKOFF_MS = 5000;
+const DEFAULT_TIMEOUT_MS = 20000;
+const MAX_NETWORK_RETRIES = 4;
+/** Máximo de respostas 429 seguidas antes de desistir nesta requisição */
+const MAX_429_ROUNDS = 14;
 
 export interface ItemsSearchResponse {
   results: string[];
@@ -74,37 +75,55 @@ async function fetchWithRetry(
   options: { timeout?: number; method?: string; body?: string; headers?: Record<string, string> } = {}
 ): Promise<Response> {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    ...(options.body ? { "Content-Type": "application/json" } : {}),
+    ...options.headers,
+  };
+
+  async function oneFetch(): Promise<Response> {
+    return fetchWithTimeout(url, {
+      method: options.method ?? "GET",
+      headers,
+      body: options.body,
+      timeout,
+    });
+  }
+
   let lastError: unknown;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let net = 0; net < MAX_NETWORK_RETRIES; net++) {
     try {
-      const res = await fetchWithTimeout(
-        url,
-        {
-          method: options.method ?? "GET",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            ...(options.body ? { "Content-Type": "application/json" } : {}),
-            ...options.headers,
-          },
-          body: options.body,
-          timeout,
-        }
-      );
+      let res = await oneFetch();
+      let r429 = 0;
+      while (res.status === 429 && r429 < MAX_429_ROUNDS) {
+        r429++;
+        const wait = Math.min(4000 * Math.pow(1.35, r429 - 1), 90_000);
+        console.warn(
+          `[ML client] 429 em ${url.slice(0, 80)}… — aguardando ${Math.round(wait)}ms (${r429}/${MAX_429_ROUNDS})`
+        );
+        await new Promise((r) => setTimeout(r, wait + Math.floor(Math.random() * 800)));
+        res = await oneFetch();
+      }
       if (res.status === 429) {
-        const wait = RATE_LIMIT_BACKOFF_MS;
-        console.warn(`[ML client] 429 rate limit em ${url}, aguardando ${wait}ms`);
-        await new Promise((r) => setTimeout(r, wait));
-        continue;
+        throw new Error(
+          "API do Mercado Livre: limite de requisições (429) após várias tentativas. Tente sincronizar de novo em alguns minutos."
+        );
       }
       return res;
     } catch (e) {
       lastError = e;
-      if (attempt < MAX_RETRIES) {
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(
+        `[ML client] falha de rede/timeout (tentativa ${net + 1}/${MAX_NETWORK_RETRIES}) em ${url.slice(0, 72)}… — ${msg}`
+      );
+      if (net < MAX_NETWORK_RETRIES - 1) {
+        await new Promise((r) => setTimeout(r, 1000 * (net + 1)));
       }
     }
   }
-  throw lastError;
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(String(lastError ?? "Falha ao chamar API do Mercado Livre"));
 }
 
 export interface ItemsSearchScanResponse {
