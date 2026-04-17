@@ -54,11 +54,11 @@ export function SyncImportProgress({ job, actions, tone = "app" }: SyncImportPro
 
   const shell =
     tone === "app"
-      ? "rounded-app bg-slate-50 px-3 py-3 ring-1 ring-slate-200"
-      : "rounded-md bg-gray-50 p-3 text-sm text-gray-800 ring-1 ring-gray-200";
+      ? "rounded-app bg-slate-50 px-3 py-3 ring-1 ring-slate-200 dark:bg-slate-800/60 dark:ring-slate-600"
+      : "rounded-md bg-slate-50 p-3 text-sm text-fg ring-1 ring-slate-200 dark:bg-slate-800/60 dark:text-fg dark:ring-slate-600";
   const fill = tone === "app" ? "bg-primary" : "bg-brand-blue";
-  const muted = tone === "app" ? "text-slate-500" : "text-gray-500";
-  const strong = tone === "app" ? "text-slate-800" : "text-gray-900";
+  const muted = tone === "app" ? "text-slate-500 dark:text-slate-400" : "text-fg-muted";
+  const strong = tone === "app" ? "text-slate-800 dark:text-slate-100" : "text-fg-strong";
 
   return (
     <div className={shell}>
@@ -66,19 +66,19 @@ export function SyncImportProgress({ job, actions, tone = "app" }: SyncImportPro
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
             <span className={`font-semibold ${strong}`}>Importação</span>
-            <span className={tone === "app" ? "text-slate-600" : "text-gray-600"}>· {label}</span>
+            <span className={tone === "app" ? "text-slate-600 dark:text-slate-300" : "text-fg"}>· {label}</span>
             {showCounts && (
-              <span className={tone === "app" ? "text-slate-600" : "text-gray-600"}>
+              <span className={tone === "app" ? "text-slate-600 dark:text-slate-300" : "text-fg"}>
                 · {processed.toLocaleString("pt-BR")} de {total.toLocaleString("pt-BR")} anúncios
               </span>
             )}
             {showCounts && ok > 0 && (
-              <span className="text-emerald-700">
+              <span className="text-emerald-700 dark:text-emerald-400">
                 · {ok.toLocaleString("pt-BR")} com sucesso
               </span>
             )}
             {showCounts && errors > 0 && (
-              <span className="text-rose-700">
+              <span className="text-rose-700 dark:text-rose-400">
                 · {errors.toLocaleString("pt-BR")} com falha
               </span>
             )}
@@ -89,7 +89,7 @@ export function SyncImportProgress({ job, actions, tone = "app" }: SyncImportPro
             </p>
           ) : null}
           <div
-            className={`h-2 w-full overflow-hidden rounded-full ${tone === "app" ? "bg-slate-200/90" : "bg-gray-200"}`}
+            className={`h-2 w-full overflow-hidden rounded-full ${tone === "app" ? "bg-slate-200/90 dark:bg-slate-600/80" : "bg-slate-200 dark:bg-slate-600/80"}`}
             role="progressbar"
             aria-valuenow={preparing ? undefined : pct}
             aria-valuemin={0}

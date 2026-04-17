@@ -16,6 +16,10 @@
   --primary-dark: #2E42B8;
   --body-bg: #F1F5F9;
   --body-text: #0F172A;
+  /* Texto semântico (use com utilitários text-fg-* no Tailwind) */
+  --text-strong: #0f172a;
+  --text-default: #334155;
+  --text-muted: #64748b;
   --card-bg: #FFFFFF;
   --card-border: #E2E8F0;
   --stroke: #E2E8F0;
@@ -35,6 +39,9 @@
 .dark {
   --body-bg: #0F172A;
   --body-text: #F8FAFC;
+  --text-strong: #f8fafc;
+  --text-default: #e2e8f0;
+  --text-muted: #94a3b8;
   --card-bg: #1E293B;
   --card-border: #334155;
   --stroke: #334155;
@@ -171,6 +178,7 @@ body {
 .app-table td {
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
+  color: var(--text-default);
 }
 
 /* Colunas congeladas (sticky) na tabela de preços — position/left/minWidth vêm do inline style */

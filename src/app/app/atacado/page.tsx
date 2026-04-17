@@ -100,7 +100,7 @@ function competitivenessBadge(status: PriceReferenceStatus | undefined): { label
     case "high":
       return { label: "Preço alto", className: "bg-red-200 text-red-800" };
     default:
-      return { label: "Sem referência", className: "bg-gray-200 text-gray-700" };
+      return { label: "Sem referência", className: "bg-gray-200 text-fg dark:bg-slate-600 dark:text-slate-200" };
   }
 }
 
@@ -185,20 +185,20 @@ function AtacadoPageContent() {
     return (
       <tr
         key={rowKey(r)}
-        className={`border-b border-gray-100 ${isInvalid ? "bg-red-50" : ""} hover:bg-gray-50`}
+        className={`border-b border-gray-100 dark:border-slate-700 ${isInvalid ? "bg-red-50 dark:bg-red-950/30" : ""} hover:bg-gray-50 dark:hover:bg-slate-800/50`}
       >
         <td className="p-2">
-          <button type="button" onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)} title="Clique para copiar" className="font-mono text-gray-600 hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
+          <button type="button" onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)} title="Clique para copiar" className="font-mono text-fg hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
             {copiedCell === `${rowKey(r)}-mlb` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.item_id}
           </button>
         </td>
         <td className="p-2">
           {r.user_product_id ? (
-            <button type="button" onClick={() => copyToClipboard(r.user_product_id ?? "", `${rowKey(r)}-mlbu`)} title="Clique para copiar" className="font-mono text-gray-600 hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
+            <button type="button" onClick={() => copyToClipboard(r.user_product_id ?? "", `${rowKey(r)}-mlbu`)} title="Clique para copiar" className="font-mono text-fg hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
               {copiedCell === `${rowKey(r)}-mlbu` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.user_product_id}
             </button>
           ) : (
-            <span className="text-gray-400">—</span>
+            <span className="text-fg-muted">—</span>
           )}
         </td>
         <td className="max-w-[180px] truncate p-2" title={r.title ?? ""}>{r.title ?? "—"}</td>
@@ -206,10 +206,10 @@ function AtacadoPageContent() {
           {r.has_variations ? (
             <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800">Sim</span>
           ) : (
-            <span className="text-gray-400">Não</span>
+            <span className="text-fg-muted">Não</span>
           )}
         </td>
-        <td className="p-2 text-gray-600" title={r.sku ? "Clique para copiar" : "Configure SELLER_SKU no ML."}>
+        <td className="p-2 text-fg" title={r.sku ? "Clique para copiar" : "Configure SELLER_SKU no ML."}>
           {r.sku ? (
             <button type="button" onClick={() => copyToClipboard(r.sku ?? "", `${rowKey(r)}-sku`)} className="hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer max-w-full truncate block">
               {copiedCell === `${rowKey(r)}-sku` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.sku}
@@ -231,15 +231,15 @@ function AtacadoPageContent() {
                 {isOpen && (
                   <>
                     <div className="fixed inset-0 z-10" aria-hidden onClick={() => setCompetitivenessPopoverKey(null)} />
-                    <div className="absolute left-0 top-full z-20 mt-1 min-w-[280px] rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
-                      <p className="text-sm font-medium text-gray-800">Referência de preço</p>
+                    <div className="absolute left-0 top-full z-20 mt-1 min-w-[280px] rounded-lg border border-stroke bg-card p-3 shadow-lg dark:border-slate-600">
+                      <p className="text-sm font-medium text-fg-strong">Referência de preço</p>
                       <dl className="mt-2 space-y-1 text-sm">
-                        <div><dt className="text-gray-500">Preço atual</dt><dd>{r.current_price != null ? `R$ ${Number(r.current_price).toFixed(2)}` : "—"}</dd></div>
-                        <div><dt className="text-gray-500">Referência / sugestão</dt><dd>{formatRefPrice(r.reference_summary)}</dd></div>
-                        {r.reference_summary?.explanation && <div><dt className="text-gray-500">Status</dt><dd className="text-gray-700">{r.reference_summary.explanation}</dd></div>}
-                        {r.reference_summary?.updated_at && <div><dt className="text-gray-500">Última atualização</dt><dd className="text-gray-600">{new Date(r.reference_summary.updated_at).toLocaleString("pt-BR")}</dd></div>}
+                        <div><dt className="text-fg-muted">Preço atual</dt><dd>{r.current_price != null ? `R$ ${Number(r.current_price).toFixed(2)}` : "—"}</dd></div>
+                        <div><dt className="text-fg-muted">Referência / sugestão</dt><dd>{formatRefPrice(r.reference_summary)}</dd></div>
+                        {r.reference_summary?.explanation && <div><dt className="text-fg-muted">Status</dt><dd className="text-fg">{r.reference_summary.explanation}</dd></div>}
+                        {r.reference_summary?.updated_at && <div><dt className="text-fg-muted">Última atualização</dt><dd className="text-fg">{new Date(r.reference_summary.updated_at).toLocaleString("pt-BR")}</dd></div>}
                       </dl>
-                      <button type="button" disabled={!!refJobId && refJob?.status !== "success" && refJob?.status !== "failed" && refJob?.status !== "partial"} onClick={async () => { setRefJobId(null); setRefJob(null); const res = await fetch("/api/price-references/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, scope: "item", item_id: r.item_id }) }); const data = await res.json(); if (res.ok && data.job_id) { setRefJobId(data.job_id); setRefJob({ status: "queued" }); } setCompetitivenessPopoverKey(null); }} className="mt-3 w-full rounded bg-gray-100 px-2 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50">{refJobId && (refJob?.status === "running" || refJob?.status === "queued") ? "Atualizando…" : "Atualizar referência"}</button>
+                      <button type="button" disabled={!!refJobId && refJob?.status !== "success" && refJob?.status !== "failed" && refJob?.status !== "partial"} onClick={async () => { setRefJobId(null); setRefJob(null); const res = await fetch("/api/price-references/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, scope: "item", item_id: r.item_id }) }); const data = await res.json(); if (res.ok && data.job_id) { setRefJobId(data.job_id); setRefJob({ status: "queued" }); } setCompetitivenessPopoverKey(null); }} className="mt-3 w-full rounded bg-gray-100 px-2 py-1.5 text-xs font-medium text-fg hover:bg-gray-200 disabled:opacity-50">{refJobId && (refJob?.status === "running" || refJob?.status === "queued") ? "Atualizando…" : "Atualizar referência"}</button>
                     </div>
                   </>
                 )}
@@ -266,8 +266,8 @@ function AtacadoPageContent() {
         </td>
         <td className="p-2">
           <button type="button" onClick={() => saveRow(r)} disabled={saving} className="mr-1 text-brand-blue hover:underline disabled:opacity-50">Salvar</button>
-          <button type="button" onClick={() => revertRow(r)} className="mr-1 text-gray-600 hover:underline">Reverter</button>
-          <button type="button" onClick={() => setReceivableRowKey(rowKey(r))} title="Ver recebível" className="text-gray-600 hover:underline">Ver recebível</button>
+          <button type="button" onClick={() => revertRow(r)} className="mr-1 text-fg hover:underline">Reverter</button>
+          <button type="button" onClick={() => setReceivableRowKey(rowKey(r))} title="Ver recebível" className="text-fg hover:underline">Ver recebível</button>
         </td>
       </tr>
     );
@@ -740,7 +740,7 @@ function AtacadoPageContent() {
 
   if (!accountsLoaded) {
     return (
-      <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200">
+      <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
         <div className="flex flex-col items-center justify-center py-8">
           <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-primary"></div>
           <p className="text-sm text-slate-500">Carregando…</p>
@@ -764,11 +764,11 @@ function AtacadoPageContent() {
   }
 
   return (
-    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200">
+    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-slate-900 sm:text-xl">Editor de Preço de Atacado</h1>
-          <p className="mt-1 text-xs text-slate-600 sm:text-sm">
+          <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 sm:text-xl">Editor de Preço de Atacado</h1>
+          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
             Defina faixas de quantidade e preços de atacado para seus anúncios.
           </p>
         </div>
@@ -802,7 +802,7 @@ function AtacadoPageContent() {
               setRefJob({ status: "queued" });
             }
           }}
-          className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {refJobId && (refJob?.status === "queued" || refJob?.status === "running")
             ? "Atualizando referências…"
@@ -819,7 +819,7 @@ function AtacadoPageContent() {
         <button
           type="button"
           onClick={exportCsv}
-          className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+          className="rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50"
         >
           Exportar CSV
         </button>
@@ -834,7 +834,7 @@ function AtacadoPageContent() {
           type="button"
           onClick={openImportCsv}
           disabled={importLoading}
-          className="rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {importLoading ? "Processando…" : "Importar CSV"}
         </button>
@@ -846,7 +846,7 @@ function AtacadoPageContent() {
         >
           {applyLoading ? (editedCount > 0 ? "Salvando e aplicando…" : "Aplicando…") : "Aplicar Preços no Mercado Livre"}
         </button>
-        <span className="text-sm text-gray-500">
+        <span className="text-sm text-fg-muted">
           Aplicar envia os preços de atacado salvos para o Mercado Livre. Alterações não salvas serão salvas automaticamente ao clicar.
         </span>
         {editedCount > 0 && (
@@ -857,12 +857,12 @@ function AtacadoPageContent() {
       {/* Filtros */}
       <div className="mb-6 rounded-app border border-slate-200 bg-slate-50 p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800">Filtros</h3>
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Filtros</h3>
           {hasActiveFilters && (
             <button
               type="button"
               onClick={clearFilters}
-              className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-800 hover:underline"
+              className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-800 dark:text-slate-100 hover:underline"
             >
               Limpar filtros
             </button>
@@ -882,7 +882,7 @@ function AtacadoPageContent() {
               value={filterMlb}
               onChange={(e) => setFilterMlb(e.target.value)}
               placeholder="ex: MLB123"
-              className="w-32 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono text-slate-800 shadow-sm"
+              className="w-32 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-100 shadow-sm"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -892,7 +892,7 @@ function AtacadoPageContent() {
               value={filterMlbu}
               onChange={(e) => setFilterMlbu(e.target.value)}
               placeholder="ex: MLBU123"
-              className="w-32 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono text-slate-800 shadow-sm"
+              className="w-32 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-100 shadow-sm"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -902,7 +902,7 @@ function AtacadoPageContent() {
               value={filterTitle}
               onChange={(e) => setFilterTitle(e.target.value)}
               placeholder="Buscar no título"
-              className="w-48 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 shadow-sm"
+              className="w-48 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 shadow-sm"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -912,7 +912,7 @@ function AtacadoPageContent() {
               value={filterSku}
               onChange={(e) => setFilterSku(e.target.value)}
               placeholder="ex: SKU-001"
-              className="w-32 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono text-slate-800 shadow-sm"
+              className="w-32 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-100 shadow-sm"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -920,7 +920,7 @@ function AtacadoPageContent() {
             <select
               value={filterVariation}
               onChange={(e) => setFilterVariation(e.target.value as "" | "com" | "sem")}
-              className="w-32 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 shadow-sm"
+              className="w-32 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 shadow-sm"
             >
               <option value="">Todas</option>
               <option value="com">Com variação</option>
@@ -932,7 +932,7 @@ function AtacadoPageContent() {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="w-36 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 shadow-sm"
+              className="w-36 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 shadow-sm"
             >
               <option value="">Todos</option>
               <option value="mlbu">Só MLBU</option>
@@ -951,7 +951,7 @@ function AtacadoPageContent() {
                 onChange={(e) => setHideVariations(e.target.checked)}
                 className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary"
               />
-              <span className="text-xs text-slate-700">Só anúncios</span>
+              <span className="text-xs text-slate-700 dark:text-slate-200">Só anúncios</span>
             </label>
           </div>
           <button
@@ -994,9 +994,9 @@ function AtacadoPageContent() {
               </span>
             )}
             {filtersApplied.status && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-800">
+              <span className="inline-flex items-center gap-1 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-fg-strong">
                 Status: {filtersApplied.status.replace(/_/g, " ")}
-                <button type="button" onClick={() => { setFilterStatus(""); setFiltersApplied((p) => ({ ...p, status: "" })); }} className="hover:text-gray-600">×</button>
+                <button type="button" onClick={() => { setFilterStatus(""); setFiltersApplied((p) => ({ ...p, status: "" })); }} className="hover:text-fg">×</button>
               </span>
             )}
             {filtersApplied.hideVariations && (
@@ -1089,7 +1089,7 @@ function AtacadoPageContent() {
                       className={`border-t border-gray-100 ${pr.valid ? "bg-white" : "bg-red-50"}`}
                     >
                       <td className="p-2">{pr.row}</td>
-                      <td className="p-2 font-mono text-gray-700">{pr.item_id || "—"}</td>
+                      <td className="p-2 font-mono text-fg">{pr.item_id || "—"}</td>
                       <td className="p-2">{pr.variation_id || "—"}</td>
                       <td className="max-w-[80px] truncate p-2">{pr.sku || "—"}</td>
                       <td className="max-w-[120px] truncate p-2" title={pr.title}>
@@ -1144,7 +1144,7 @@ function AtacadoPageContent() {
               type="button"
               onClick={cancelImport}
               disabled={importConfirming}
-              className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-fg hover:bg-gray-50 disabled:opacity-50"
             >
               Cancelar
             </button>
@@ -1155,7 +1155,7 @@ function AtacadoPageContent() {
       {loadingRows ? (
         <div className="flex flex-col items-center justify-center py-12">
           <div className="mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-primary"></div>
-          <p className="font-medium text-slate-600">Carregando anúncios…</p>
+          <p className="font-medium text-slate-600 dark:text-slate-300">Carregando anúncios…</p>
           <p className="mt-1 text-sm text-slate-400">Isso pode levar alguns segundos</p>
         </div>
       ) : rows.length === 0 ? (
@@ -1174,49 +1174,49 @@ function AtacadoPageContent() {
           >
             <thead className="bg-slate-50">
               <tr>
-                <th className="whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   MLB
                 </th>
                 <th
-                  className="whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                  className="whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
                   title="Código User Product (MLBU)"
                 >
                   MLBU
                 </th>
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Título
                 </th>
                 <th
-                  className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                  className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
                   title="Indica se o anúncio possui variações"
                 >
                   Variação
                 </th>
                 <th
-                  className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                  className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
                   title="SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação."
                 >
                   SKU
                 </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Preço R$
                 </th>
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Competitividade
                 </th>
                 {[1, 2, 3, 4, 5].map((i) => (
                   <th
                     key={i}
                     colSpan={2}
-                    className="whitespace-nowrap p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    className="whitespace-nowrap p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
                   >
                     T{i}
                   </th>
                 ))}
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Status
                 </th>
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Ações
                 </th>
               </tr>
@@ -1236,7 +1236,7 @@ function AtacadoPageContent() {
                   type="button"
                   onClick={() => setPage(1)}
                   disabled={page === 1}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   «
                 </button>
@@ -1244,18 +1244,18 @@ function AtacadoPageContent() {
                   type="button"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Anterior
                 </button>
-                <span className="px-2 text-xs font-semibold text-slate-800">
+                <span className="px-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
                   {page}
                 </span>
                 <button
                   type="button"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Próxima
                 </button>
@@ -1263,7 +1263,7 @@ function AtacadoPageContent() {
                   type="button"
                   onClick={() => setPage(totalPages)}
                   disabled={page === totalPages}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   »
                 </button>

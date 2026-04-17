@@ -320,11 +320,11 @@ export default function ProdutosPage() {
   const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200">
+    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-slate-900 sm:text-xl">Cadastro de Produtos</h1>
-          <p className="mt-1 text-xs text-slate-600 sm:text-sm">
+          <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 sm:text-xl">Cadastro de Produtos</h1>
+          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
             Organize seus produtos, custos e parâmetros usados nas demais telas.
           </p>
         </div>
@@ -349,14 +349,14 @@ export default function ProdutosPage() {
           <button
             type="button"
             onClick={() => setImportModalOpen(true)}
-            className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="btn btn-secondary px-4 py-2 text-sm"
           >
             Importar CSV
           </button>
           <button
             type="button"
             onClick={handleExport}
-            className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="btn btn-secondary px-4 py-2 text-sm"
           >
             Exportar CSV
           </button>
@@ -390,7 +390,7 @@ export default function ProdutosPage() {
         </div>
       )}
 
-      <div className="mb-4 mt-2 flex gap-2 border-b border-slate-200">
+      <div className="mb-4 mt-2 flex gap-2 border-b border-slate-200 dark:border-slate-600">
         <button
           type="button"
           onClick={() => {
@@ -400,7 +400,7 @@ export default function ProdutosPage() {
           className={`px-4 py-2 text-sm font-medium ${
             viewMode === "products"
               ? "border-b-2 border-brand-blue text-brand-blue"
-              : "text-gray-600 hover:text-gray-900"
+              : "text-fg hover:text-fg-strong"
           }`}
         >
           Produtos
@@ -414,7 +414,7 @@ export default function ProdutosPage() {
           className={`px-4 py-2 text-sm font-medium ${
             viewMode === "stats"
               ? "border-b-2 border-brand-blue text-brand-blue"
-              : "text-gray-600 hover:text-gray-900"
+              : "text-fg hover:text-fg-strong"
           }`}
         >
           Estatísticas de Anúncios
@@ -423,13 +423,13 @@ export default function ProdutosPage() {
 
       <form onSubmit={handleSearchSubmit} className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex flex-1 items-center gap-2 rounded-full bg-slate-50 px-3 py-1.5 ring-1 ring-slate-200">
-          <span className="text-xs text-slate-500">Buscar</span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">Buscar</span>
           <input
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="SKU ou título…"
-            className="h-7 flex-1 border-0 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+            className="h-7 flex-1 border-0 bg-transparent text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none"
           />
         </div>
         <button
@@ -446,7 +446,7 @@ export default function ProdutosPage() {
               setSearchInput("");
               setPage(1);
             }}
-            className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-800 hover:underline"
+            className="text-xs font-medium text-slate-500 dark:text-slate-400 underline-offset-4 hover:text-slate-800 dark:text-slate-100 hover:underline"
           >
             Limpar
           </button>
@@ -454,10 +454,10 @@ export default function ProdutosPage() {
       </form>
 
       {loading ? (
-        <p className="text-gray-500">Carregando…</p>
+        <p className="text-fg-muted">Carregando…</p>
       ) : viewMode === "products" ? (
         products.length === 0 ? (
-          <p className="text-gray-500">
+          <p className="text-fg-muted">
             Nenhum produto cadastrado. Clique em &quot;Novo Produto&quot; ou importe via CSV.
           </p>
         ) : (
@@ -468,40 +468,40 @@ export default function ProdutosPage() {
             >
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     SKU
                   </th>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Título
                   </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Custo (R$)
                   </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Imposto (%)
                   </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Taxa Extra (%)
                   </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Desp. Fixas (R$)
                   </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Altura (cm)
                   </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Largura (cm)
                   </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Comprimento (cm)
                   </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Peso (kg)
                   </th>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Criado em
                   </th>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Ações
                   </th>
                 </tr>
@@ -510,39 +510,39 @@ export default function ProdutosPage() {
                 {products.map((product) => (
                   <tr
                     key={product.id}
-                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5"
+                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
                   >
-                    <td className="p-2 font-mono text-xs text-slate-700">{product.sku}</td>
+                    <td className="p-2 font-mono text-xs text-slate-700 dark:text-slate-200">{product.sku}</td>
                     <td className="max-w-[240px] p-2" title={product.title}>
-                      <span className="line-clamp-2 text-sm font-medium text-slate-900">
+                      <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
                         {product.title}
                       </span>
                     </td>
-                    <td className="p-2 text-right text-sm text-slate-700">
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.cost_price != null ? Number(product.cost_price).toFixed(2) : "—"}
                     </td>
-                    <td className="p-2 text-right text-sm text-slate-700">
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.tax_percent != null ? Number(product.tax_percent).toFixed(2) : "—"}
                     </td>
-                    <td className="p-2 text-right text-sm text-slate-700">
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.extra_fee_percent != null ? Number(product.extra_fee_percent).toFixed(2) : "—"}
                     </td>
-                    <td className="p-2 text-right text-sm text-slate-700">
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.fixed_expenses != null ? Number(product.fixed_expenses).toFixed(2) : "—"}
                     </td>
-                    <td className="p-2 text-right text-sm text-slate-700">
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.height ?? "—"}
                     </td>
-                    <td className="p-2 text-right text-sm text-slate-700">
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.width ?? "—"}
                     </td>
-                    <td className="p-2 text-right text-sm text-slate-700">
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.length ?? "—"}
                     </td>
-                    <td className="p-2 text-right text-sm text-slate-700">
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.weight ?? "—"}
                     </td>
-                    <td className="p-2 text-xs text-slate-500">
+                    <td className="p-2 text-xs text-slate-500 dark:text-slate-400">
                       {new Date(product.created_at).toLocaleDateString()}
                     </td>
                     <td className="p-2">
@@ -570,7 +570,7 @@ export default function ProdutosPage() {
 
             {totalPages > 1 && (
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   Mostrando página {page} de {totalPages} · {total} produto(s)
                 </p>
                 <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
@@ -578,7 +578,7 @@ export default function ProdutosPage() {
                     type="button"
                     onClick={() => setPage(1)}
                     disabled={page === 1}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     «
                   </button>
@@ -586,18 +586,18 @@ export default function ProdutosPage() {
                     type="button"
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     disabled={page <= 1}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Anterior
                   </button>
-                  <span className="px-2 text-xs font-semibold text-slate-800">
+                  <span className="px-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
                     {page}
                   </span>
                   <button
                     type="button"
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     disabled={page >= totalPages}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Próxima
                   </button>
@@ -605,7 +605,7 @@ export default function ProdutosPage() {
                     type="button"
                     onClick={() => setPage(totalPages)}
                     disabled={page === totalPages}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     »
                   </button>
@@ -615,7 +615,7 @@ export default function ProdutosPage() {
           </>
         )
       ) : stats.length === 0 ? (
-        <p className="text-gray-500">
+        <p className="text-fg-muted">
           Nenhum produto com anúncios vinculados. Clique em &quot;Vincular SKUs&quot; para associar automaticamente.
         </p>
       ) : (
@@ -626,40 +626,40 @@ export default function ProdutosPage() {
           >
             <thead className="bg-slate-50">
               <tr>
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   SKU
                 </th>
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Título
                 </th>
-                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Anúncios
                 </th>
-                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Variações
                 </th>
-                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Total
                 </th>
-                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Ativos
                 </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Preço Mín
                 </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Preço Máx
                 </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Preço Médio
                 </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Custo
                 </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Estoque
                 </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Vendidos
                 </th>
               </tr>
@@ -668,11 +668,11 @@ export default function ProdutosPage() {
               {stats.map((stat) => (
                 <tr
                   key={stat.product_id}
-                  className="border-b border-slate-100 bg-white/50 hover:bg-primary/5"
+                  className="border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
                 >
-                  <td className="p-2 font-mono text-xs text-slate-700">{stat.sku}</td>
+                  <td className="p-2 font-mono text-xs text-slate-700 dark:text-slate-200">{stat.sku}</td>
                   <td className="max-w-[200px] p-2" title={stat.title}>
-                    <span className="line-clamp-2 text-sm font-medium text-slate-900">
+                    <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
                       {stat.title}
                     </span>
                   </td>
@@ -680,7 +680,7 @@ export default function ProdutosPage() {
                   <td className="p-2 text-center">{stat.total_variations}</td>
                   <td className="p-2 text-center font-semibold">{stat.total_listings}</td>
                   <td className="p-2 text-center">
-                    <span className={stat.active_items > 0 ? "text-green-600" : "text-gray-400"}>
+                    <span className={stat.active_items > 0 ? "text-green-600" : "text-fg-muted"}>
                       {stat.active_items + stat.active_variations}
                     </span>
                   </td>
@@ -693,7 +693,7 @@ export default function ProdutosPage() {
                   <td className="p-2 text-right">
                     {stat.avg_item_price != null ? `R$ ${Number(stat.avg_item_price).toFixed(2)}` : "—"}
                   </td>
-                  <td className="p-2 text-right text-gray-600">
+                  <td className="p-2 text-right text-fg">
                     {stat.cost_price != null ? `R$ ${Number(stat.cost_price).toFixed(2)}` : "—"}
                   </td>
                   <td className="p-2 text-right">{stat.total_available_qty}</td>
@@ -705,7 +705,7 @@ export default function ProdutosPage() {
 
           {totalPages > 1 && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Mostrando página {page} de {totalPages} · {total} produto(s) com anúncios
               </p>
               <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
@@ -713,7 +713,7 @@ export default function ProdutosPage() {
                   type="button"
                   onClick={() => setPage(1)}
                   disabled={page === 1}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   «
                 </button>
@@ -721,18 +721,18 @@ export default function ProdutosPage() {
                   type="button"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Anterior
                 </button>
-                <span className="px-2 text-xs font-semibold text-slate-800">
+                <span className="px-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
                   {page}
                 </span>
                 <button
                   type="button"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Próxima
                 </button>
@@ -740,7 +740,7 @@ export default function ProdutosPage() {
                   type="button"
                   onClick={() => setPage(totalPages)}
                   disabled={page === totalPages}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   »
                 </button>
@@ -760,17 +760,17 @@ export default function ProdutosPage() {
           aria-label={editingProduct ? "Editar Produto" : "Novo Produto"}
         >
           <div
-            className="w-full max-w-lg rounded-lg border border-gray-200 bg-white shadow-xl"
+            className="w-full max-w-lg rounded-lg border border-stroke bg-card shadow-xl dark:border-slate-600"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-gray-200 p-4">
-              <h2 className="text-lg font-semibold text-gray-900">
+            <div className="flex items-center justify-between border-b border-stroke p-4 dark:border-slate-600">
+              <h2 className="text-lg font-semibold text-fg-strong">
                 {editingProduct ? "Editar Produto" : "Novo Produto"}
               </h2>
               <button
                 type="button"
                 onClick={closeModal}
-                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                className="rounded p-1 text-fg-muted hover:bg-gray-100 hover:text-fg dark:hover:bg-slate-700"
                 aria-label="Fechar"
               >
                 ✕
@@ -783,104 +783,104 @@ export default function ProdutosPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-1">
-                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                  <label className="mb-1 block text-sm font-medium text-fg">
                     SKU <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     value={form.sku}
                     onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                     required
                   />
                 </div>
                 <div className="col-span-1">
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Título</label>
+                  <label className="mb-1 block text-sm font-medium text-fg">Título</label>
                   <input
                     type="text"
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Altura (cm)</label>
+                  <label className="mb-1 block text-sm font-medium text-fg">Altura (cm)</label>
                   <input
                     type="text"
                     value={form.height}
                     onChange={(e) => setForm({ ...form, height: e.target.value })}
                     placeholder="0,00"
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Largura (cm)</label>
+                  <label className="mb-1 block text-sm font-medium text-fg">Largura (cm)</label>
                   <input
                     type="text"
                     value={form.width}
                     onChange={(e) => setForm({ ...form, width: e.target.value })}
                     placeholder="0,00"
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Comprimento (cm)</label>
+                  <label className="mb-1 block text-sm font-medium text-fg">Comprimento (cm)</label>
                   <input
                     type="text"
                     value={form.length}
                     onChange={(e) => setForm({ ...form, length: e.target.value })}
                     placeholder="0,00"
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Peso (kg)</label>
+                  <label className="mb-1 block text-sm font-medium text-fg">Peso (kg)</label>
                   <input
                     type="text"
                     value={form.weight}
                     onChange={(e) => setForm({ ...form, weight: e.target.value })}
                     placeholder="0,000"
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Preço de Custo (R$)</label>
+                  <label className="mb-1 block text-sm font-medium text-fg">Preço de Custo (R$)</label>
                   <input
                     type="text"
                     value={form.cost_price}
                     onChange={(e) => setForm({ ...form, cost_price: e.target.value })}
                     placeholder="0,00"
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Imposto (%)</label>
+                  <label className="mb-1 block text-sm font-medium text-fg">Imposto (%)</label>
                   <input
                     type="text"
                     value={form.tax_percent}
                     onChange={(e) => setForm({ ...form, tax_percent: e.target.value })}
                     placeholder="0,00"
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Taxa Extra (%)</label>
+                  <label className="mb-1 block text-sm font-medium text-fg">Taxa Extra (%)</label>
                   <input
                     type="text"
                     value={form.extra_fee_percent}
                     onChange={(e) => setForm({ ...form, extra_fee_percent: e.target.value })}
                     placeholder="0,00"
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Desp. Fixas (R$)</label>
+                  <label className="mb-1 block text-sm font-medium text-fg">Desp. Fixas (R$)</label>
                   <input
                     type="text"
                     value={form.fixed_expenses}
                     onChange={(e) => setForm({ ...form, fixed_expenses: e.target.value })}
                     placeholder="0,00"
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-brand-blue focus:outline-none"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
               </div>
@@ -889,7 +889,7 @@ export default function ProdutosPage() {
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="btn btn-secondary px-4 py-2 text-sm"
                 >
                   Cancelar
                 </button>
@@ -916,11 +916,11 @@ export default function ProdutosPage() {
           aria-label="Confirmar exclusão"
         >
           <div
-            className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-xl"
+            className="w-full max-w-sm rounded-lg border border-stroke bg-card p-6 shadow-xl dark:border-slate-600"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="mb-4 text-lg font-semibold text-gray-900">Excluir Produto</h2>
-            <p className="mb-6 text-sm text-gray-600">
+            <h2 className="mb-4 text-lg font-semibold text-fg-strong">Excluir Produto</h2>
+            <p className="mb-6 text-sm text-fg">
               Tem certeza que deseja excluir o produto <strong>{deleteConfirm.sku}</strong>?
               Esta ação não pode ser desfeita.
             </p>
@@ -928,7 +928,7 @@ export default function ProdutosPage() {
               <button
                 type="button"
                 onClick={() => setDeleteConfirm(null)}
-                className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="btn btn-secondary px-4 py-2 text-sm"
               >
                 Cancelar
               </button>
@@ -955,25 +955,25 @@ export default function ProdutosPage() {
           aria-label="Confirmar exclusão de todos os produtos"
         >
           <div
-            className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-xl"
+            className="w-full max-w-sm rounded-lg border border-stroke bg-card p-6 shadow-xl dark:border-slate-600"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="mb-4 text-lg font-semibold text-gray-900">Excluir todos os produtos</h2>
-            <p className="mb-3 text-sm text-gray-700 font-medium">
+            <h2 className="mb-4 text-lg font-semibold text-fg-strong">Excluir todos os produtos</h2>
+            <p className="mb-3 text-sm text-fg font-medium">
               Esta ação irá remover <span className="font-semibold">todos os produtos da sua base</span>.
             </p>
-            <p className="mb-4 text-sm text-gray-600">
+            <p className="mb-4 text-sm text-fg">
               Os anúncios do Mercado Livre <span className="font-semibold">não serão apagados</span>, apenas ficarão
               <span className="font-semibold"> desvinculados dos produtos</span>.
             </p>
-            <p className="mb-6 text-xs text-gray-500">
+            <p className="mb-6 text-xs text-fg-muted">
               Depois você poderá importar ou vincular novamente os produtos a partir dos anúncios.
             </p>
             <div className="flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setDeleteAllOpen(false)}
-                className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="btn btn-secondary px-4 py-2 text-sm"
               >
                 Cancelar
               </button>
@@ -1003,35 +1003,35 @@ export default function ProdutosPage() {
           aria-label="Importar CSV"
         >
           <div
-            className="w-full max-w-md rounded-lg border border-gray-200 bg-white shadow-xl"
+            className="w-full max-w-md rounded-lg border border-stroke bg-card shadow-xl dark:border-slate-600"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-gray-200 p-4">
-              <h2 className="text-lg font-semibold text-gray-900">Importar Produtos via CSV</h2>
+            <div className="flex items-center justify-between border-b border-stroke p-4 dark:border-slate-600">
+              <h2 className="text-lg font-semibold text-fg-strong">Importar Produtos via CSV</h2>
               <button
                 type="button"
                 onClick={() => {
                   setImportModalOpen(false);
                   setImportResult(null);
                 }}
-                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                className="rounded p-1 text-fg-muted hover:bg-gray-100 hover:text-fg dark:hover:bg-slate-700"
                 aria-label="Fechar"
               >
                 ✕
               </button>
             </div>
             <form onSubmit={handleImport} className="p-4">
-              <p className="mb-4 text-sm text-gray-600">
+              <p className="mb-4 text-sm text-fg">
                 O arquivo CSV deve conter a coluna <strong>SKU</strong> (obrigatório),
                 e opcionalmente: Titulo, Altura, Largura, Comprimento, Peso, PrecoCusto, Imposto, TaxaExtra, DespFixas.
               </p>
-              <p className="mb-4 text-sm text-gray-600">
+              <p className="mb-4 text-sm text-fg">
                 Produtos com SKU existente serão atualizados.
               </p>
               <a
                 href="/api/products/template"
                 download="modelo_produtos.csv"
-                className="mb-4 inline-flex items-center gap-2 rounded border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                className="btn btn-secondary mb-4 inline-flex items-center gap-2"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -1043,7 +1043,7 @@ export default function ProdutosPage() {
                 ref={fileInputRef}
                 type="file"
                 accept=".csv"
-                className="mb-4 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                className="input mb-4 w-full py-2 text-sm"
                 required
               />
 
@@ -1080,7 +1080,7 @@ export default function ProdutosPage() {
                     setImportModalOpen(false);
                     setImportResult(null);
                   }}
-                  className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="btn btn-secondary px-4 py-2 text-sm"
                 >
                   Fechar
                 </button>
@@ -1107,40 +1107,40 @@ export default function ProdutosPage() {
           aria-label="SKUs não cadastrados"
         >
           <div
-            className="w-full max-w-2xl rounded-lg border border-gray-200 bg-white shadow-xl"
+            className="w-full max-w-2xl rounded-lg border border-stroke bg-card shadow-xl dark:border-slate-600"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-gray-200 p-4">
-              <h2 className="text-lg font-semibold text-gray-900">
+            <div className="flex items-center justify-between border-b border-stroke p-4 dark:border-slate-600">
+              <h2 className="text-lg font-semibold text-fg-strong">
                 SKUs encontrados em anúncios sem produto cadastrado
               </h2>
               <button
                 type="button"
                 onClick={() => setUnregisteredModalOpen(false)}
-                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                className="rounded p-1 text-fg-muted hover:bg-gray-100 hover:text-fg dark:hover:bg-slate-700"
                 aria-label="Fechar"
               >
                 ✕
               </button>
             </div>
             <div className="max-h-[60vh] overflow-y-auto p-4">
-              <p className="mb-4 text-sm text-gray-600">
+              <p className="mb-4 text-sm text-fg">
                 Estes SKUs foram encontrados no campo &quot;seller_custom_field&quot; dos seus anúncios,
                 mas não possuem um produto cadastrado. Clique em um SKU para criar o produto.
               </p>
               {unregisteredSkus.length === 0 ? (
-                <p className="text-gray-500">Todos os SKUs já estão cadastrados!</p>
+                <p className="text-fg-muted">Todos os SKUs já estão cadastrados!</p>
               ) : (
                 <div className="space-y-2">
                   {unregisteredSkus.map((item) => (
                     <div
                       key={item.sku}
-                      className="flex items-center justify-between rounded border border-gray-200 p-3 hover:bg-gray-50"
+                      className="flex items-center justify-between rounded border border-stroke p-3 hover:bg-gray-50 dark:border-slate-600 dark:hover:bg-slate-700/50"
                     >
                       <div className="flex-1">
                         <span className="font-mono text-sm font-medium">{item.sku}</span>
                         {item.sample_title && (
-                          <p className="mt-1 truncate text-xs text-gray-500" title={item.sample_title}>
+                          <p className="mt-1 truncate text-xs text-fg-muted" title={item.sample_title}>
                             {item.sample_title}
                           </p>
                         )}
@@ -1162,11 +1162,11 @@ export default function ProdutosPage() {
                 </div>
               )}
             </div>
-            <div className="flex justify-end border-t border-gray-200 p-4">
+            <div className="flex justify-end border-t border-stroke p-4 dark:border-slate-600">
               <button
                 type="button"
                 onClick={() => setUnregisteredModalOpen(false)}
-                className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="btn btn-secondary px-4 py-2 text-sm"
               >
                 Fechar
               </button>

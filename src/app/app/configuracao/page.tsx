@@ -188,7 +188,7 @@ function ConfiguracaoContent() {
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-900">
-      <h1 className="mb-4 text-xl font-semibold text-gray-900 dark:text-slate-50">Configuração</h1>
+      <h1 className="mb-4 text-xl font-semibold text-fg-strong">Configuração</h1>
 
       <div className="mb-6 flex flex-wrap gap-2 border-b border-gray-200 pb-2 dark:border-slate-700">
         <button
@@ -229,7 +229,7 @@ function ConfiguracaoContent() {
       {activeTab === "ml" && (
         <>
           <section className="mb-8">
-            <h2 className="mb-3 text-lg font-medium text-gray-900 dark:text-slate-50">Mercado Livre</h2>
+            <h2 className="mb-3 text-lg font-medium text-fg-strong">Mercado Livre</h2>
             <p className="mb-4 text-gray-600 dark:text-slate-300">
               Conecte sua conta do Mercado Livre para sincronizar anúncios e gerenciar preços.
             </p>
@@ -288,7 +288,7 @@ function ConfiguracaoContent() {
 
           {accounts.length > 0 && (
             <section className="mb-8">
-              <h2 className="mb-3 text-lg font-medium text-gray-900 dark:text-slate-50">Reputação do Vendedor</h2>
+              <h2 className="mb-3 text-lg font-medium text-fg-strong">Reputação do Vendedor</h2>
               <p className="mb-4 text-gray-600 dark:text-slate-300">
                 Métricas de qualidade da sua conta no Mercado Livre.
               </p>
@@ -323,7 +323,7 @@ function ConfiguracaoContent() {
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
                       <p className="text-sm text-gray-500 dark:text-slate-300">Vendas Concluídas</p>
-                      <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-slate-50">
+                      <p className="mt-1 text-2xl font-bold text-fg-strong">
                         {reputation.reputation.metrics.sales.completed}
                       </p>
                       <p className="text-xs text-gray-400 dark:text-slate-400">
@@ -393,7 +393,7 @@ function ConfiguracaoContent() {
                   </div>
 
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-slate-700 dark:bg-slate-800">
-                    <h3 className="mb-3 text-sm font-medium text-gray-900 dark:text-slate-50">
+                    <h3 className="mb-3 text-sm font-medium text-fg-strong">
                       Qualificações dos Compradores
                     </h3>
                     <div className="flex items-center gap-4">
@@ -478,7 +478,7 @@ function ConfiguracaoContent() {
 
       {activeTab === "frete" && (
         <section className="mb-8">
-          <h2 className="mb-3 text-lg font-medium text-gray-900 dark:text-slate-50">
+          <h2 className="mb-3 text-lg font-medium text-fg-strong">
             Tabela de Frete - Mercado Livre
           </h2>
           <p className="mb-4 text-gray-600 dark:text-slate-300">
@@ -510,31 +510,31 @@ function ConfiguracaoContent() {
               <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-slate-700">
                 <thead className="bg-gray-50 dark:bg-slate-800">
                   <tr>
-                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-900 dark:text-slate-50">
+                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">
                       Peso
                     </th>
-                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900 dark:text-slate-50">
+                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-fg-strong">
                       R$ 0-18
                     </th>
-                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900 dark:text-slate-50">
+                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-fg-strong">
                       R$ 19-48
                     </th>
-                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900 dark:text-slate-50">
+                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-fg-strong">
                       R$ 49-78
                     </th>
-                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900 dark:text-slate-50">
+                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-fg-strong">
                       R$ 79-99
                     </th>
-                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900 dark:text-slate-50">
+                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-fg-strong">
                       R$ 100-119
                     </th>
-                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900 dark:text-slate-50">
+                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-fg-strong">
                       R$ 120-149
                     </th>
-                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900 dark:text-slate-50">
+                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-fg-strong">
                       R$ 150-199
                     </th>
-                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-900 dark:text-slate-50">
+                    <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-fg-strong">
                       ≥ R$ 200
                     </th>
                   </tr>
@@ -542,7 +542,7 @@ function ConfiguracaoContent() {
                 <tbody className="divide-y divide-gray-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
                   {shippingCosts.map((row) => (
                     <tr key={row.id} className="hover:bg-gray-50 dark:hover:bg-slate-800">
-                      <td className="whitespace-nowrap px-3 py-2 font-medium text-gray-900 dark:text-slate-50">
+                      <td className="whitespace-nowrap px-3 py-2 font-medium text-fg-strong">
                         {row.weight_label}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-right text-gray-600 dark:text-slate-200">
@@ -592,7 +592,7 @@ function ConfiguracaoContent() {
 
       {activeTab === "aparencia" && (
         <section className="mb-4">
-          <h2 className="mb-3 text-lg font-medium text-gray-900 dark:text-slate-50">Aparência</h2>
+          <h2 className="mb-3 text-lg font-medium text-fg-strong">Aparência</h2>
           <p className="mb-4 text-gray-600 dark:text-slate-300">
             Escolha entre modo claro e escuro para a interface do EscalaPreço.
           </p>
@@ -607,7 +607,7 @@ function ConfiguracaoContent() {
                   : "border-gray-200 bg-white hover:border-blue-400 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-blue-400"
               }`}
             >
-              <span className="text-sm font-semibold text-gray-900 dark:text-slate-50">Modo claro</span>
+              <span className="text-sm font-semibold text-fg-strong">Modo claro</span>
               <span className="text-xs text-gray-500 dark:text-slate-300">
                 Fundo claro com textos escuros. Ideal para ambientes bem iluminados.
               </span>
@@ -622,7 +622,7 @@ function ConfiguracaoContent() {
                   : "border-gray-200 bg-slate-900 text-slate-50 hover:border-blue-400 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-400"
               }`}
             >
-              <span className="text-sm font-semibold text-gray-900 dark:text-slate-50">Modo escuro</span>
+              <span className="text-sm font-semibold text-fg-strong">Modo escuro</span>
               <span className="text-xs text-gray-500 dark:text-slate-300">
                 Fundo escuro com textos claros. Mais confortável para uso prolongado.
               </span>

@@ -3,7 +3,7 @@ import Image from "next/image";
 
 export default function HomePage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-gray-50 p-8">
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-canvas p-8">
       <Image
         src="/logo.png"
         alt="Escala Preço"
@@ -12,7 +12,7 @@ export default function HomePage() {
         className="h-28 w-auto object-contain sm:h-36"
         priority
       />
-      <p className="text-gray-600">Integração com Mercado Livre</p>
+      <p className="text-fg">Integração com Mercado Livre</p>
       <div className="flex gap-4">
         <Link
           href="/auth/login"
@@ -22,7 +22,7 @@ export default function HomePage() {
         </Link>
         <Link
           href="/auth/register"
-          className="rounded border border-brand-blue bg-white px-4 py-2 font-medium text-brand-blue transition hover:bg-brand-blue hover:text-white"
+          className="rounded border border-brand-blue bg-card px-4 py-2 font-medium text-brand-blue transition hover:bg-brand-blue hover:text-white dark:border-blue-400 dark:text-blue-300 dark:hover:text-white"
         >
           Cadastrar
         </Link>

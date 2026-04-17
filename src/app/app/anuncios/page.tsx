@@ -304,7 +304,7 @@ export default function AnunciosPage() {
       <div className="rounded-app bg-white/80 p-4 shadow-sm ring-1 ring-slate-200 backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-lg font-semibold text-slate-900 sm:text-xl">Anúncios</h1>
+            <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 sm:text-xl">Anúncios</h1>
             <p className="mt-1 text-xs text-slate-600 sm:text-sm">
               Visualize rapidamente seus anúncios, atacado configurado e status no Mercado Livre.
             </p>
@@ -576,7 +576,7 @@ export default function AnunciosPage() {
                       )}
                     </td>
                     <td className="max-w-[260px] p-2" title={item.title ?? ""}>
-                      <span className="line-clamp-2 text-sm font-medium text-slate-900">
+                      <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
                         {item.title ?? "—"}
                       </span>
                     </td>
@@ -747,13 +747,13 @@ export default function AnunciosPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-gray-200 p-4">
-              <h2 className="text-lg font-semibold text-gray-900">
+              <h2 className="text-lg font-semibold text-fg-strong">
                 Família: {familyModal.familyName || familyModal.familyId}
               </h2>
               <button
                 type="button"
                 onClick={() => setFamilyModal(null)}
-                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                className="rounded p-1 text-fg-muted hover:bg-gray-100 hover:text-fg dark:hover:bg-slate-700"
                 aria-label="Fechar"
               >
                 ✕

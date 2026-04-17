@@ -202,10 +202,10 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
         className="absolute inset-0 bg-black/50"
         onClick={onClose}
       />
-      <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
+      <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 text-gray-400 hover:text-gray-600"
+          className="absolute right-4 top-4 text-fg-muted hover:text-fg"
         >
           <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -214,9 +214,9 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
         <h2 className="mb-4 text-xl font-semibold">Como funciona a Calculadora de Preços</h2>
 
-        <div className="space-y-4 text-sm text-gray-700">
+        <div className="space-y-4 text-sm text-fg">
           <section>
-            <h3 className="mb-2 font-medium text-gray-900">Objetivo</h3>
+            <h3 className="mb-2 font-medium text-fg-strong">Objetivo</h3>
             <p>
               Esta ferramenta permite simular preços de venda em massa para seus anúncios do Mercado Livre,
               calculando automaticamente as taxas e o valor líquido que você receberá.
@@ -224,7 +224,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </section>
 
           <section>
-            <h3 className="mb-2 font-medium text-gray-900">Colunas da tabela</h3>
+            <h3 className="mb-2 font-medium text-fg-strong">Colunas da tabela</h3>
             <ul className="list-inside list-disc space-y-1">
               <li><strong>SKU:</strong> Código do produto vinculado ao anúncio</li>
               <li><strong>Vendas (30d):</strong> Soma das quantidades vendidas em cada pedido (unidades) nos últimos 30 dias. Clique no cabeçalho para ordenar.</li>
@@ -243,7 +243,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </section>
 
           <section>
-            <h3 className="mb-2 font-medium text-gray-900">Como usar</h3>
+            <h3 className="mb-2 font-medium text-fg-strong">Como usar</h3>
             <ol className="list-inside list-decimal space-y-1">
               <li>Os anúncios são carregados automaticamente ao abrir a página</li>
               <li>Edite o campo &quot;Preço Novo&quot; para simular um valor diferente</li>
@@ -254,7 +254,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </section>
 
           <section>
-            <h3 className="mb-2 font-medium text-gray-900">Mercado Líder</h3>
+            <h3 className="mb-2 font-medium text-fg-strong">Mercado Líder</h3>
             <p>
               Se sua conta é Mercado Líder, marque a opção para incluir o custo de frete no cálculo.
               O frete usa o maior entre peso real e peso volumétrico (altura × largura × comprimento ÷ 6000), como no Mercado Livre.
@@ -262,7 +262,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </section>
 
           <section>
-            <h3 className="mb-2 font-medium text-gray-900">Filtros (busca geral)</h3>
+            <h3 className="mb-2 font-medium text-fg-strong">Filtros (busca geral)</h3>
             <ul className="list-inside list-disc space-y-1">
               <li><strong>Status:</strong> Filtre por anúncios ativos, pausados ou encerrados</li>
               <li><strong>Apenas vinculados:</strong> Mostra apenas anúncios com produto vinculado</li>
@@ -273,19 +273,19 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </section>
 
           <section>
-            <h3 className="mb-2 font-medium text-gray-900">Imposto, Taxa Extra e Desp. Fixas</h3>
+            <h3 className="mb-2 font-medium text-fg-strong">Imposto, Taxa Extra e Desp. Fixas</h3>
             <p className="mb-2">
               Imposto e taxa extra (percentuais) e despesas fixas (valor em R$) são cadastrados na página de Produtos.
               Imposto e taxa extra são calculados sobre o preço de venda; despesas fixas são um valor fixo em R$ descontado do líquido.
             </p>
-            <p className="text-gray-600">
+            <p className="text-fg">
               Exemplo: Produto com 10% de imposto, 5% de taxa extra e R$ 2,00 de desp. fixas vendido a R$ 100,00:
               <br />Imposto = R$ 10,00 | Taxa Extra = R$ 5,00 | Desp. Fixas = R$ 2,00
             </p>
           </section>
 
           <section>
-            <h3 className="mb-2 font-medium text-gray-900">Observações</h3>
+            <h3 className="mb-2 font-medium text-fg-strong">Observações</h3>
             <ul className="list-inside list-disc space-y-1">
               <li>Anúncios sem tipo de listagem (N/D) precisam ser sincronizados novamente</li>
               <li>Para ter o custo, vincule o anúncio a um produto na página de Produtos</li>
@@ -1181,14 +1181,14 @@ export default function PrecosPage() {
 
   if (loading && listings.length === 0) {
     return (
-      <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200">
-        <p className="text-sm text-slate-500">Carregando…</p>
+      <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
+        <p className="text-sm text-slate-500 dark:text-slate-400">Carregando…</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200">
+    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       {campaignOpen && (
@@ -1197,40 +1197,40 @@ export default function PrecosPage() {
             className="absolute inset-0 bg-black/50"
             onClick={() => setCampaignOpen(false)}
           />
-          <div className="relative w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+          <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
             <h2 className="mb-4 text-lg font-semibold">Criar campanha no Mercado Livre</h2>
             <div className="space-y-3 text-sm">
               <div>
-                <label className="mb-1 block text-gray-700">Nome da campanha</label>
+                <label className="mb-1 block text-fg">Nome da campanha</label>
                 <input
                   type="text"
                   value={campaignName}
                   onChange={(e) => setCampaignName(e.target.value)}
-                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                  className="input w-full py-2 text-sm"
                   placeholder="Ex.: Campanha preços março"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="mb-1 block text-gray-700">Início</label>
+                  <label className="mb-1 block text-fg">Início</label>
                   <input
                     type="date"
                     value={campaignStart}
                     onChange={(e) => setCampaignStart(e.target.value)}
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                    className="input w-full py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-gray-700">Término</label>
+                  <label className="mb-1 block text-fg">Término</label>
                   <input
                     type="date"
                     value={campaignFinish}
                     onChange={(e) => setCampaignFinish(e.target.value)}
-                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                    className="input w-full py-2 text-sm"
                   />
                 </div>
               </div>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-fg-muted">
                 Use os anúncios selecionados nesta página. O preço de cada item virá do &quot;Preço Novo&quot; salvo (planned_price).
               </p>
             </div>
@@ -1238,7 +1238,7 @@ export default function PrecosPage() {
               <button
                 type="button"
                 onClick={() => setCampaignOpen(false)}
-                className="rounded border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                className="btn btn-secondary px-4 py-2 text-sm"
                 disabled={campaignLoading}
               >
                 Cancelar
@@ -1258,18 +1258,18 @@ export default function PrecosPage() {
 
       <div className="flex w-full min-h-0 gap-4">
         <aside
-          className={`flex shrink-0 flex-col self-start rounded-r-lg border border-slate-200 bg-white shadow-sm transition-[width] duration-200 ease-out ${
+          className={`flex shrink-0 flex-col self-start rounded-r-lg border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 shadow-sm transition-[width] duration-200 ease-out ${
             filterPanelOpen ? "w-[280px]" : "w-10"
           }`}
         >
           {filterPanelOpen ? (
             <div className="flex flex-col gap-3 overflow-y-auto p-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-700">Filtros</span>
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtros</span>
                 <button
                   type="button"
                   onClick={() => setFilterPanelOpen(false)}
-                  className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-700"
+                  className="rounded p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:text-slate-200"
                   title="Fechar"
                 >
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1279,34 +1279,34 @@ export default function PrecosPage() {
               </div>
               <form onSubmit={handleSearchSubmit} className="flex flex-col gap-3">
                 <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500">Buscar</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Buscar</span>
                   <input
                     type="text"
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
                     placeholder="Título ou MLB…"
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="w-full rounded border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500">SKU</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">SKU</span>
                   <input
                     type="text"
                     value={skuFilter}
                     onChange={(e) => setSkuFilter(e.target.value)}
                     placeholder="Filtrar por SKU…"
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="w-full rounded border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-2 font-mono text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500">Status</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Status</span>
                   <select
                     value={statusFilter}
                     onChange={(e) => {
                       setStatusFilter(e.target.value);
                       setPage(1);
                     }}
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="w-full rounded border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option value="">Todos os status</option>
                     <option value="active">Ativo</option>
@@ -1324,7 +1324,7 @@ export default function PrecosPage() {
                     }}
                     className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
                   />
-                  <span className="text-xs text-slate-700">Só vinculados</span>
+                  <span className="text-xs text-slate-700 dark:text-slate-200">Só vinculados</span>
                 </label>
                 <label className="flex cursor-pointer items-center gap-2" title="Exibe apenas anúncios com pelo menos 1 venda nos últimos 30 dias">
                   <input
@@ -1336,10 +1336,10 @@ export default function PrecosPage() {
                     }}
                     className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
                   />
-                  <span className="text-xs text-slate-700">Só com vendas (30d)</span>
+                  <span className="text-xs text-slate-700 dark:text-slate-200">Só com vendas (30d)</span>
                 </label>
                 <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500">Lucratividade</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Lucratividade</span>
                   <div className="flex flex-wrap gap-1">
                     {(
                       [
@@ -1357,7 +1357,7 @@ export default function PrecosPage() {
                         className={`rounded px-2 py-1 text-xs font-medium ${
                           profitFilter === value
                             ? "bg-brand-blue text-white"
-                            : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                            : "border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50"
                         }`}
                       >
                         {label}
@@ -1386,7 +1386,7 @@ export default function PrecosPage() {
                         setSortBy("");
                         setPage(1);
                       }}
-                      className="w-full rounded border border-slate-300 bg-white py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      className="w-full rounded border border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-800 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50"
                     >
                       Limpar filtros
                     </button>
@@ -1398,7 +1398,7 @@ export default function PrecosPage() {
             <button
               type="button"
               onClick={() => setFilterPanelOpen(true)}
-              className="flex flex-col items-center gap-0.5 py-2 w-full text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors"
+              className="flex w-full flex-col items-center gap-0.5 py-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50 dark:hover:text-slate-200"
               title="Abrir filtros"
             >
               <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1415,11 +1415,11 @@ export default function PrecosPage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-slate-900 sm:text-xl">Calculadora de Preços</h1>
+            <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 sm:text-xl">Calculadora de Preços</h1>
             <button
               type="button"
               onClick={() => setHelpOpen(true)}
-              className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              className="rounded-full p-1 text-fg-muted hover:bg-gray-100 hover:text-fg dark:hover:bg-slate-700"
               title="Como funciona"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1427,12 +1427,12 @@ export default function PrecosPage() {
               </svg>
             </button>
           </div>
-          <p className="mt-1 text-xs text-slate-600 sm:text-sm">
+          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
             Simule preços de venda e veja o valor líquido a receber
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 shadow-sm">
+          <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 shadow-sm">
             <input
               type="checkbox"
               checked={isMercadoLider}
@@ -1443,7 +1443,7 @@ export default function PrecosPage() {
             <span>Mercado Líder (calcular frete)</span>
           </label>
           {lastUpdatedAt != null && (
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
               Última atualização: {formatLastUpdated(lastUpdatedAt)}
             </span>
           )}
@@ -1451,7 +1451,7 @@ export default function PrecosPage() {
             type="button"
             onClick={handleRefreshCache}
             disabled={cacheRefreshing || loading}
-            className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
             title="Atualiza anúncios, vínculos MLB-SKU e vendas 30d no cache"
           >
             {cacheRefreshing ? "Atualizando…" : "Atualizar dados"}
@@ -1549,7 +1549,7 @@ export default function PrecosPage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-slate-500">Carregando anúncios…</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Carregando anúncios…</p>
       ) : cacheEmpty && !loading ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
           <p className="text-sm text-amber-800">Nenhum dado no cache.</p>
@@ -1567,9 +1567,9 @@ export default function PrecosPage() {
           </button>
         </div>
       ) : listings.length === 0 ? (
-        <p className="text-sm text-slate-500">Nenhum anúncio encontrado com os filtros selecionados.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Nenhum anúncio encontrado com os filtros selecionados.</p>
       ) : filteredListings.length === 0 ? (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-slate-500 dark:text-slate-400">
           Nenhum anúncio nesta faixa de lucratividade. Calcule os preços ou escolha outro filtro.
         </p>
       ) : (
@@ -1577,36 +1577,36 @@ export default function PrecosPage() {
           <div className="pricing-table-with-sticky">
           {contextMenuCol !== null && contextMenuPos && (
             <div
-              className="fixed z-30 rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+              className="fixed z-30 rounded-lg border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 py-1 shadow-lg"
               style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
             >
               <button
                 type="button"
                 onClick={() => toggleStickyColumn(contextMenuCol)}
-                className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50"
               >
                 {stickyColumns.has(contextMenuCol) ? "Descongelar coluna" : "Congelar coluna"}
               </button>
             </div>
           )}
           <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-slate-600">
-              <span className="font-medium text-slate-800">{clientSideFiltering ? filteredListings.length : total}</span>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              <span className="font-medium text-slate-800 dark:text-slate-100">{clientSideFiltering ? filteredListings.length : total}</span>
               {" anúncios filtrados de "}
-              <span className="font-medium text-slate-800">{total}</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
             </p>
             <div className="flex flex-wrap items-center gap-3">
               {clientSideFiltering && total > listings.length && listings.length < MAX_CLIENT_SIDE_LOAD && (
                 <button
                   type="button"
                   onClick={() => setLoadAllResults(true)}
-                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  className="rounded border border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50"
                   title="Carregar até 10.000 itens para aplicar os filtros em todo o resultado"
                 >
                   Carregar todos (até 10.000)
                 </button>
               )}
-              <label className="flex items-center gap-2 text-xs text-slate-600">
+              <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
                 <span>Linhas por página</span>
                 <select
                   value={pageSize}
@@ -1615,7 +1615,7 @@ export default function PrecosPage() {
                     setPageSize(value);
                     setPage(1);
                   }}
-                  className="rounded border border-slate-200 bg-white px-2 py-1.5 text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="rounded border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-2 py-1.5 text-slate-700 dark:text-slate-200 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 >
                   <option value={25}>25</option>
                   <option value={50}>50</option>
@@ -1627,13 +1627,13 @@ export default function PrecosPage() {
               </label>
               {totalPages > 1 && (
                 <>
-                  <span className="text-xs text-slate-500">Página {page} de {totalPages}</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Página {page} de {totalPages}</span>
                   <div className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-1 text-xs ring-1 ring-slate-200">
                   <button
                     type="button"
                     onClick={() => setPage(1)}
                     disabled={page === 1}
-                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
                     title="Primeira página"
                   >
                     «
@@ -1642,18 +1642,18 @@ export default function PrecosPage() {
                     type="button"
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     disabled={page <= 1}
-                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Anterior
                   </button>
-                  <span className="min-w-[2ch] px-1.5 py-1 text-center font-semibold text-slate-800">
+                  <span className="min-w-[2ch] px-1.5 py-1 text-center font-semibold text-slate-800 dark:text-slate-100">
                     {page}
                   </span>
                   <button
                     type="button"
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     disabled={page >= totalPages}
-                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Próxima
                   </button>
@@ -1661,7 +1661,7 @@ export default function PrecosPage() {
                     type="button"
                     onClick={() => setPage(totalPages)}
                     disabled={page === totalPages}
-                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
                     title="Última página"
                   >
                     »
@@ -1677,7 +1677,7 @@ export default function PrecosPage() {
             <thead className="bg-slate-50">
               <tr>
                 <th
-                  className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[0] ? "sticky-col" : ""}`}
+                  className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[0] ? "sticky-col" : ""}`}
                   style={stickyColumnStyles[0] ? { position: "sticky", left: stickyColumnStyles[0].left, minWidth: stickyColumnStyles[0].minWidth } : undefined}
                   onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(0); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}
                 >
@@ -1692,62 +1692,62 @@ export default function PrecosPage() {
                       type="button"
                       onClick={(e) => { e.stopPropagation(); toggleStickyColumn(0); }}
                       title={stickyColumns.has(0) ? "Descongelar coluna" : "Congelar coluna"}
-                      className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100"
+                      className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100"
                     >
                       <PinIcon pinned={stickyColumns.has(0)} className={stickyColumns.has(0) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
                 <th
-                  className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[1] ? "sticky-col" : ""}`}
+                  className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[1] ? "sticky-col" : ""}`}
                   style={stickyColumnStyles[1] ? { position: "sticky", left: stickyColumnStyles[1].left, minWidth: stickyColumnStyles[1].minWidth } : undefined}
                   onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(1); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}
                 >
                   <div className="flex items-center justify-between gap-1">
                     <span>Imagem</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(1); }} title={stickyColumns.has(1) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(1); }} title={stickyColumns.has(1) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(1)} className={stickyColumns.has(1) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
                 <th
-                  className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[2] ? "sticky-col" : ""}`}
+                  className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[2] ? "sticky-col" : ""}`}
                   style={stickyColumnStyles[2] ? { position: "sticky", left: stickyColumnStyles[2].left, minWidth: stickyColumnStyles[2].minWidth } : undefined}
                   onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(2); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}
                 >
                   <div className="flex items-center justify-between gap-1">
                     <span>MLB</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(2); }} title={stickyColumns.has(2) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(2); }} title={stickyColumns.has(2) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(2)} className={stickyColumns.has(2) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
                 <th
-                  className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[3] ? "sticky-col" : ""}`}
+                  className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[3] ? "sticky-col" : ""}`}
                   style={stickyColumnStyles[3] ? { position: "sticky", left: stickyColumnStyles[3].left, minWidth: stickyColumnStyles[3].minWidth } : undefined}
                   onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(3); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}
                 >
                   <div className="flex items-center justify-between gap-1">
                     <span>Título</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(3); }} title={stickyColumns.has(3) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(3); }} title={stickyColumns.has(3) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(3)} className={stickyColumns.has(3) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
                 <th
-                  className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[4] ? "sticky-col" : ""}`}
+                  className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[4] ? "sticky-col" : ""}`}
                   style={stickyColumnStyles[4] ? { position: "sticky", left: stickyColumnStyles[4].left, minWidth: stickyColumnStyles[4].minWidth } : undefined}
                   onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(4); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}
                 >
                   <div className="flex items-center justify-between gap-1">
                     <span>SKU</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(4); }} title={stickyColumns.has(4) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(4); }} title={stickyColumns.has(4) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(4)} className={stickyColumns.has(4) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
                 <th
-                  className={`cursor-pointer select-none rounded p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 ${stickyColumnStyles[5] ? "sticky-col" : ""}`}
+                  className={`cursor-pointer select-none rounded p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 hover:bg-slate-100 ${stickyColumnStyles[5] ? "sticky-col" : ""}`}
                   style={stickyColumnStyles[5] ? { position: "sticky", left: stickyColumnStyles[5].left, minWidth: stickyColumnStyles[5].minWidth } : undefined}
                   title="Clique para ordenar por vendas (30 dias)"
                   onClick={() => {
@@ -1759,103 +1759,103 @@ export default function PrecosPage() {
                 >
                   <div className="flex items-center justify-end gap-1">
                     <span>Vendas (30d){sortBy === "sales_desc" && " ↓"}{sortBy === "sales_asc" && " ↑"}</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(5); }} title={stickyColumns.has(5) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(5); }} title={stickyColumns.has(5) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(5)} className={stickyColumns.has(5) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[6] ? "sticky-col" : ""}`} style={stickyColumnStyles[6] ? { position: "sticky", left: stickyColumnStyles[6].left, minWidth: stickyColumnStyles[6].minWidth } : undefined} title="Número de pedidos pagos (30 dias)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(6); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[6] ? "sticky-col" : ""}`} style={stickyColumnStyles[6] ? { position: "sticky", left: stickyColumnStyles[6].left, minWidth: stickyColumnStyles[6].minWidth } : undefined} title="Número de pedidos pagos (30 dias)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(6); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Pedidos (30d)</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(6); }} title={stickyColumns.has(6) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(6); }} title={stickyColumns.has(6) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(6)} className={stickyColumns.has(6) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[7] ? "sticky-col" : ""}`} style={stickyColumnStyles[7] ? { position: "sticky", left: stickyColumnStyles[7].left, minWidth: stickyColumnStyles[7].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(7); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[7] ? "sticky-col" : ""}`} style={stickyColumnStyles[7] ? { position: "sticky", left: stickyColumnStyles[7].left, minWidth: stickyColumnStyles[7].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(7); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Custo</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(7); }} title={stickyColumns.has(7) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(7); }} title={stickyColumns.has(7) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(7)} className={stickyColumns.has(7) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[8] ? "sticky-col" : ""}`} style={stickyColumnStyles[8] ? { position: "sticky", left: stickyColumnStyles[8].left, minWidth: stickyColumnStyles[8].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(8); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[8] ? "sticky-col" : ""}`} style={stickyColumnStyles[8] ? { position: "sticky", left: stickyColumnStyles[8].left, minWidth: stickyColumnStyles[8].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(8); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Preço Atual</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(8); }} title={stickyColumns.has(8) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(8); }} title={stickyColumns.has(8) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(8)} className={stickyColumns.has(8) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[9] ? "sticky-col" : ""}`} style={stickyColumnStyles[9] ? { position: "sticky", left: stickyColumnStyles[9].left, minWidth: stickyColumnStyles[9].minWidth } : undefined} title="Promoção ML exige desconto ≥ 5%" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(9); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[9] ? "sticky-col" : ""}`} style={stickyColumnStyles[9] ? { position: "sticky", left: stickyColumnStyles[9].left, minWidth: stickyColumnStyles[9].minWidth } : undefined} title="Promoção ML exige desconto ≥ 5%" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(9); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Preço Novo</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(9); }} title={stickyColumns.has(9) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(9); }} title={stickyColumns.has(9) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(9)} className={stickyColumns.has(9) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[10] ? "sticky-col" : ""}`} style={stickyColumnStyles[10] ? { position: "sticky", left: stickyColumnStyles[10].left, minWidth: stickyColumnStyles[10].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[10] ? "sticky-col" : ""}`} style={stickyColumnStyles[10] ? { position: "sticky", left: stickyColumnStyles[10].left, minWidth: stickyColumnStyles[10].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Taxa ML</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(10); }} title={stickyColumns.has(10) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(10); }} title={stickyColumns.has(10) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(10)} className={stickyColumns.has(10) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[11] ? "sticky-col" : ""}`} style={stickyColumnStyles[11] ? { position: "sticky", left: stickyColumnStyles[11].left, minWidth: stickyColumnStyles[11].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(11); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[11] ? "sticky-col" : ""}`} style={stickyColumnStyles[11] ? { position: "sticky", left: stickyColumnStyles[11].left, minWidth: stickyColumnStyles[11].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(11); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Frete</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(11); }} title={stickyColumns.has(11) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(11); }} title={stickyColumns.has(11) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(11)} className={stickyColumns.has(11) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[12] ? "sticky-col" : ""}`} style={stickyColumnStyles[12] ? { position: "sticky", left: stickyColumnStyles[12].left, minWidth: stickyColumnStyles[12].minWidth } : undefined} title="Imposto sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(12); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[12] ? "sticky-col" : ""}`} style={stickyColumnStyles[12] ? { position: "sticky", left: stickyColumnStyles[12].left, minWidth: stickyColumnStyles[12].minWidth } : undefined} title="Imposto sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(12); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Imposto</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(12); }} title={stickyColumns.has(12) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(12); }} title={stickyColumns.has(12) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(12)} className={stickyColumns.has(12) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[13] ? "sticky-col" : ""}`} style={stickyColumnStyles[13] ? { position: "sticky", left: stickyColumnStyles[13].left, minWidth: stickyColumnStyles[13].minWidth } : undefined} title="Taxa extra sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(13); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[13] ? "sticky-col" : ""}`} style={stickyColumnStyles[13] ? { position: "sticky", left: stickyColumnStyles[13].left, minWidth: stickyColumnStyles[13].minWidth } : undefined} title="Taxa extra sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(13); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Taxa Extra</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(13); }} title={stickyColumns.has(13) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(13); }} title={stickyColumns.has(13) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(13)} className={stickyColumns.has(13) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[14] ? "sticky-col" : ""}`} style={stickyColumnStyles[14] ? { position: "sticky", left: stickyColumnStyles[14].left, minWidth: stickyColumnStyles[14].minWidth } : undefined} title="Despesas fixas em R$ (cadastrado no produto)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(14); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[14] ? "sticky-col" : ""}`} style={stickyColumnStyles[14] ? { position: "sticky", left: stickyColumnStyles[14].left, minWidth: stickyColumnStyles[14].minWidth } : undefined} title="Despesas fixas em R$ (cadastrado no produto)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(14); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Desp. Fixas</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(14); }} title={stickyColumns.has(14) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(14); }} title={stickyColumns.has(14) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(14)} className={stickyColumns.has(14) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[15] ? "sticky-col" : ""}`} style={stickyColumnStyles[15] ? { position: "sticky", left: stickyColumnStyles[15].left, minWidth: stickyColumnStyles[15].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(15); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[15] ? "sticky-col" : ""}`} style={stickyColumnStyles[15] ? { position: "sticky", left: stickyColumnStyles[15].left, minWidth: stickyColumnStyles[15].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(15); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Vai Receber</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(15); }} title={stickyColumns.has(15) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(15); }} title={stickyColumns.has(15) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(15)} className={stickyColumns.has(15) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[16] ? "sticky-col" : ""}`} style={stickyColumnStyles[16] ? { position: "sticky", left: stickyColumnStyles[16].left, minWidth: stickyColumnStyles[16].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(16); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[16] ? "sticky-col" : ""}`} style={stickyColumnStyles[16] ? { position: "sticky", left: stickyColumnStyles[16].left, minWidth: stickyColumnStyles[16].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(16); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Lucro</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(16); }} title={stickyColumns.has(16) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(16); }} title={stickyColumns.has(16) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(16)} className={stickyColumns.has(16) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 ${stickyColumnStyles[17] ? "sticky-col" : ""}`} style={stickyColumnStyles[17] ? { position: "sticky", left: stickyColumnStyles[17].left, minWidth: stickyColumnStyles[17].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(17); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumnStyles[17] ? "sticky-col" : ""}`} style={stickyColumnStyles[17] ? { position: "sticky", left: stickyColumnStyles[17].left, minWidth: stickyColumnStyles[17].minWidth } : undefined} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(17); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-between gap-1">
                     <span>Link</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(17); }} title={stickyColumns.has(17) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(17); }} title={stickyColumns.has(17) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(17)} className={stickyColumns.has(17) ? "text-primary" : ""} />
                     </button>
                   </div>
@@ -1878,7 +1878,7 @@ export default function PrecosPage() {
                 return (
                   <tr
                     key={`${listing.id}-${listing.variation_id ?? "item"}`}
-                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5"
+                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
                   >
                     <td
                       className={`p-2 text-center ${stickyColumnStyles[0] ? "sticky-col" : ""}`}
@@ -1916,7 +1916,7 @@ export default function PrecosPage() {
                           onClick={() => handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
                           onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
                           title="Clique para copiar"
-                          className="cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100"
+                          className="cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100"
                         >
                           {copiedCell === `mlb-${listing.id}-${listing.variation_id ?? "n"}` ? (
                             <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
@@ -1924,7 +1924,7 @@ export default function PrecosPage() {
                             listing.item_id
                           )}
                           {listing.variation_id && (
-                            <span className="block text-gray-400">var: {listing.variation_id}</span>
+                            <span className="block text-fg-muted">var: {listing.variation_id}</span>
                           )}
                         </span>
                         <button
@@ -1932,7 +1932,7 @@ export default function PrecosPage() {
                           onClick={(e) => { e.stopPropagation(); handleRefreshItem(listing.item_id); }}
                           disabled={refreshingItemId === listing.item_id}
                           title="Atualizar este item no cache"
-                          className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600 disabled:opacity-50"
+                          className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:text-slate-300 disabled:opacity-50"
                         >
                           {refreshingItemId === listing.item_id ? (
                             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
@@ -1949,12 +1949,12 @@ export default function PrecosPage() {
                       style={stickyColumnStyles[3] ? { position: "sticky", left: stickyColumnStyles[3].left, minWidth: stickyColumnStyles[3].minWidth } : undefined}
                       title={listing.title ?? ""}
                     >
-                      <span className="line-clamp-2 text-sm font-medium text-slate-900">
+                      <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
                         {listing.title ?? "—"}
                       </span>
                     </td>
                     <td
-                      className={`p-2 font-mono text-xs text-slate-700 ${stickyColumnStyles[4] ? "sticky-col" : ""}`}
+                      className={`p-2 font-mono text-xs text-slate-700 dark:text-slate-200 ${stickyColumnStyles[4] ? "sticky-col" : ""}`}
                       style={stickyColumnStyles[4] ? { position: "sticky", left: stickyColumnStyles[4].left, minWidth: stickyColumnStyles[4].minWidth } : undefined}
                     >
                       {listing.sku ? (
@@ -1973,7 +1973,7 @@ export default function PrecosPage() {
                           )}
                         </span>
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td
@@ -1988,11 +1988,11 @@ export default function PrecosPage() {
                       }
                     >
                       {salesLoading ? (
-                        <span className="text-gray-400">…</span>
+                        <span className="text-fg-muted">…</span>
                       ) : salesData[listing.item_id] != null ? (
                         salesData[listing.item_id]
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td
@@ -2007,20 +2007,20 @@ export default function PrecosPage() {
                       }
                     >
                       {salesLoading ? (
-                        <span className="text-gray-400">…</span>
+                        <span className="text-fg-muted">…</span>
                       ) : ordersData[listing.item_id] != null ? (
                         ordersData[listing.item_id]
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td className={`p-2 text-right text-sm ${stickyColumnStyles[7] ? "sticky-col" : ""}`} style={stickyColumnStyles[7] ? { position: "sticky", left: stickyColumnStyles[7].left, minWidth: stickyColumnStyles[7].minWidth } : undefined}>
                       {listing.cost_price != null ? (
-                        <span className="text-gray-700">
+                        <span className="text-fg">
                           R$ {formatBRL(listing.cost_price)}
                         </span>
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td className={`p-2 text-right text-sm font-medium ${stickyColumnStyles[8] ? "sticky-col" : ""}`} style={stickyColumnStyles[8] ? { position: "sticky", left: stickyColumnStyles[8].left, minWidth: stickyColumnStyles[8].minWidth } : undefined}>
@@ -2055,7 +2055,7 @@ export default function PrecosPage() {
                     </td>
                     <td className={`p-2 text-right text-sm ${stickyColumnStyles[10] ? "sticky-col" : ""}`} style={stickyColumnStyles[10] ? { position: "sticky", left: stickyColumnStyles[10].left, minWidth: stickyColumnStyles[10].minWidth } : undefined}>
                       {listing.calculating ? (
-                        <span className="text-gray-400">…</span>
+                        <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
                         <span className="text-amber-700">
                           R$ {formatBRL(listing.calculated.fee)}
@@ -2065,18 +2065,18 @@ export default function PrecosPage() {
                           N/D
                         </span>
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td className={`p-2 text-right text-sm ${stickyColumnStyles[11] ? "sticky-col" : ""}`} style={stickyColumnStyles[11] ? { position: "sticky", left: stickyColumnStyles[11].left, minWidth: stickyColumnStyles[11].minWidth } : undefined}>
                       {listing.calculating ? (
-                        <span className="text-gray-400">…</span>
+                        <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
                         <span
                           className={
                             listing.calculated.shipping_cost > 0
                               ? "text-red-600"
-                              : "text-gray-400"
+                              : "text-fg-muted"
                           }
                         >
                           {listing.calculated.shipping_cost > 0
@@ -2084,18 +2084,18 @@ export default function PrecosPage() {
                             : "—"}
                         </span>
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td className={`p-2 text-right text-sm ${stickyColumnStyles[12] ? "sticky-col" : ""}`} style={stickyColumnStyles[12] ? { position: "sticky", left: stickyColumnStyles[12].left, minWidth: stickyColumnStyles[12].minWidth } : undefined}>
                       {listing.calculating ? (
-                        <span className="text-gray-400">…</span>
+                        <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
                         <span
                           className={
                             listing.calculated.tax_amount > 0
                               ? "text-orange-600"
-                              : "text-gray-400"
+                              : "text-fg-muted"
                           }
                           title={listing.tax_percent ? `${listing.tax_percent}%` : undefined}
                         >
@@ -2104,18 +2104,18 @@ export default function PrecosPage() {
                             : "—"}
                         </span>
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td className={`p-2 text-right text-sm ${stickyColumnStyles[13] ? "sticky-col" : ""}`} style={stickyColumnStyles[13] ? { position: "sticky", left: stickyColumnStyles[13].left, minWidth: stickyColumnStyles[13].minWidth } : undefined}>
                       {listing.calculating ? (
-                        <span className="text-gray-400">…</span>
+                        <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
                         <span
                           className={
                             listing.calculated.extra_fee_amount > 0
                               ? "text-purple-600"
-                              : "text-gray-400"
+                              : "text-fg-muted"
                           }
                           title={listing.extra_fee_percent ? `${listing.extra_fee_percent}%` : undefined}
                         >
@@ -2124,18 +2124,18 @@ export default function PrecosPage() {
                             : "—"}
                         </span>
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td className={`p-2 text-right text-sm ${stickyColumnStyles[14] ? "sticky-col" : ""}`} style={stickyColumnStyles[14] ? { position: "sticky", left: stickyColumnStyles[14].left, minWidth: stickyColumnStyles[14].minWidth } : undefined}>
                       {listing.calculating ? (
-                        <span className="text-gray-400">…</span>
+                        <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
                         <span
                           className={
                             listing.calculated.fixed_expenses_amount > 0
                               ? "text-indigo-600"
-                              : "text-gray-400"
+                              : "text-fg-muted"
                           }
                           title={listing.fixed_expenses != null ? `R$ ${formatBRL(listing.fixed_expenses)}` : undefined}
                         >
@@ -2144,23 +2144,23 @@ export default function PrecosPage() {
                             : "—"}
                         </span>
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td className={`p-2 text-right text-sm font-semibold ${stickyColumnStyles[15] ? "sticky-col" : ""}`} style={stickyColumnStyles[15] ? { position: "sticky", left: stickyColumnStyles[15].left, minWidth: stickyColumnStyles[15].minWidth } : undefined}>
                       {listing.calculating ? (
-                        <span className="text-gray-400">…</span>
+                        <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
                         <span className="text-green-700">
                           R$ {formatBRL(listing.calculated.net_amount)}
                         </span>
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td className={`p-2 text-right text-sm ${stickyColumnStyles[16] ? "sticky-col" : ""}`} style={stickyColumnStyles[16] ? { position: "sticky", left: stickyColumnStyles[16].left, minWidth: stickyColumnStyles[16].minWidth } : undefined}>
                       {listing.calculating ? (
-                        <span className="text-gray-400">…</span>
+                        <span className="text-fg-muted">…</span>
                       ) : profit != null ? (
                         <div className="flex flex-col items-end">
                           <span
@@ -2184,7 +2184,7 @@ export default function PrecosPage() {
                           )}
                         </div>
                       ) : (
-                        <span className="text-gray-400">—</span>
+                        <span className="text-fg-muted">—</span>
                       )}
                     </td>
                     <td className={`p-2 ${stickyColumnStyles[17] ? "sticky-col" : ""}`} style={stickyColumnStyles[17] ? { position: "sticky", left: stickyColumnStyles[17].left, minWidth: stickyColumnStyles[17].minWidth } : undefined}>

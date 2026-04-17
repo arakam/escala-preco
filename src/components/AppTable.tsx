@@ -85,7 +85,10 @@ export function AppTableBodyRow({
   ...props
 }: React.HTMLAttributes<HTMLTableRowElement>) {
   return (
-    <tr className={`border-b border-gray-100 hover:bg-gray-50 ${className}`} {...props}>
+    <tr
+      className={`border-b border-stroke/80 hover:bg-gray-50 dark:border-slate-700/80 dark:hover:bg-slate-700/40 ${className}`}
+      {...props}
+    >
       {children}
     </tr>
   );

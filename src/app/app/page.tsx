@@ -203,22 +203,22 @@ function AppHomeContent() {
 
   if (loading && accounts.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="text-gray-500">Carregando…</p>
+      <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
+        <p className="text-fg-muted">Carregando…</p>
       </div>
     );
   }
 
   if (accounts.length === 0) {
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-8 text-center">
-        <h1 className="mb-2 text-xl font-semibold text-amber-900">Conecte sua conta do Mercado Livre</h1>
-        <p className="mb-6 text-amber-800">
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-8 text-center dark:border-amber-800 dark:bg-amber-950/40">
+        <h1 className="mb-2 text-xl font-semibold text-amber-900 dark:text-amber-100">Conecte sua conta do Mercado Livre</h1>
+        <p className="mb-6 text-amber-800 dark:text-amber-200">
           Para ver o resumo e usar o EscalaPreço, conecte pelo menos uma conta.
         </p>
         <Link
           href="/app/mercadolivre"
-          className="inline-block rounded bg-yellow-400 px-5 py-2.5 font-medium text-gray-900 hover:bg-yellow-500"
+          className="inline-block rounded bg-yellow-400 px-5 py-2.5 font-medium text-amber-950 hover:bg-yellow-500 dark:bg-amber-400 dark:text-amber-950"
         >
           Ir para Mercado Livre
         </Link>
@@ -229,24 +229,24 @@ function AppHomeContent() {
   return (
     <div className="space-y-6 sm:space-y-8">
       {/* Cabeçalho do dashboard */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-app bg-white/80 p-4 shadow-sm ring-1 ring-slate-200 backdrop-blur">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-app bg-white/80 p-4 shadow-sm ring-1 ring-slate-200 backdrop-blur dark:bg-slate-800/80 dark:ring-slate-600">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Visão geral</h1>
-          <p className="mt-1 text-sm text-slate-600">
+          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-50">Visão geral</h1>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
             Acompanhe rapidamente a saúde dos seus anúncios e operações.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
+          <div className="flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 dark:bg-slate-700/50 dark:text-slate-300 dark:ring-slate-600">
             <StatusDot className={summaryLoading ? "bg-amber-400" : "bg-emerald-500"} />
             {summaryLoading ? "Atualizando dados..." : "Dados atualizados"}
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-slate-600">Conta Mercado Livre</label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">Conta Mercado Livre</label>
             <select
               value={accountId}
               onChange={(e) => persistAccount(e.target.value)}
-              className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-primary-light dark:focus:ring-primary-light"
             >
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -262,10 +262,10 @@ function AppHomeContent() {
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
               Status geral
             </h2>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               Indicadores principais do uso do EscalaPreço nesta conta.
             </p>
           </div>
@@ -275,7 +275,7 @@ function AppHomeContent() {
             {[1, 2, 3, 4, 5].map((i) => (
               <div
                 key={i}
-                className="rounded-2xl border border-slate-100 bg-white/70 p-4 shadow-sm backdrop-blur-sm animate-pulse"
+                className="rounded-2xl border border-slate-100 bg-white/70 p-4 shadow-sm backdrop-blur-sm animate-pulse dark:border-slate-700 dark:bg-slate-800/60"
               >
                 <div className="flex items-center justify-between">
                   <div className="h-4 w-1/2 rounded bg-slate-200" />
@@ -288,13 +288,13 @@ function AppHomeContent() {
         ) : summary ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {/* Total sincronizado */}
-            <div className="group rounded-2xl border border-slate-100 bg-white/80 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-primary/40">
+            <div className="group rounded-2xl border border-slate-100 bg-white/80 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-primary/40 dark:border-slate-700 dark:bg-slate-800/80">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     Anúncios sincronizados
                   </p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-900">
+                  <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
                     {summary.cards.synced_count}
                   </p>
                 </div>
@@ -302,39 +302,39 @@ function AppHomeContent() {
                   <SmallIconStack />
                 </div>
               </div>
-              <p className="mt-2 text-xs text-slate-500">
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                 Itens prontos para edição e aplicação de atacado.
               </p>
             </div>
 
             {/* Com atacado */}
-            <div className="group rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-emerald-300/70">
+            <div className="group rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-emerald-300/70 dark:border-emerald-900/50 dark:bg-emerald-950/40">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">
+                  <p className="text-xs font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
                     Com atacado configurado
                   </p>
-                  <p className="mt-2 text-2xl font-semibold text-emerald-900">
+                  <p className="mt-2 text-2xl font-semibold text-emerald-900 dark:text-emerald-100">
                     {summary.cards.wholesale_configured_count}
                   </p>
                 </div>
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 group-hover:bg-emerald-200">
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 group-hover:bg-emerald-200 dark:bg-emerald-900/60 dark:text-emerald-200 dark:group-hover:bg-emerald-800/60">
                   <WholesaleIcon />
                 </div>
               </div>
-              <p className="mt-2 text-xs text-emerald-800">
+              <p className="mt-2 text-xs text-emerald-800 dark:text-emerald-200/90">
                 Itens já aproveitando condições de volume.
               </p>
             </div>
 
             {/* Cobertura atacado */}
-            <div className="group rounded-2xl border border-sky-100 bg-sky-50/80 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-sky-300/70">
+            <div className="group rounded-2xl border border-sky-100 bg-sky-50/80 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-sky-300/70 dark:border-sky-900/50 dark:bg-sky-950/40">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-sky-800">
+                  <p className="text-xs font-medium uppercase tracking-wide text-sky-800 dark:text-sky-300">
                     Cobertura de atacado
                   </p>
-                  <p className="mt-2 text-2xl font-semibold text-sky-900">
+                  <p className="mt-2 text-2xl font-semibold text-sky-900 dark:text-sky-100">
                     {summary.cards.synced_count > 0
                       ? Math.round(
                           (summary.cards.wholesale_configured_count /
@@ -342,61 +342,61 @@ function AppHomeContent() {
                             100
                         )
                       : 0}
-                    <span className="ml-1 text-base font-medium text-sky-700">%</span>
+                    <span className="ml-1 text-base font-medium text-sky-700 dark:text-sky-300">%</span>
                   </p>
                 </div>
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-100 text-sky-800 group-hover:bg-sky-200">
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-100 text-sky-800 group-hover:bg-sky-200 dark:bg-sky-900/60 dark:text-sky-200 dark:group-hover:bg-sky-800/60">
                   <GaugeIcon />
                 </div>
               </div>
-              <p className="mt-2 text-xs text-sky-800">
+              <p className="mt-2 text-xs text-sky-800 dark:text-sky-200/90">
                 Percentual de anúncios com estratégia de atacado ativa.
               </p>
             </div>
 
             {/* Sem atacado */}
-            <div className="group rounded-2xl border border-amber-100 bg-amber-50/90 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-amber-300/70">
+            <div className="group rounded-2xl border border-amber-100 bg-amber-50/90 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-amber-300/70 dark:border-amber-900/50 dark:bg-amber-950/40">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-amber-800">
+                  <p className="text-xs font-medium uppercase tracking-wide text-amber-800 dark:text-amber-200">
                     Sem atacado configurado
                   </p>
-                  <p className="mt-2 text-2xl font-semibold text-amber-900">
+                  <p className="mt-2 text-2xl font-semibold text-amber-900 dark:text-amber-100">
                     {summary.cards.wholesale_missing_count}
                   </p>
                 </div>
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-800 group-hover:bg-amber-200">
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-800 group-hover:bg-amber-200 dark:bg-amber-900/60 dark:text-amber-200 dark:group-hover:bg-amber-800/60">
                   <AlertIcon />
                 </div>
               </div>
-              <p className="mt-2 text-xs text-amber-800">
+              <p className="mt-2 text-xs text-amber-800 dark:text-amber-200/90">
                 Oportunidade de aumentar ticket e giro com condições de volume.
               </p>
             </div>
 
             {/* Erros / pendências */}
-            <div className="group rounded-2xl border border-rose-100 bg-rose-50/90 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-rose-300/70">
+            <div className="group rounded-2xl border border-rose-100 bg-rose-50/90 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-rose-300/70 dark:border-rose-900/50 dark:bg-rose-950/40">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-rose-800">
+                  <p className="text-xs font-medium uppercase tracking-wide text-rose-800 dark:text-rose-200">
                     Erros / Pendências (7 dias)
                   </p>
-                  <p className="mt-2 text-2xl font-semibold text-rose-900">
+                  <p className="mt-2 text-2xl font-semibold text-rose-900 dark:text-rose-100">
                     {summary.cards.errors_or_pending_count}
                   </p>
                 </div>
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-100 text-rose-800 group-hover:bg-rose-200">
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-100 text-rose-800 group-hover:bg-rose-200 dark:bg-rose-900/60 dark:text-rose-200 dark:group-hover:bg-rose-800/60">
                   <WarningIcon />
                 </div>
               </div>
-              <p className="mt-2 text-xs text-rose-800">
+              <p className="mt-2 text-xs text-rose-800 dark:text-rose-200/90">
                 Problemas recentes em sincronizações ou aplicações de atacado.
               </p>
             </div>
           </div>
         ) : (
-          <div className="rounded-2xl border border-slate-100 bg-white/80 p-6 shadow-sm">
-            <p className="text-sm text-slate-500">Não foi possível carregar o resumo.</p>
+          <div className="rounded-2xl border border-slate-100 bg-white/80 p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
+            <p className="text-sm text-slate-500 dark:text-slate-400">Não foi possível carregar o resumo.</p>
           </div>
         )}
 
@@ -433,10 +433,10 @@ function AppHomeContent() {
           <div className="flex items-center gap-2">
             <ActivityIcon />
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 Últimas alterações
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Histórico recente de sincronizações, importações e aplicações de atacado.
               </p>
             </div>
@@ -449,26 +449,26 @@ function AppHomeContent() {
           </Link>
         </div>
         {activityLoading ? (
-          <div className="rounded-2xl border border-slate-100 bg-white/80 p-6 shadow-sm">
-            <p className="text-sm text-slate-500">Carregando atividades…</p>
+          <div className="rounded-2xl border border-slate-100 bg-white/80 p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
+            <p className="text-sm text-slate-500 dark:text-slate-400">Carregando atividades…</p>
           </div>
         ) : activity.length === 0 ? (
-          <div className="rounded-2xl border border-slate-100 bg-white/80 p-6 text-sm text-slate-500 shadow-sm">
+          <div className="rounded-2xl border border-slate-100 bg-white/80 p-6 text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-400">
             Nenhuma atividade recente para esta conta.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white/80 shadow-sm">
-            <ul className="divide-y divide-slate-100">
+          <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white/80 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
+            <ul className="divide-y divide-slate-100 dark:divide-slate-700">
               {activity.slice(0, 10).map((item, idx) => (
                 <li
                   key={`${item.at}-${idx}`}
                   className="flex flex-wrap items-center gap-2 px-4 py-3 text-xs sm:text-sm"
                 >
-                  <div className="flex items-center gap-2 text-slate-500">
+                  <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
                     <span className="inline-flex h-2 w-2 rounded-full bg-slate-300" />
                     <span>{formatDate(item.at)}</span>
                   </div>
-                  <span className="ml-2 rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                  <span className="ml-2 rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:text-slate-200">
                     {activityTypeLabel(item.type)}
                   </span>
                   <span
@@ -484,7 +484,7 @@ function AppHomeContent() {
                   >
                     {activityStatusLabel(item.status)}
                   </span>
-                  <span className="ml-auto text-slate-700">{item.message}</span>
+                  <span className="ml-auto text-slate-700 dark:text-slate-200">{item.message}</span>
                 </li>
               ))}
             </ul>
@@ -496,10 +496,10 @@ function AppHomeContent() {
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
               Ações rápidas
             </h2>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               Atalhos para manter o catálogo sempre atualizado e competitivo.
             </p>
           </div>
@@ -531,18 +531,18 @@ function AppHomeContent() {
 
           <Link
             href="/app/atacado"
-            className="group flex flex-col justify-between rounded-2xl border border-slate-100 bg-white/80 p-4 text-left text-slate-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-slate-300"
+            className="group flex flex-col justify-between rounded-2xl border border-slate-100 bg-white/80 p-4 text-left text-slate-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-slate-300 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-50 dark:hover:ring-slate-600"
           >
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide">
                   Editar preços de atacado
                 </p>
-                <p className="mt-1 text-xs text-slate-600">
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
                   Ajuste margens, faixas de quantidade e descontos.
                 </p>
               </div>
-              <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 group-hover:bg-slate-200">
+              <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 group-hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:group-hover:bg-slate-600">
                 <PencilIcon />
               </div>
             </div>
@@ -551,18 +551,18 @@ function AppHomeContent() {
 
           <Link
             href="/app/atacado"
-            className="group flex flex-col justify-between rounded-2xl border border-slate-100 bg-white/80 p-4 text-left text-slate-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-slate-300"
+            className="group flex flex-col justify-between rounded-2xl border border-slate-100 bg-white/80 p-4 text-left text-slate-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-slate-300 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-50 dark:hover:ring-slate-600"
           >
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide">
                   Importar CSV
                 </p>
-                <p className="mt-1 text-xs text-slate-600">
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
                   Suba planilhas com ajustes em massa de atacado.
                 </p>
               </div>
-              <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 group-hover:bg-slate-200">
+              <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 group-hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:group-hover:bg-slate-600">
                 <UploadIcon />
               </div>
             </div>
@@ -598,8 +598,8 @@ export default function AppHomePage() {
   return (
     <Suspense
       fallback={
-        <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <p className="text-gray-500">Carregando…</p>
+        <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
+          <p className="text-fg-muted">Carregando…</p>
         </div>
       }
     >
@@ -687,7 +687,7 @@ function WarningIcon() {
 
 function ActivityIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-500" aria-hidden="true">
+    <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-500 dark:text-slate-400" aria-hidden="true">
       <path
         d="M4 6.5h3l2.2 8 3.6-13 2.4 9 1.4-4H20"
         className="fill-none stroke-current"

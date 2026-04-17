@@ -24,14 +24,21 @@ export async function updateSession(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const cookieOpts = { path: "/", httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" as const };
   const isApp = request.nextUrl.pathname.startsWith("/app");
+
+  /** Repassa cookies da resposta do Supabase (refresh etc.) sem forçar httpOnly — forçar httpOnly quebra cookies usados pelo client @supabase/ssr. */
+  function forwardCookies(to: NextResponse) {
+    supabaseResponse.cookies.getAll().forEach((c) => {
+      to.cookies.set(c.name, c.value);
+    });
+  }
+
   if (isApp && !user) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
     url.searchParams.set("redirect", request.nextUrl.pathname);
     const redirect = NextResponse.redirect(url);
-    supabaseResponse.cookies.getAll().forEach((c) => redirect.cookies.set(c.name, c.value, cookieOpts));
+    forwardCookies(redirect);
     return redirect;
   }
   if (user && (request.nextUrl.pathname === "/auth/login" || request.nextUrl.pathname === "/auth/register")) {
@@ -42,7 +49,7 @@ export async function updateSession(request: NextRequest) {
     url.pathname = safe;
     url.search = "";
     const redirect = NextResponse.redirect(url);
-    supabaseResponse.cookies.getAll().forEach((c) => redirect.cookies.set(c.name, c.value, cookieOpts));
+    forwardCookies(redirect);
     return redirect;
   }
   return supabaseResponse;

@@ -91,16 +91,16 @@ function HistoricoContent() {
 
   if (loading && accounts.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="text-gray-500">Carregando…</p>
+      <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
+        <p className="text-fg-muted">Carregando…</p>
       </div>
     );
   }
 
   if (accounts.length === 0) {
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-6">
-        <p className="text-amber-800">
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 dark:border-amber-800 dark:bg-amber-950/40">
+        <p className="text-amber-800 dark:text-amber-200">
           Conecte sua conta do Mercado Livre em{" "}
           <Link href="/app/mercadolivre" className="font-medium underline">
             Mercado Livre
@@ -114,18 +114,18 @@ function HistoricoContent() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-xl font-semibold text-gray-900">Histórico de alterações</h1>
-        <Link href="/app" className="text-sm font-medium text-blue-600 hover:underline">
+        <h1 className="text-xl font-semibold text-fg-strong">Histórico de alterações</h1>
+        <Link href="/app" className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400">
           ← Voltar ao Início
         </Link>
       </div>
 
       <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-600">Conta:</label>
+        <label className="text-sm text-fg">Conta:</label>
         <select
           value={accountId}
           onChange={(e) => setAccountId(e.target.value)}
-          className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm"
+          className="input w-auto max-w-xs py-1.5"
         >
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
@@ -136,37 +136,37 @@ function HistoricoContent() {
       </div>
 
       {loading ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <p className="text-gray-500">Carregando atividades…</p>
+        <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
+          <p className="text-fg-muted">Carregando atividades…</p>
         </div>
       ) : items.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <p className="text-gray-500">Nenhuma atividade para esta conta.</p>
+        <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
+          <p className="text-fg-muted">Nenhuma atividade para esta conta.</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <ul className="divide-y divide-gray-200">
+        <div className="overflow-hidden rounded-lg border border-stroke bg-card shadow-sm dark:border-slate-700">
+          <ul className="divide-y divide-stroke dark:divide-slate-700">
             {items.map((item, idx) => (
               <li
                 key={`${item.at}-${item.type}-${idx}`}
                 className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm"
               >
-                <span className="text-gray-500">{formatDate(item.at)}</span>
-                <span className="font-medium text-gray-700">{activityTypeLabel(item.type)}</span>
+                <span className="text-fg-muted">{formatDate(item.at)}</span>
+                <span className="font-medium text-fg">{activityTypeLabel(item.type)}</span>
                 <span
                   className={`rounded px-2 py-0.5 text-xs font-medium ${
                     item.status === "ok"
-                      ? "bg-green-100 text-green-800"
+                      ? "bg-green-100 text-green-800 dark:bg-green-950/50 dark:text-green-300"
                       : item.status === "error"
-                        ? "bg-red-100 text-red-800"
+                        ? "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300"
                         : item.status === "partial"
-                          ? "bg-amber-100 text-amber-800"
-                          : "bg-blue-100 text-blue-800"
+                          ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200"
+                          : "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
                   }`}
                 >
                   {activityStatusLabel(item.status)}
                 </span>
-                <span className="text-gray-600">{item.message}</span>
+                <span className="text-fg">{item.message}</span>
               </li>
             ))}
           </ul>
@@ -180,8 +180,8 @@ export default function HistoricoPage() {
   return (
     <Suspense
       fallback={
-        <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <p className="text-gray-500">Carregando…</p>
+        <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
+          <p className="text-fg-muted">Carregando…</p>
         </div>
       }
     >

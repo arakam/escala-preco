@@ -213,30 +213,30 @@ function MercadoLivreContent() {
 
   if (loading) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="text-gray-500">Carregando…</p>
+      <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
+        <p className="text-fg-muted">Carregando…</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <h1 className="mb-4 text-xl font-semibold">Mercado Livre</h1>
+    <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
+      <h1 className="mb-4 text-xl font-semibold text-fg-strong">Mercado Livre</h1>
 
       {accounts.length === 0 ? (
         <div className="space-y-4">
-          <p className="text-gray-600">Nenhuma conta conectada. Conecte para sincronizar anúncios.</p>
+          <p className="text-fg">Nenhuma conta conectada. Conecte para sincronizar anúncios.</p>
           <a
             href="/api/mercadolivre/auth"
-            className="inline-block rounded bg-yellow-400 px-4 py-2 font-medium text-gray-900 hover:bg-yellow-500"
+            className="inline-block rounded bg-yellow-400 px-4 py-2 font-medium text-amber-950 hover:bg-yellow-500 dark:bg-amber-400 dark:text-amber-950"
           >
             Conectar conta Mercado Livre
           </a>
         </div>
       ) : (
         <div className="space-y-4">
-          <p className="text-gray-600">Contas conectadas:</p>
-          <ul className="divide-y divide-gray-200">
+          <p className="text-fg">Contas conectadas:</p>
+          <ul className="divide-y divide-stroke dark:divide-slate-700">
             {accounts.map((acc) => {
               const job = jobByAccount[acc.id];
               const isSyncing = syncing === acc.id;
@@ -245,11 +245,11 @@ function MercadoLivreContent() {
                 <li key={acc.id} className="flex flex-col gap-2 py-3 first:pt-0">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <span className="font-medium">
+                      <span className="font-medium text-fg-strong">
                         {acc.ml_nickname || `ID ${acc.ml_user_id}`}
                       </span>
                       {acc.site_id && (
-                        <span className="ml-2 text-sm text-gray-500">({acc.site_id})</span>
+                        <span className="ml-2 text-sm text-fg-muted">({acc.site_id})</span>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
@@ -264,7 +264,7 @@ function MercadoLivreContent() {
                       <button
                         type="button"
                         onClick={() => toggleItems(acc.id)}
-                        className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                        className="btn btn-secondary px-3 py-1.5 text-sm"
                       >
                         {expandedAccount === acc.id ? "Ocultar itens" : "Ver itens"}
                       </button>
@@ -285,7 +285,7 @@ function MercadoLivreContent() {
                                 setSyncing(null);
                               }
                             }}
-                            className="rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
+                            className="btn btn-secondary px-2.5 py-1 text-xs shadow-sm"
                           >
                             Encerrar e liberar nova importação
                           </button>
@@ -304,31 +304,31 @@ function MercadoLivreContent() {
                               setMlbuOnly(e.target.checked);
                               loadItems(acc.id);
                             }}
-                            className="rounded border-gray-300"
+                            className="rounded border-stroke text-fg dark:border-slate-600"
                           />
-                          <span>Só MLBU</span>
+                          <span className="text-fg">Só MLBU</span>
                         </label>
                         <div className="flex items-center gap-1 text-sm">
-                          <label className="text-gray-600">Cód. MLBU:</label>
+                          <label className="text-fg">Cód. MLBU:</label>
                           <input
                             type="text"
                             value={mlbuCodeInput}
                             onChange={(e) => setMlbuCodeInput(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && loadItems(acc.id)}
                             placeholder="ex: MLAU123"
-                            className="w-28 rounded border border-gray-300 px-2 py-1 font-mono text-sm"
+                            className="input w-28 py-1 font-mono"
                           />
                           <button
                             type="button"
                             onClick={() => loadItems(acc.id)}
-                            className="rounded border border-gray-300 bg-white px-2 py-1 text-sm hover:bg-gray-50"
+                            className="btn btn-secondary py-1 text-sm"
                           >
                             Filtrar
                           </button>
                         </div>
                       </div>
                       {itemsLoading[acc.id] ? (
-                        <p className="p-4 text-gray-500">Carregando itens…</p>
+                        <p className="p-4 text-fg-muted">Carregando itens…</p>
                       ) : (itemsByAccount[acc.id]?.length ?? 0) > 0 ? (
                         <AppTable
                           summary={`${itemsByAccount[acc.id]?.length ?? 0} itens`}
@@ -355,10 +355,10 @@ function MercadoLivreContent() {
                                     type="button"
                                     onClick={() => copyItemId(item.item_id)}
                                     title="Clique para copiar"
-                                    className="font-mono text-gray-600 hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 cursor-pointer"
+                                    className="-mx-1 cursor-pointer rounded px-1 py-0.5 font-mono text-fg hover:bg-gray-100 dark:hover:bg-slate-700"
                                   >
                                     {copiedItemId === item.item_id ? (
-                                      <span className="text-emerald-600 text-xs font-medium">Copiado!</span>
+                                      <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Copiado!</span>
                                     ) : (
                                       item.item_id
                                     )}
@@ -371,18 +371,18 @@ function MercadoLivreContent() {
                                   <div className="flex flex-wrap items-center gap-1.5">
                                     {item.user_product_id && (
                                       <span
-                                        className="inline-flex rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-800"
+                                        className="inline-flex rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200"
                                         title="User Product (MLBU)"
                                       >
                                         MLBU
                                       </span>
                                     )}
                                     {item.user_product_id && (
-                                      <span className="font-mono text-xs text-gray-600">{item.user_product_id}</span>
+                                      <span className="font-mono text-xs text-fg">{item.user_product_id}</span>
                                     )}
                                     {item.family_name && (
                                       <span
-                                        className="max-w-[100px] truncate inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700"
+                                        className="inline-flex max-w-[100px] truncate rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700 dark:bg-slate-700 dark:text-slate-200"
                                         title={`Família: ${item.family_name}`}
                                       >
                                         {item.family_name}
@@ -392,20 +392,20 @@ function MercadoLivreContent() {
                                       <button
                                         type="button"
                                         onClick={() => setFamilyModal({ familyId: item.family_id!, familyName: item.family_name ?? "", accountId: acc.id })}
-                                        className="text-xs text-brand-blue hover:underline"
+                                        className="text-xs text-brand-blue hover:underline dark:text-blue-400"
                                       >
                                         Ver família
                                       </button>
                                     )}
                                     {!item.user_product_id && !item.family_name && (
-                                      <span className="text-gray-400 text-xs">—</span>
+                                      <span className="text-xs text-fg-muted">—</span>
                                     )}
                                   </div>
                                 </td>
                                 <td className="p-2">{item.status ?? "—"}</td>
                                 <td className="p-2">{item.price != null ? Number(item.price).toFixed(2) : "—"}</td>
                                 <td className="p-2">{item.has_variations ? "Sim" : "Não"}</td>
-                                <td className="p-2 text-gray-500">
+                                <td className="p-2 text-fg-muted">
                                   {item.updated_at ? new Date(item.updated_at).toLocaleString() : "—"}
                                 </td>
                               </tr>
@@ -413,7 +413,7 @@ function MercadoLivreContent() {
                           </tbody>
                         </AppTable>
                       ) : (
-                        <p className="p-4 text-gray-500">
+                        <p className="p-4 text-fg-muted">
                           Nenhum item sincronizado. Clique em &quot;Sincronizar anúncios&quot;.
                         </p>
                       )}
@@ -425,7 +425,7 @@ function MercadoLivreContent() {
           </ul>
           <a
             href="/api/mercadolivre/auth"
-            className="inline-block text-sm text-brand-blue hover:underline"
+            className="inline-block text-sm text-brand-blue hover:underline dark:text-blue-400"
           >
             + Conectar outra conta
           </a>
@@ -441,17 +441,17 @@ function MercadoLivreContent() {
           aria-label="Itens da família"
         >
           <div
-            className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl"
+            className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-lg border border-stroke bg-card shadow-xl dark:border-slate-600"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-gray-200 p-4">
-              <h2 className="text-lg font-semibold text-gray-900">
+            <div className="flex items-center justify-between border-b border-stroke p-4 dark:border-slate-600">
+              <h2 className="text-lg font-semibold text-fg-strong">
                 Família: {familyModal.familyName || familyModal.familyId}
               </h2>
               <button
                 type="button"
                 onClick={() => setFamilyModal(null)}
-                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                className="rounded p-1 text-fg-muted hover:bg-gray-100 hover:text-fg dark:hover:bg-slate-700"
                 aria-label="Fechar"
               >
                 ✕
@@ -459,13 +459,13 @@ function MercadoLivreContent() {
             </div>
             <div className="max-h-[60vh] overflow-auto p-4">
               {familyItemsLoading ? (
-                <p className="text-gray-500">Carregando itens da família…</p>
+                <p className="text-fg-muted">Carregando itens da família…</p>
               ) : familyItems.length === 0 ? (
-                <p className="text-gray-500">Nenhum item encontrado nesta família.</p>
+                <p className="text-fg-muted">Nenhum item encontrado nesta família.</p>
               ) : (
-                <table className="w-full text-sm">
+                <table className="w-full text-sm text-fg">
                   <thead>
-                    <tr className="border-b border-gray-200 text-left">
+                    <tr className="border-b border-stroke text-left dark:border-slate-600">
                       <th className="p-2 font-medium">MLB</th>
                       <th className="p-2 font-medium">Título</th>
                       <th className="p-2 font-medium">Preço R$</th>
@@ -474,13 +474,13 @@ function MercadoLivreContent() {
                   </thead>
                   <tbody>
                     {familyItems.map((it) => (
-                      <tr key={it.item_id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <tr key={it.item_id} className="border-b border-stroke/80 hover:bg-gray-50 dark:border-slate-700 dark:hover:bg-slate-700/40">
                         <td className="font-mono p-2">{it.item_id}</td>
                         <td className="max-w-[280px] truncate p-2" title={it.title ?? ""}>
                           {it.title ?? "—"}
                         </td>
                         <td className="p-2">{it.price != null ? Number(it.price).toFixed(2) : "—"}</td>
-                        <td className="font-mono text-gray-600 p-2">{it.user_product_id ?? "—"}</td>
+                        <td className="p-2 font-mono text-fg">{it.user_product_id ?? "—"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -498,8 +498,8 @@ export default function MercadoLivrePage() {
   return (
     <Suspense
       fallback={
-        <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <p className="text-gray-500">Carregando…</p>
+        <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
+          <p className="text-fg-muted">Carregando…</p>
         </div>
       }
     >

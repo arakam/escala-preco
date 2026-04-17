@@ -25,24 +25,45 @@ function LoginForm() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const supabase = createClient();
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password });
-    if (err) {
-      setLoading(false);
-      setError(err.message || "Erro ao entrar. Verifique email e senha.");
-      return;
+    let willNavigate = false;
+    try {
+      const supabase = createClient();
+      const { error: err } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (err) {
+        setError(err.message || "Erro ao entrar. Verifique email e senha.");
+        return;
+      }
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        setError(
+          "A sessão não foi gravada no navegador. Limpe os cookies de localhost ou tente outro navegador."
+        );
+        return;
+      }
+      /*
+       * Navegação completa: após login os cookies de sessão precisam ir no próximo request.
+       * router.push() (SPA) costuma chegar ao /app antes do middleware enxergar a sessão → loop no login.
+       */
+      const next = safeRedirect(redirectRaw);
+      willNavigate = true;
+      window.location.assign(next);
+    } catch (unknownErr) {
+      setError(
+        unknownErr instanceof Error
+          ? unknownErr.message
+          : "Erro inesperado ao entrar. Verifique o console (F12)."
+      );
+    } finally {
+      if (!willNavigate) setLoading(false);
     }
-    /*
-     * Navegação completa: após login os cookies de sessão precisam ir no próximo request.
-     * router.push() (SPA) costuma chegar ao /app antes do middleware enxergar a sessão → loop no login.
-     */
-    const next = safeRedirect(redirectRaw);
-    window.location.assign(next);
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-canvas p-4">
+      <div className="w-full max-w-sm rounded-lg border border-stroke bg-card p-6 shadow-sm dark:border-slate-600">
         <div className="mb-8 flex justify-center">
           <Image
             src="/logo.png"
@@ -53,10 +74,10 @@ function LoginForm() {
             priority
           />
         </div>
-        <h1 className="mb-4 text-xl font-semibold text-gray-900">Entrar</h1>
+        <h1 className="mb-4 text-xl font-semibold text-fg-strong">Entrar</h1>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="email" className="label">
               Email
             </label>
             <input
@@ -65,12 +86,12 @@ function LoginForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
+              className="input mt-1 focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
               placeholder="seu@email.com"
             />
           </div>
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="password" className="label">
               Senha
             </label>
             <input
@@ -79,11 +100,11 @@ function LoginForm() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-gray-900 focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
+              className="input mt-1 focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
             />
           </div>
           {error && (
-            <p className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</p>
+            <p className="rounded bg-red-50 p-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p>
           )}
           <button
             type="submit"
@@ -93,9 +114,9 @@ function LoginForm() {
             {loading ? "Entrando…" : "Entrar"}
           </button>
         </form>
-        <p className="mt-4 text-center text-sm text-gray-600">
+        <p className="mt-4 text-center text-sm text-fg">
           Não tem conta?{" "}
-          <Link href="/auth/register" className="font-medium text-brand-blue hover:text-brand-blue-dark hover:underline">
+          <Link href="/auth/register" className="font-medium text-brand-blue hover:text-brand-blue-light hover:underline dark:text-blue-400 dark:hover:text-blue-300">
             Cadastrar
           </Link>
         </p>
@@ -106,7 +127,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<main className="flex min-h-screen items-center justify-center"><p className="text-gray-500">Carregando…</p></main>}>
+    <Suspense fallback={<main className="flex min-h-screen items-center justify-center bg-canvas"><p className="text-fg-muted">Carregando…</p></main>}>
       <LoginForm />
     </Suspense>
   );

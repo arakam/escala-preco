@@ -10,6 +10,14 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        fg: {
+          DEFAULT: "var(--text-default)",
+          strong: "var(--text-strong)",
+          muted: "var(--text-muted)",
+        },
+        card: "var(--card-bg)",
+        /** Fundo de página (segue --body-bg / modo escuro) */
+        canvas: "var(--body-bg)",
         /* Tema inspirado em TailAdmin: primary (azul), accent (laranja), semânticos */
         primary: {
           DEFAULT: "#3C50E0",
