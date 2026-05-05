@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
 import { ReceivableModal } from "@/components/ReceivableModal";
+import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 import type { Tier } from "@/lib/atacado";
 
 type PriceReferenceStatus = "competitive" | "attention" | "high" | "none";
@@ -734,6 +735,26 @@ function AtacadoPageContent() {
     }
   }, [refJobId, refJob?.status, fetchRefJob]);
 
+  const refRefreshing =
+    !!refJobId && (refJob?.status === "queued" || refJob?.status === "running");
+  const atacadoLoaderOpen = loadingRows || refRefreshing;
+  const atacadoLoaderMessages =
+    loadingRows
+      ? [
+          "Carregando anúncios…",
+          "Buscando itens e variações no banco…",
+          "Mesclando rascunhos de atacado…",
+          "Montando a grade de preços…",
+        ]
+      : refRefreshing
+        ? [
+            "Atualizando referências de preço…",
+            "Consultando dados de mercado no Mercado Livre…",
+            "Calculando faixas de referência e competitividade…",
+            "Gravando referências nos anúncios…",
+          ]
+        : ["Processando…"];
+
   const totalPages = Math.ceil(total / limit) || 1;
 
   const TABLE_COL_COUNT = 18;
@@ -765,6 +786,7 @@ function AtacadoPageContent() {
 
   return (
     <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
+      <SmartLoaderOverlay open={atacadoLoaderOpen} messages={atacadoLoaderMessages} />
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 sm:text-xl">Editor de Preço de Atacado</h1>
@@ -1152,13 +1174,7 @@ function AtacadoPageContent() {
         </div>
       )}
 
-      {loadingRows ? (
-        <div className="flex flex-col items-center justify-center py-12">
-          <div className="mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-primary"></div>
-          <p className="font-medium text-slate-600 dark:text-slate-300">Carregando anúncios…</p>
-          <p className="mt-1 text-sm text-slate-400">Isso pode levar alguns segundos</p>
-        </div>
-      ) : rows.length === 0 ? (
+      {loadingRows ? null : rows.length === 0 ? (
         <p className="text-sm text-slate-500">
           Nenhum item encontrado. Sincronize anúncios em{" "}
           <a href="/app/anuncios" className="text-brand-blue hover:underline">
