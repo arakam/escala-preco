@@ -58,6 +58,7 @@ interface MLUserResponse {
   id: number;
   nickname: string;
   seller_reputation: SellerReputation;
+  tags?: string[];
 }
 
 export async function GET() {
@@ -124,11 +125,14 @@ export async function GET() {
     }
 
     const data = (await res.json()) as MLUserResponse;
+    const userProductSeller =
+      Array.isArray(data.tags) && data.tags.includes("user_product_seller");
 
     return NextResponse.json({
       user_id: data.id,
       nickname: data.nickname,
       reputation: data.seller_reputation,
+      user_product_seller: userProductSeller,
     });
   } catch (e) {
     console.error("[ML reputation] fetch error:", e);

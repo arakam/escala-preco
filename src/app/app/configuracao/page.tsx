@@ -70,6 +70,8 @@ interface ReputationData {
   user_id: number;
   nickname: string;
   reputation: SellerReputation;
+  /** Novo modelo de User Products (tag `user_product_seller` na API de users do ML). */
+  user_product_seller?: boolean;
 }
 
 function getReputationColor(levelId: string | null): { bg: string; text: string; label: string } {
@@ -285,6 +287,57 @@ function ConfiguracaoContent() {
               </div>
             )}
           </section>
+
+          {accounts.length > 0 && (
+            <section className="mb-8">
+              <h2 className="mb-3 text-lg font-medium text-fg-strong">Modelo User Products</h2>
+              <p className="mb-4 text-gray-600 dark:text-slate-300">
+                O Mercado Livre ativa vendedores progressivamente no novo modelo de publicações (variantes com
+                condições distintas). Quem já foi migrado recebe a tag{" "}
+                <code className="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-slate-800">user_product_seller</code>{" "}
+                na API de usuários.
+              </p>
+              {reputationLoading ? (
+                <p className="text-gray-500 dark:text-slate-400">Verificando status…</p>
+              ) : !reputation ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/30">
+                  <p className="text-sm text-amber-800 dark:text-amber-200">
+                    Não foi possível verificar se sua conta está no novo modelo. Tente recarregar a página ou
+                    reconecte o Mercado Livre.
+                  </p>
+                </div>
+              ) : reputation.user_product_seller ? (
+                <div className="flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-900/50 dark:bg-green-950/30">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-200 text-green-800 dark:bg-green-800 dark:text-green-100">
+                    ✓
+                  </span>
+                  <div>
+                    <p className="font-medium text-green-800 dark:text-green-200">Ativo no novo modelo</p>
+                    <p className="text-sm text-green-700 dark:text-green-300/90">
+                      Sua conta está habilitada para publicar com User Products (tag{" "}
+                      <code className="rounded bg-green-100/80 px-1 py-0.5 text-xs dark:bg-green-900/60">
+                        user_product_seller
+                      </code>
+                      ).
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-600 dark:bg-slate-800/80">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-700 dark:bg-slate-600 dark:text-slate-100">
+                    ○
+                  </span>
+                  <div>
+                    <p className="font-medium text-fg-strong">Ainda no modelo anterior</p>
+                    <p className="text-sm text-gray-600 dark:text-slate-300">
+                      Sua conta ainda não possui a tag de vendedor User Products. Continue publicando pelo fluxo
+                      habitual até o Mercado Livre habilitar sua conta.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
 
           {accounts.length > 0 && (
             <section className="mb-8">
