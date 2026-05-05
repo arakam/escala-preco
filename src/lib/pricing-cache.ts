@@ -3,6 +3,10 @@
  * Junta ml_items, ml_variations, products, planned_prices e vendas 30d em uma única tabela
  * para leitura rápida com filtros.
  *
+ * Anúncios clássicos com variações: uma linha por MLB (preço nível anúncio; o ML ainda não
+ * permite preço por variação fora do fluxo User Product). Variações alimentam só o fallback
+ * de preço planejado legado (chaves por variation_id).
+ *
  * Chamado após: sync de anúncios, vínculo MLB-SKU, ou manualmente (POST /api/pricing/cache/refresh).
  */
 import { createHash } from "crypto";
@@ -31,6 +35,169 @@ function extractSku(rawJson: Record<string, unknown> | null, productSku: string 
   if (typeof rawJson.seller_custom_field === "string" && rawJson.seller_custom_field.trim())
     return rawJson.seller_custom_field.trim();
   return productSku ?? null;
+}
+
+function resolvePlannedPriceForParentListing(
+  plannedByKey: Map<string, number>,
+  itemId: string,
+  fallbackPrice: number,
+  variationIds: number[]
+): number {
+  const main = plannedByKey.get(`${itemId}:${VARIATION_ID_ITEM}`);
+  if (main !== undefined) return main;
+  for (const vid of variationIds) {
+    const p = plannedByKey.get(`${itemId}:${vid}`);
+    if (p !== undefined) return p;
+  }
+  return fallbackPrice;
+}
+
+function pickSavedCalculatedForParentListing<
+  T extends { calculated_price: number; calculated_fee: number; calculated_shipping_cost: number; calculated_at: string },
+>(
+  oldCalculated: Map<string, T>,
+  itemId: string,
+  variationIds: number[]
+): T | undefined {
+  const keys = [`${itemId}:${VARIATION_ID_ITEM}`, ...variationIds.map((v) => `${itemId}:${v}`)];
+  for (const k of keys) {
+    const s = oldCalculated.get(k);
+    if (s) return s;
+  }
+  return undefined;
+}
+
+/** Campos de produto para a linha consolidada do MLB (pai + variações). */
+interface MergedListingProductFields {
+  product_id: string | null;
+  sku: string | null;
+  cost_price: number | null;
+  weight_kg: number | null;
+  height_cm: number | null;
+  width_cm: number | null;
+  length_cm: number | null;
+  tax_percent: number | null;
+  extra_fee_percent: number | null;
+  fixed_expenses: number | null;
+}
+
+/**
+ * MLB com variações costuma não ter product_id/SKU no pai; vínculos ficam em ml_variations.
+ * Se o pai já tem produto, usa o pai; senão deriva das variações (menor variation_id com produto).
+ * Vários produtos distintos: usa o primeiro para custo/dimensões/impostos (indicativo); SKU pode listar vários.
+ */
+function mergeParentListingProductFields(
+  parentRaw: Record<string, unknown>,
+  variationRows: Record<string, unknown>[],
+  toNum: (v: unknown) => number | null
+): MergedListingProductFields {
+  const parentPid = parentRaw.product_id != null && parentRaw.product_id !== "" ? String(parentRaw.product_id) : null;
+  if (parentPid) {
+    const prod = parentRaw.products as Record<string, unknown> | Record<string, unknown>[] | null;
+    const p = Array.isArray(prod) ? prod[0] : prod;
+    const productSku = p && typeof p.sku === "string" ? p.sku : null;
+    const sku = extractSku((parentRaw.raw_json as Record<string, unknown>) || null, productSku);
+    return {
+      product_id: parentPid,
+      sku,
+      cost_price: toNum(p?.cost_price),
+      weight_kg: toNum(p?.weight),
+      height_cm: toNum(p?.height),
+      width_cm: toNum(p?.width),
+      length_cm: toNum(p?.length),
+      tax_percent: toNum(p?.tax_percent),
+      extra_fee_percent: toNum(p?.extra_fee_percent),
+      fixed_expenses: toNum(p?.fixed_expenses),
+    };
+  }
+
+  if (variationRows.length === 0) {
+    return {
+      product_id: null,
+      sku: extractSku((parentRaw.raw_json as Record<string, unknown>) || null, null),
+      cost_price: null,
+      weight_kg: null,
+      height_cm: null,
+      width_cm: null,
+      length_cm: null,
+      tax_percent: null,
+      extra_fee_percent: null,
+      fixed_expenses: null,
+    };
+  }
+
+  const snapshots = variationRows
+    .map((raw) => {
+      const prod = raw.products as Record<string, unknown> | Record<string, unknown>[] | null;
+      const p = Array.isArray(prod) ? prod[0] : prod;
+      const productSku = p && typeof p.sku === "string" ? p.sku : null;
+      const sku = extractSku((raw.raw_json as Record<string, unknown>) || null, productSku);
+      const pid = raw.product_id != null && raw.product_id !== "" ? String(raw.product_id) : null;
+      return {
+        variation_id: Number(raw.variation_id),
+        product_id: pid,
+        sku,
+        cost_price: toNum(p?.cost_price),
+        weight_kg: toNum(p?.weight),
+        height_cm: toNum(p?.height),
+        width_cm: toNum(p?.width),
+        length_cm: toNum(p?.length),
+        tax_percent: toNum(p?.tax_percent),
+        extra_fee_percent: toNum(p?.extra_fee_percent),
+        fixed_expenses: toNum(p?.fixed_expenses),
+      };
+    })
+    .sort((a, b) => a.variation_id - b.variation_id);
+
+  const withProd = snapshots.filter((s) => s.product_id != null);
+  const skusAll = Array.from(
+    new Set(snapshots.map((s) => s.sku).filter((x): x is string => Boolean(x)))
+  );
+
+  if (withProd.length === 0) {
+    const skuLabel =
+      skusAll.length === 0
+        ? null
+        : skusAll.length === 1
+          ? skusAll[0]
+          : `${skusAll[0]} (+${skusAll.length - 1} SKUs)`;
+    return {
+      product_id: null,
+      sku: skuLabel,
+      cost_price: null,
+      weight_kg: null,
+      height_cm: null,
+      width_cm: null,
+      length_cm: null,
+      tax_percent: null,
+      extra_fee_percent: null,
+      fixed_expenses: null,
+    };
+  }
+
+  const base = withProd[0];
+  const uniquePids = Array.from(new Set(withProd.map((s) => s.product_id!)));
+
+  let skuOut: string | null;
+  if (uniquePids.length === 1) {
+    skuOut = skusAll.length <= 1 ? base.sku : skusAll.join(" · ");
+  } else {
+    skuOut =
+      skusAll.length <= 2 ? skusAll.join(" · ") : `${skusAll[0]} · … (+${skusAll.length - 1} SKUs)`;
+  }
+
+  return {
+    product_id: base.product_id,
+    sku: skuOut,
+    cost_price: base.cost_price,
+    weight_kg: base.weight_kg,
+    height_cm: base.height_cm,
+    width_cm: base.width_cm,
+    length_cm: base.length_cm,
+    tax_percent: base.tax_percent,
+    extra_fee_percent: base.extra_fee_percent,
+    fixed_expenses: base.fixed_expenses,
+  };
 }
 
 export interface PricingCacheRow {
@@ -125,20 +292,38 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
     variationsFrom += PAGE_SIZE;
   }
 
-  const varItemIds = Array.from(new Set((variations as Array<{ item_id: string }>).map((v) => v.item_id)));
-  let parentItems: Array<{ item_id: string; title: string | null; thumbnail: string | null; permalink: string | null; status: string | null; listing_type_id: string | null; category_id: string | null }> = [];
-  if (varItemIds.length > 0) {
-    for (let i = 0; i < varItemIds.length; i += PAGE_SIZE) {
-      const ids = varItemIds.slice(i, i + PAGE_SIZE);
-      const { data: parents } = await supabase
-        .from("ml_items")
-        .select("item_id, title, thumbnail, permalink, status, listing_type_id, category_id")
-        .eq("account_id", accountId)
-        .in("item_id", ids);
-      parentItems = parentItems.concat(parents || []);
-    }
+  const variationRowsByItemId = new Map<string, Record<string, unknown>[]>();
+  const variationIdsByItemId = new Map<string, number[]>();
+  for (const v of variations as Record<string, unknown>[]) {
+    const iid = v.item_id as string;
+    const vid = Number(v.variation_id);
+    const arrRows = variationRowsByItemId.get(iid);
+    if (arrRows) arrRows.push(v);
+    else variationRowsByItemId.set(iid, [v]);
+    const arrIds = variationIdsByItemId.get(iid);
+    if (arrIds) arrIds.push(vid);
+    else variationIdsByItemId.set(iid, [vid]);
   }
-  const parentMap = new Map(parentItems.map((p: { item_id: string }) => [p.item_id, p]));
+
+  // 2b) Anúncios pai com variações (uma linha de cache por MLB)
+  const itemsWithVariations: unknown[] = [];
+  let ivFrom = 0;
+  while (true) {
+    const { data: chunk, error: ivErr } = await supabase
+      .from("ml_items")
+      .select(itemsSelect)
+      .eq("account_id", accountId)
+      .eq("has_variations", true)
+      .range(ivFrom, ivFrom + PAGE_SIZE - 1);
+    if (ivErr) {
+      console.error("[pricing-cache] ml_items (com variações) error:", ivErr);
+      return { ok: false, error: "Erro ao carregar anúncios com variações" };
+    }
+    const list = (chunk || []) as unknown[];
+    itemsWithVariations.push(...list);
+    if (list.length < PAGE_SIZE) break;
+    ivFrom += PAGE_SIZE;
+  }
 
   // 3) Preços planejados (paginar se houver muitos)
   const plannedRows: Array<{ item_id: string; variation_id: number | null; planned_price: number }> = [];
@@ -169,6 +354,7 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
   const allItemIds = Array.from(
     new Set([
       ...(items as Array<{ item_id: string }>).map((i) => i.item_id),
+      ...(itemsWithVariations as Array<{ item_id: string }>).map((i) => i.item_id),
       ...(variations as Array<{ item_id: string }>).map((v) => v.item_id),
     ])
   );
@@ -255,50 +441,41 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
     });
   }
 
-  for (const v of variations) {
-    const raw = v as unknown as Record<string, unknown>;
-    const parent = parentMap.get(raw.item_id as string) as Record<string, unknown> | undefined;
-    const prod = raw.products as Record<string, unknown> | Record<string, unknown>[] | null;
-    const p = Array.isArray(prod) ? prod[0] : prod;
-    const productSku = p && typeof p.sku === "string" ? p.sku : null;
-    const sku = extractSku((raw.raw_json as Record<string, unknown>) || null, productSku);
+  for (const item of itemsWithVariations) {
+    const raw = item as unknown as Record<string, unknown>;
     const currentPrice = Number(raw.price) || 0;
-    const vid = Number(raw.variation_id);
-    const key = `${raw.item_id}:${vid}`;
-    const plannedPrice = plannedByKey.get(key) ?? currentPrice;
-    const parentTitle = (parent?.title as string) ?? "";
-    const variationName = (raw.raw_json as Record<string, unknown>)?.attribute_combinations;
-    let variationNameStr = "";
-    if (Array.isArray(variationName)) {
-      variationNameStr = variationName.map((a: { value_name?: string }) => a?.value_name ?? "").filter(Boolean).join(" / ");
-    }
-    const title = variationNameStr ? `${parentTitle} - ${variationNameStr}` : parentTitle;
+    const itemId = raw.item_id as string;
+    const vids = variationIdsByItemId.get(itemId) ?? [];
+    const varRows = variationRowsByItemId.get(itemId) ?? [];
+    const merged = mergeParentListingProductFields(raw, varRows, toNum);
+    const plannedPrice = resolvePlannedPriceForParentListing(plannedByKey, itemId, currentPrice, vids);
+    const title = (raw.title as string) ?? null;
     rows.push({
-      id: cacheRowId(accountId, raw.item_id as string, vid),
+      id: cacheRowId(accountId, itemId, VARIATION_ID_ITEM),
       account_id: accountId,
-      item_id: raw.item_id as string,
-      variation_id: vid,
-      title: title || null,
-      thumbnail: (parent?.thumbnail as string) ?? null,
-      permalink: (parent?.permalink as string) ?? null,
-      status: (parent?.status as string) ?? null,
-      listing_type_id: (parent?.listing_type_id as string) ?? null,
-      category_id: (parent?.category_id as string) ?? null,
+      item_id: itemId,
+      variation_id: VARIATION_ID_ITEM,
+      title,
+      thumbnail: (raw.thumbnail as string) ?? null,
+      permalink: (raw.permalink as string) ?? null,
+      status: (raw.status as string) ?? null,
+      listing_type_id: (raw.listing_type_id as string) ?? null,
+      category_id: (raw.category_id as string) ?? null,
       current_price: currentPrice,
-      sku,
-      product_id: (raw.product_id as string) ?? null,
-      cost_price: toNum(p?.cost_price),
-      weight_kg: toNum(p?.weight),
-      height_cm: toNum(p?.height),
-      width_cm: toNum(p?.width),
-      length_cm: toNum(p?.length),
-      tax_percent: toNum(p?.tax_percent),
-      extra_fee_percent: toNum(p?.extra_fee_percent),
-      fixed_expenses: toNum(p?.fixed_expenses),
+      sku: merged.sku,
+      product_id: merged.product_id,
+      cost_price: merged.cost_price,
+      weight_kg: merged.weight_kg,
+      height_cm: merged.height_cm,
+      width_cm: merged.width_cm,
+      length_cm: merged.length_cm,
+      tax_percent: merged.tax_percent,
+      extra_fee_percent: merged.extra_fee_percent,
+      fixed_expenses: merged.fixed_expenses,
       planned_price: plannedPrice,
-      sales_30d: salesMap[raw.item_id as string] ?? 0,
-      orders_30d: ordersMap[raw.item_id as string] ?? 0,
-      sort_title: (parentTitle || "").toLowerCase(),
+      sales_30d: salesMap[itemId] ?? 0,
+      orders_30d: ordersMap[itemId] ?? 0,
+      sort_title: (title || "").toLowerCase(),
       cache_updated_at: now,
     });
   }
@@ -348,8 +525,8 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
   }
 
   const toInsert = uniqueRows.map((r) => {
-    const calcKey = `${r.item_id}:${r.variation_id}`;
-    const saved = oldCalculated.get(calcKey);
+    const vids = variationIdsByItemId.get(r.item_id) ?? [];
+    const saved = pickSavedCalculatedForParentListing(oldCalculated, r.item_id, vids);
     return {
       id: r.id,
       account_id: r.account_id,
@@ -416,37 +593,30 @@ export async function refreshPricingCacheByItemId(
   if (accountErr || !account) return { ok: false, error: "Conta não encontrada" };
 
   const now = new Date().toISOString();
-  const itemsSelect = `
-    id, account_id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id,
+  const itemsSelectWithVarFlag = `
+    id, account_id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id, has_variations,
     products:product_id (sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
   `;
-  const variationsSelect = `
+
+  const { data: mlItem } = await supabase
+    .from("ml_items")
+    .select(itemsSelectWithVarFlag)
+    .eq("account_id", accountId)
+    .eq("item_id", itemIdClean)
+    .maybeSingle();
+
+  const variationsSelectByItem = `
     id, account_id, item_id, variation_id, price, raw_json, product_id,
     products:product_id (sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
   `;
-
-  const { data: items } = await supabase
-    .from("ml_items")
-    .select(itemsSelect)
-    .eq("account_id", accountId)
-    .eq("item_id", itemIdClean)
-    .eq("has_variations", false);
-  const { data: variations } = await supabase
+  const { data: variationsFull } = await supabase
     .from("ml_variations")
-    .select(variationsSelect)
+    .select(variationsSelectByItem)
     .eq("account_id", accountId)
     .eq("item_id", itemIdClean);
 
-  let parentItems: Array<{ item_id: string; title: string | null; thumbnail: string | null; permalink: string | null; status: string | null; listing_type_id: string | null; category_id: string | null }> = [];
-  if ((variations?.length ?? 0) > 0) {
-    const { data: parents } = await supabase
-      .from("ml_items")
-      .select("item_id, title, thumbnail, permalink, status, listing_type_id, category_id")
-      .eq("account_id", accountId)
-      .eq("item_id", itemIdClean);
-    parentItems = parents || [];
-  }
-  const parentMap = new Map(parentItems.map((p: { item_id: string }) => [p.item_id, p]));
+  const varRowsFull = (variationsFull ?? []) as Record<string, unknown>[];
+  const variationIds = varRowsFull.map((r) => Number(r.variation_id)).sort((a, b) => a - b);
 
   const { data: plannedRows } = await supabase
     .from("planned_prices")
@@ -480,20 +650,19 @@ export async function refreshPricingCacheByItemId(
   const toNum = (v: unknown): number | null => (v != null && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : null);
   const rows: PricingCacheRow[] = [];
 
-  for (const item of items || []) {
-    const raw = item as unknown as Record<string, unknown>;
-    const prod = raw.products as Record<string, unknown> | Record<string, unknown>[] | null;
-    const p = Array.isArray(prod) ? prod[0] : prod;
-    const productSku = p && typeof p.sku === "string" ? p.sku : null;
-    const sku = extractSku((raw.raw_json as Record<string, unknown>) || null, productSku);
+  if (mlItem) {
+    const raw = mlItem as unknown as Record<string, unknown>;
     const currentPrice = Number(raw.price) || 0;
-    const key = `${raw.item_id}:${VARIATION_ID_ITEM}`;
-    const plannedPrice = plannedByKey.get(key) ?? currentPrice;
+    const hasVariations = raw.has_variations === true;
+    const merged = mergeParentListingProductFields(raw, hasVariations ? varRowsFull : [], toNum);
+    const plannedPrice = hasVariations
+      ? resolvePlannedPriceForParentListing(plannedByKey, itemIdClean, currentPrice, variationIds)
+      : plannedByKey.get(`${itemIdClean}:${VARIATION_ID_ITEM}`) ?? currentPrice;
     const title = (raw.title as string) ?? null;
     rows.push({
-      id: cacheRowId(accountId, raw.item_id as string, VARIATION_ID_ITEM),
+      id: cacheRowId(accountId, itemIdClean, VARIATION_ID_ITEM),
       account_id: accountId,
-      item_id: raw.item_id as string,
+      item_id: itemIdClean,
       variation_id: VARIATION_ID_ITEM,
       title,
       thumbnail: (raw.thumbnail as string) ?? null,
@@ -502,68 +671,20 @@ export async function refreshPricingCacheByItemId(
       listing_type_id: (raw.listing_type_id as string) ?? null,
       category_id: (raw.category_id as string) ?? null,
       current_price: currentPrice,
-      sku,
-      product_id: (raw.product_id as string) ?? null,
-      cost_price: toNum(p?.cost_price),
-      weight_kg: toNum(p?.weight),
-      height_cm: toNum(p?.height),
-      width_cm: toNum(p?.width),
-      length_cm: toNum(p?.length),
-      tax_percent: toNum(p?.tax_percent),
-      extra_fee_percent: toNum(p?.extra_fee_percent),
-      fixed_expenses: toNum(p?.fixed_expenses),
+      sku: merged.sku,
+      product_id: merged.product_id,
+      cost_price: merged.cost_price,
+      weight_kg: merged.weight_kg,
+      height_cm: merged.height_cm,
+      width_cm: merged.width_cm,
+      length_cm: merged.length_cm,
+      tax_percent: merged.tax_percent,
+      extra_fee_percent: merged.extra_fee_percent,
+      fixed_expenses: merged.fixed_expenses,
       planned_price: plannedPrice,
-      sales_30d: salesMap[raw.item_id as string] ?? 0,
-      orders_30d: ordersMap[raw.item_id as string] ?? 0,
+      sales_30d: salesMap[itemIdClean] ?? 0,
+      orders_30d: ordersMap[itemIdClean] ?? 0,
       sort_title: (title || "").toLowerCase(),
-      cache_updated_at: now,
-    });
-  }
-
-  for (const v of variations || []) {
-    const raw = v as unknown as Record<string, unknown>;
-    const parent = parentMap.get(raw.item_id as string) as Record<string, unknown> | undefined;
-    const prod = raw.products as Record<string, unknown> | Record<string, unknown>[] | null;
-    const p = Array.isArray(prod) ? prod[0] : prod;
-    const productSku = p && typeof p.sku === "string" ? p.sku : null;
-    const sku = extractSku((raw.raw_json as Record<string, unknown>) || null, productSku);
-    const currentPrice = Number(raw.price) || 0;
-    const vid = Number(raw.variation_id);
-    const key = `${raw.item_id}:${vid}`;
-    const plannedPrice = plannedByKey.get(key) ?? currentPrice;
-    const parentTitle = (parent?.title as string) ?? "";
-    const variationName = (raw.raw_json as Record<string, unknown>)?.attribute_combinations;
-    let variationNameStr = "";
-    if (Array.isArray(variationName)) {
-      variationNameStr = variationName.map((a: { value_name?: string }) => a?.value_name ?? "").filter(Boolean).join(" / ");
-    }
-    const title = variationNameStr ? `${parentTitle} - ${variationNameStr}` : parentTitle;
-    rows.push({
-      id: cacheRowId(accountId, raw.item_id as string, vid),
-      account_id: accountId,
-      item_id: raw.item_id as string,
-      variation_id: vid,
-      title: title || null,
-      thumbnail: (parent?.thumbnail as string) ?? null,
-      permalink: (parent?.permalink as string) ?? null,
-      status: (parent?.status as string) ?? null,
-      listing_type_id: (parent?.listing_type_id as string) ?? null,
-      category_id: (parent?.category_id as string) ?? null,
-      current_price: currentPrice,
-      sku,
-      product_id: (raw.product_id as string) ?? null,
-      cost_price: toNum(p?.cost_price),
-      weight_kg: toNum(p?.weight),
-      height_cm: toNum(p?.height),
-      width_cm: toNum(p?.width),
-      length_cm: toNum(p?.length),
-      tax_percent: toNum(p?.tax_percent),
-      extra_fee_percent: toNum(p?.extra_fee_percent),
-      fixed_expenses: toNum(p?.fixed_expenses),
-      planned_price: plannedPrice,
-      sales_30d: salesMap[raw.item_id as string] ?? 0,
-      orders_30d: ordersMap[raw.item_id as string] ?? 0,
-      sort_title: (parentTitle || "").toLowerCase(),
       cache_updated_at: now,
     });
   }
@@ -572,9 +693,36 @@ export async function refreshPricingCacheByItemId(
   for (const r of rows) rowsById.set(r.id, r);
   const uniqueRows = Array.from(rowsById.values());
 
+  const oldCalculated = new Map<
+    string,
+    { calculated_price: number; calculated_fee: number; calculated_shipping_cost: number; calculated_at: string }
+  >();
+  const { data: oldRows } = await supabase
+    .from("pricing_cache")
+    .select("item_id, variation_id, calculated_price, calculated_fee, calculated_shipping_cost, calculated_at")
+    .eq("account_id", accountId)
+    .eq("item_id", itemIdClean);
+  for (const o of oldRows ?? []) {
+    if (
+      o.calculated_price != null &&
+      o.calculated_fee != null &&
+      o.calculated_shipping_cost != null &&
+      o.calculated_at != null
+    ) {
+      oldCalculated.set(`${o.item_id}:${o.variation_id}`, {
+        calculated_price: Number(o.calculated_price),
+        calculated_fee: Number(o.calculated_fee),
+        calculated_shipping_cost: Number(o.calculated_shipping_cost),
+        calculated_at: String(o.calculated_at),
+      });
+    }
+  }
+
   await supabase.from("pricing_cache").delete().eq("account_id", accountId).eq("item_id", itemIdClean);
   if (uniqueRows.length > 0) {
-    const toInsert = uniqueRows.map((r) => ({
+    const toInsert = uniqueRows.map((r) => {
+      const saved = pickSavedCalculatedForParentListing(oldCalculated, r.item_id, variationIds);
+      return {
       id: r.id,
       account_id: r.account_id,
       item_id: r.item_id,
@@ -601,7 +749,14 @@ export async function refreshPricingCacheByItemId(
       orders_30d: r.orders_30d,
       sort_title: r.sort_title,
       cache_updated_at: r.cache_updated_at,
-    }));
+      ...(saved && {
+        calculated_price: saved.calculated_price,
+        calculated_fee: saved.calculated_fee,
+        calculated_shipping_cost: saved.calculated_shipping_cost,
+        calculated_at: saved.calculated_at,
+      }),
+    };
+    });
     const { error: insertErr } = await supabase.from("pricing_cache").insert(toInsert);
     if (insertErr) return { ok: false, error: "Erro ao gravar cache" };
   }

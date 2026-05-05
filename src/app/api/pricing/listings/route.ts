@@ -47,7 +47,8 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(10000, Math.max(1, parseInt(url.searchParams.get("limit") || "50", 10)));
   const search = url.searchParams.get("search")?.trim() || "";
   const statusFilter = url.searchParams.get("status")?.trim() || "";
-  const linkedOnly = url.searchParams.get("linked") === "1";
+  /** linked=1 só com produto; linked=0 só sem produto; omitido = todos */
+  const linkedParam = url.searchParams.get("linked")?.trim();
   const orderBy = url.searchParams.get("order_by")?.trim() || "";
   const skuFilter = url.searchParams.get("sku")?.trim() || "";
   const onlyWithSales30d = url.searchParams.get("only_with_sales") === "1";
@@ -71,7 +72,8 @@ export async function GET(req: NextRequest) {
     const buildCacheQuery = (base: ReturnType<typeof serviceSupabase.from>) => {
       let q = base.select("*", { count: "exact" }).eq("account_id", account.id);
       if (statusFilter) q = q.eq("status", statusFilter);
-      if (linkedOnly) q = q.not("product_id", "is", null);
+      if (linkedParam === "1") q = q.not("product_id", "is", null);
+      else if (linkedParam === "0") q = q.is("product_id", null);
       if (search) q = q.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
       if (skuFilter) q = q.ilike("sku", `%${skuFilter}%`);
       if (onlyWithSales30d) q = q.gt("sales_30d", 0);

@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { fetchSaleFee } from "@/lib/mercadolivre/fees";
 import { createServiceClient } from "@/lib/supabase/service";
+import { PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST } from "@/lib/pricing/calculate-limits";
 
 interface CalculateRequest {
   items: {
@@ -42,11 +43,23 @@ export async function POST(req: NextRequest) {
   const body = (await req.json()) as CalculateRequest;
 
   if (!body.items || !Array.isArray(body.items) || body.items.length === 0) {
+    console.warn("[pricing/calculate] 400: lista de items vazia ou inválida");
     return NextResponse.json({ error: "Nenhum item para calcular" }, { status: 400 });
   }
 
-  if (body.items.length > 100) {
-    return NextResponse.json({ error: "Máximo de 100 itens por requisição" }, { status: 400 });
+  if (body.items.length > PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST) {
+    console.warn(
+      "[pricing/calculate] 400: excesso de items",
+      body.items.length,
+      ">",
+      PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST
+    );
+    return NextResponse.json(
+      {
+        error: `Máximo de ${PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST} itens por requisição. Use várias chamadas ou o lote automático da tela de Preços.`,
+      },
+      { status: 400 }
+    );
   }
 
   const { data: account, error: accountError } = await supabase

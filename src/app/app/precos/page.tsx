@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { AppTable } from "@/components/AppTable";
+import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
+import { PRICING_CALCULATE_CLIENT_BATCH_SIZE } from "@/lib/pricing/calculate-limits";
 
 interface PricingListing {
   id: string;
@@ -193,6 +195,101 @@ function calculateFullPricing(
   };
 }
 
+const MAX_PRICING_CALCULATE_BATCH = PRICING_CALCULATE_CLIENT_BATCH_SIZE;
+
+type PricingCalculatePayloadItem = {
+  item_id: string;
+  variation_id?: number | null;
+  price: number;
+  listing_type_id: string;
+  category_id: string;
+  weight_kg?: number | null;
+  height_cm?: number | null;
+  width_cm?: number | null;
+  length_cm?: number | null;
+};
+
+type PricingCalculateResultRow = {
+  item_id: string;
+  variation_id: number | null;
+  price: number;
+  fee: number;
+  shipping_cost: number;
+};
+
+function findPricingResultForListing(
+  results: PricingCalculateResultRow[],
+  listing: Pick<ListingWithPricing, "item_id" | "variation_id">
+): PricingCalculateResultRow | undefined {
+  return results.find(
+    (r) => r.item_id === listing.item_id && (r.variation_id ?? null) === (listing.variation_id ?? null)
+  );
+}
+
+/**
+ * Envia o cálculo em lotes de até 100 itens (limite da API), em sequência, e concatena resultados.
+ */
+async function fetchPricingCalculateBatches(
+  items: PricingCalculatePayloadItem[],
+  isMercadoLider: boolean
+): Promise<{
+  results: PricingCalculateResultRow[];
+  errors: { item_id: string; variation_id: number | null; error: string }[];
+}> {
+  const results: PricingCalculateResultRow[] = [];
+  const errors: { item_id: string; variation_id: number | null; error: string }[] = [];
+  const step = MAX_PRICING_CALCULATE_BATCH;
+  if (!Number.isFinite(step) || step < 1) {
+    throw new Error("PRICING_CALCULATE_CLIENT_BATCH_SIZE inválido");
+  }
+  for (let i = 0; i < items.length; i += step) {
+    const batch = items.slice(i, i + step);
+    if (batch.length === 0) continue;
+    try {
+      const res = await fetch("/api/pricing/calculate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: batch,
+          is_mercado_lider: isMercadoLider,
+        }),
+      });
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const errBody = (await res.json()) as { error?: string };
+          if (errBody.error) detail = errBody.error;
+        } catch {
+          // ignore
+        }
+        for (const it of batch) {
+          errors.push({
+            item_id: it.item_id,
+            variation_id: it.variation_id ?? null,
+            error: detail,
+          });
+        }
+        continue;
+      }
+      const data = (await res.json()) as {
+        results?: PricingCalculateResultRow[];
+        errors?: { item_id: string; variation_id: number | null; error: string }[];
+      };
+      if (data.results?.length) results.push(...data.results);
+      if (data.errors?.length) errors.push(...data.errors);
+    } catch {
+      for (const it of batch) {
+        errors.push({
+          item_id: it.item_id,
+          variation_id: it.variation_id ?? null,
+          error: "Falha de rede",
+        });
+      }
+    }
+  }
+  return { results, errors };
+}
+
 function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
 
@@ -265,7 +362,10 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <h3 className="mb-2 font-medium text-fg-strong">Filtros (busca geral)</h3>
             <ul className="list-inside list-disc space-y-1">
               <li><strong>Status:</strong> Filtre por anúncios ativos, pausados ou encerrados</li>
-              <li><strong>Apenas vinculados:</strong> Mostra apenas anúncios com produto vinculado</li>
+              <li>
+                <strong>Vínculo com produto:</strong> pode filtrar só anúncios vinculados a um produto (custo/SKU) ou só os
+                não vinculados para corrigir depois
+              </li>
               <li><strong>Busca:</strong> Pesquise por título ou código MLB</li>
               <li><strong>Só com vendas (30d):</strong> Exibe apenas anúncios com pelo menos 1 venda nos últimos 30 dias</li>
               <li><strong>Lucratividade:</strong> Filtra em até 500 anúncios carregados (busca geral na amostra)</li>
@@ -287,6 +387,11 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           <section>
             <h3 className="mb-2 font-medium text-fg-strong">Observações</h3>
             <ul className="list-inside list-disc space-y-1">
+              <li>
+                Anúncios com variações aparecem uma linha por MLB (preço do anúncio no ML é único até o suporte
+                pleno a preço por variação via User Product). Custo, impostos e SKU vêm dos produtos vinculados às
+                variações (vários SKUs podem aparecer resumidos na mesma linha).
+              </li>
               <li>Anúncios sem tipo de listagem (N/D) precisam ser sincronizados novamente</li>
               <li>Para ter o custo, vincule o anúncio a um produto na página de Produtos</li>
               <li>Imposto, taxa extra e desp. fixas são considerados apenas se cadastrados no produto vinculado</li>
@@ -319,7 +424,8 @@ export default function PrecosPage() {
   const [searchInput, setSearchInput] = useState("");
   const [skuFilter, setSkuFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [linkedOnly, setLinkedOnly] = useState(false);
+  /** Filtro por vínculo com produto no cache */
+  const [linkFilter, setLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
   const [calculating, setCalculating] = useState(false);
   const [isMercadoLider, setIsMercadoLider] = useState(false);
   const [reputationLoading, setReputationLoading] = useState(true);
@@ -396,7 +502,8 @@ export default function PrecosPage() {
     });
     if (search) params.set("search", search);
     if (statusFilter) params.set("status", statusFilter);
-    if (linkedOnly) params.set("linked", "1");
+    if (linkFilter === "linked") params.set("linked", "1");
+    if (linkFilter === "unlinked") params.set("linked", "0");
     if (sortBy === "sales_desc" || sortBy === "sales_asc") params.set("order_by", sortBy);
     if (skuFilter) params.set("sku", skuFilter);
     if (onlyWithSales30d) params.set("only_with_sales", "1");
@@ -466,7 +573,7 @@ export default function PrecosPage() {
     } finally {
       setLoading(false);
     }
-  }, [pageForRequest, limitForRequest, search, statusFilter, linkedOnly, sortBy, skuFilter, onlyWithSales30d]);
+  }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, onlyWithSales30d]);
 
   const handleRefreshCache = useCallback(async () => {
     setCacheRefreshing(true);
@@ -518,7 +625,7 @@ export default function PrecosPage() {
   /** Ao mudar filtros do servidor (ou sair do modo cliente), voltar a carregar só 500 quando em modo cliente */
   useEffect(() => {
     if (clientSideFiltering) setLoadAllResults(false);
-  }, [clientSideFiltering, search, statusFilter, linkedOnly, sortBy, skuFilter]);
+  }, [clientSideFiltering, search, statusFilter, linkFilter, sortBy, skuFilter]);
 
   useEffect(() => {
     loadReputation();
@@ -553,42 +660,20 @@ export default function PrecosPage() {
       if (itemsToCalculate.length === 0) return;
 
       try {
-        const res = await fetch("/api/pricing/calculate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: itemsToCalculate,
-            is_mercado_lider: mercadoLider,
-          }),
-        });
+        const { results } = await fetchPricingCalculateBatches(itemsToCalculate, mercadoLider);
 
-        if (res.ok) {
-          const data = await res.json();
-          const results = data.results as {
-            item_id: string;
-            variation_id: number | null;
-            price: number;
-            fee: number;
-            shipping_cost: number;
-          }[];
-
-          setListings((prev) =>
-            prev.map((listing) => {
-              const result = results.find(
-                (r) =>
-                  r.item_id === listing.item_id &&
-                  r.variation_id === listing.variation_id
-              );
-              if (result) {
-                return {
-                  ...listing,
-                  calculated: calculateFullPricing(listing, result),
-                };
-              }
-              return listing;
-            })
-          );
-        }
+        setListings((prev) =>
+          prev.map((listing) => {
+            const result = findPricingResultForListing(results, listing);
+            if (result) {
+              return {
+                ...listing,
+                calculated: calculateFullPricing(listing, result),
+              };
+            }
+            return listing;
+          })
+        );
       } catch {
         // ignore
       }
@@ -607,7 +692,7 @@ export default function PrecosPage() {
   
   useEffect(() => {
     if (!loading && listings.length > 0 && !calculating) {
-      const key = `${page}-${search}-${statusFilter}-${linkedOnly}-${skuFilter}`;
+      const key = `${page}-${search}-${statusFilter}-${linkFilter}-${skuFilter}`;
       if (lastCalculatedKey.current !== key) {
         const hasUncalculated = listings.some((l) => !l.calculated && l.listing_type_id);
         if (hasUncalculated) {
@@ -620,7 +705,7 @@ export default function PrecosPage() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, listings.length, calculating, page, search, statusFilter, linkedOnly, skuFilter]);
+  }, [loading, listings.length, calculating, page, search, statusFilter, linkFilter, skuFilter]);
 
   const calculatePrices = useCallback(
     async (items: ListingWithPricing[]) => {
@@ -648,42 +733,20 @@ export default function PrecosPage() {
       }
 
       try {
-        const res = await fetch("/api/pricing/calculate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: itemsToCalculate,
-            is_mercado_lider: isMercadoLider,
-          }),
-        });
+        const { results } = await fetchPricingCalculateBatches(itemsToCalculate, isMercadoLider);
 
-        if (res.ok) {
-          const data = await res.json();
-          const results = data.results as {
-            item_id: string;
-            variation_id: number | null;
-            price: number;
-            fee: number;
-            shipping_cost: number;
-          }[];
-
-          setListings((prev) =>
-            prev.map((listing) => {
-              const result = results.find(
-                (r) =>
-                  r.item_id === listing.item_id &&
-                  r.variation_id === listing.variation_id
-              );
-              if (result) {
-                return {
-                  ...listing,
-                  calculated: calculateFullPricing(listing, result),
-                };
-              }
-              return listing;
-            })
-          );
-        }
+        setListings((prev) =>
+          prev.map((listing) => {
+            const result = findPricingResultForListing(results, listing);
+            if (result) {
+              return {
+                ...listing,
+                calculated: calculateFullPricing(listing, result),
+              };
+            }
+            return listing;
+          })
+        );
       } catch {
         // ignore
       } finally {
@@ -1190,6 +1253,12 @@ export default function PrecosPage() {
   return (
     <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <SmartLoaderOverlay
+        open={cacheRefreshing || calculating}
+        phase={
+          cacheRefreshing ? "refresh-cache" : calculating ? "calculate" : "default"
+        }
+      />
 
       {campaignOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -1314,18 +1383,21 @@ export default function PrecosPage() {
                     <option value="closed">Fechado</option>
                   </select>
                 </div>
-                <label className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={linkedOnly}
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Vínculo MLB → produto</span>
+                  <select
+                    value={linkFilter}
                     onChange={(e) => {
-                      setLinkedOnly(e.target.checked);
+                      setLinkFilter(e.target.value as "all" | "linked" | "unlinked");
                       setPage(1);
                     }}
-                    className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
-                  />
-                  <span className="text-xs text-slate-700 dark:text-slate-200">Só vinculados</span>
-                </label>
+                    className="w-full rounded border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="all">Todos</option>
+                    <option value="linked">Só vinculados</option>
+                    <option value="unlinked">Só não vinculados</option>
+                  </select>
+                </div>
                 <label className="flex cursor-pointer items-center gap-2" title="Exibe apenas anúncios com pelo menos 1 venda nos últimos 30 dias">
                   <input
                     type="checkbox"
@@ -1372,7 +1444,7 @@ export default function PrecosPage() {
                   >
                     Aplicar filtros
                   </button>
-                  {(search || skuFilter || statusFilter || linkedOnly || onlyWithSales30d || profitFilter || sortBy) && (
+                  {(search || skuFilter || statusFilter || linkFilter !== "all" || onlyWithSales30d || profitFilter || sortBy) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1380,7 +1452,7 @@ export default function PrecosPage() {
                         setSearchInput("");
                         setSkuFilter("");
                         setStatusFilter("active");
-                        setLinkedOnly(false);
+                        setLinkFilter("all");
                         setOnlyWithSales30d(false);
                         setProfitFilter("");
                         setSortBy("");
@@ -1404,7 +1476,7 @@ export default function PrecosPage() {
               <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
               </svg>
-              {(search || skuFilter || statusFilter || linkedOnly || onlyWithSales30d || profitFilter || sortBy) && (
+              {(search || skuFilter || statusFilter || linkFilter !== "all" || onlyWithSales30d || profitFilter || sortBy) && (
                 <span className="rounded-full bg-primary h-1.5 w-1.5" title="Filtros ativos" />
               )}
             </button>
