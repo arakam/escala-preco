@@ -181,16 +181,19 @@ body {
   color: var(--text-default);
 }
 
-/* Colunas congeladas (sticky) na tabela de preços — position/left/minWidth vêm do inline style */
+/* Preços: cabeçalhos respeitam a largura do <colgroup> (evita texto invadindo a coluna ao lado ao pinar) */
+.pricing-table-with-sticky .app-table thead th {
+  white-space: normal;
+}
+
+/* Colunas congeladas (sticky) na tabela de preços — position/left/largura/z-index vêm do inline (page.tsx) */
 .pricing-table-with-sticky .app-table thead th.sticky-col {
-  z-index: 20;
   box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.08);
   background: #f8fafc;
 }
 .dark .pricing-table-with-sticky .app-table thead th.sticky-col { background: #1e293b; }
 
 .pricing-table-with-sticky .app-table tbody td.sticky-col {
-  z-index: 1;
   box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.06);
   background: #fff;
 }

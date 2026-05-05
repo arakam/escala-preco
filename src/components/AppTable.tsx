@@ -18,9 +18,24 @@ export interface AppTableProps {
   maxHeight?: string;
   /** Classe extra no wrapper da tabela */
   className?: string;
+  /**
+   * Classes extras no `<table>`. Quando informado, substitui o `min-w-full` padrão
+   * (útil para `table-fixed` + larguras via `<colgroup>`).
+   */
+  tableClassName?: string;
 }
 
-export function AppTable({ children, summary, maxHeight = "70vh", className = "" }: AppTableProps) {
+export function AppTable({
+  children,
+  summary,
+  maxHeight = "70vh",
+  className = "",
+  tableClassName,
+}: AppTableProps) {
+  const tableClasses = tableClassName?.trim()
+    ? `app-table text-left text-sm ${tableClassName}`
+    : "app-table min-w-full text-left text-sm";
+
   return (
     <div className={`w-full ${className}`}>
       {summary != null && (
@@ -30,7 +45,7 @@ export function AppTable({ children, summary, maxHeight = "70vh", className = ""
         className="w-full overflow-x-auto overflow-y-auto rounded-app border border-stroke bg-white shadow-card dark:border-slate-700 dark:bg-slate-800"
         style={maxHeight ? { maxHeight } : undefined}
       >
-        <table className="app-table min-w-full text-left text-sm">
+        <table className={tableClasses}>
           {children}
         </table>
       </div>
