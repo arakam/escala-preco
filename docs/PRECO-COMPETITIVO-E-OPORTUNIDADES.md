@@ -2,18 +2,20 @@
 
 ## Configuração do endpoint
 
-O endpoint oficial de Referências de preços do Mercado Livre está definido em:
+O endpoint oficial de Referências de preços para **vendedor local** (ex.: MLB) está definido em:
 
 **`src/lib/mercadolivre/priceReferences.ts`**
 
 ```ts
-export const PRICE_REFERENCE_BASE = "https://api.mercadolibre.com/marketplace/benchmarks";
+export const PRICE_REFERENCE_BASE = "https://api.mercadolibre.com/suggestions";
 ```
 
 - Lista de itens com referência: `GET {BASE}/user/{USER_ID}/items`
 - Detalhes por item: `GET {BASE}/items/{ITEM_ID}/details`
 
-Documentação: https://global-selling.mercadolibre.com/devsite/pricing-reference
+Documentação (Brasil): https://developers.mercadolivre.com.br/pt_br/referencias-de-precos  
+
+*(A rota `marketplace/benchmarks` é para Global Selling/CBT; com OAuth de conta comum costuma retornar 403 `Invalid caller.id`.)*
 
 ## Resumo da implementação
 

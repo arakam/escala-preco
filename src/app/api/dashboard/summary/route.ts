@@ -11,7 +11,7 @@ export interface DashboardSummaryResponse {
   };
 }
 
-/** Tier válido: objeto com min_qty e price numéricos */
+/** Tier válido em rascunho: min_qty e price numéricos */
 function hasValidTier(tiers: unknown): boolean {
   if (!Array.isArray(tiers) || tiers.length === 0) return false;
   return tiers.some(
@@ -21,6 +21,18 @@ function hasValidTier(tiers: unknown): boolean {
       typeof (t as { min_qty?: unknown }).min_qty === "number" &&
       typeof (t as { price?: unknown }).price === "number"
   );
+}
+
+/** Tiers vindos do ML em `ml_items.wholesale_prices_json`: { min_purchase_unit, amount } */
+function hasValidMlWholesaleTiers(tiers: unknown): boolean {
+  if (!Array.isArray(tiers) || tiers.length === 0) return false;
+  return tiers.some((t) => {
+    if (t == null || typeof t !== "object") return false;
+    const o = t as { min_purchase_unit?: unknown; amount?: unknown };
+    const minU = Number(o.min_purchase_unit);
+    const amt = Number(o.amount);
+    return Number.isFinite(minU) && Number.isFinite(amt) && minU > 0 && amt > 0;
+  });
 }
 
 /**
@@ -52,41 +64,57 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Conta não encontrada" }, { status: 404 });
   }
 
-  // 1) Total de linhas editáveis achatadas: itens sem variação (1 cada) + variações dos itens com variação
-  const { count: countNoVar } = await supabase
-    .from("ml_items")
-    .select("id", { count: "exact", head: true })
-    .eq("account_id", accountId)
-    .eq("has_variations", false);
+  // 1–2) Linhas sincronizadas (mesma regra da grade atacado) e quantas têm atacado:
+  //      rascunho válido em wholesale_drafts OU preço por quantidade vindo do ML (wholesale_prices_json na sync).
+  const [{ data: items }, { data: variationRows }, { data: drafts }] = await Promise.all([
+    supabase
+      .from("ml_items")
+      .select("item_id, has_variations, wholesale_prices_json")
+      .eq("account_id", accountId),
+    supabase.from("ml_variations").select("item_id, variation_id").eq("account_id", accountId),
+    supabase.from("wholesale_drafts").select("item_id, variation_id, tiers_json").eq("account_id", accountId),
+  ]);
 
-  const { data: itemsWithVar } = await supabase
-    .from("ml_items")
-    .select("item_id")
-    .eq("account_id", accountId)
-    .eq("has_variations", true);
-
-  let varCount = 0;
-  if (itemsWithVar && itemsWithVar.length > 0) {
-    const itemIds = itemsWithVar.map((i) => i.item_id);
-    const { count } = await supabase
-      .from("ml_variations")
-      .select("id", { count: "exact", head: true })
-      .eq("account_id", accountId)
-      .in("item_id", itemIds);
-    varCount = count ?? 0;
+  const validDraftKeys = new Set<string>();
+  for (const d of drafts ?? []) {
+    if (!hasValidTier(d.tiers_json)) continue;
+    const iid = String(d.item_id).trim().toUpperCase();
+    if (d.variation_id == null) validDraftKeys.add(`${iid}:item`);
+    else validDraftKeys.add(`${iid}:${Number(d.variation_id)}`);
   }
 
-  const synced_count = (countNoVar ?? 0) + varCount;
+  const varsByItem = new Map<string, number[]>();
+  for (const v of variationRows ?? []) {
+    const id = v.item_id as string;
+    const list = varsByItem.get(id) ?? [];
+    list.push(Number(v.variation_id));
+    varsByItem.set(id, list);
+  }
 
-  // 2) Com atacado configurado: drafts com tiers_json com pelo menos 1 tier válido
-  const { data: drafts } = await supabase
-    .from("wholesale_drafts")
-    .select("tiers_json")
-    .eq("account_id", accountId);
+  let synced_count = 0;
+  let wholesale_configured_count = 0;
 
-  const wholesale_configured_count = (drafts ?? []).filter((d) =>
-    hasValidTier(d.tiers_json)
-  ).length;
+  for (const row of items ?? []) {
+    const itemId = row.item_id as string;
+    const upper = String(itemId).trim().toUpperCase();
+    const hasVar = !!row.has_variations;
+    const mlWholesale = hasValidMlWholesaleTiers(row.wholesale_prices_json);
+
+    if (!hasVar) {
+      synced_count += 1;
+      const draftOk = validDraftKeys.has(`${upper}:item`);
+      if (draftOk || mlWholesale) wholesale_configured_count += 1;
+      continue;
+    }
+
+    const varIds = varsByItem.get(itemId) ?? [];
+    for (const vid of varIds) {
+      synced_count += 1;
+      const draftOk =
+        validDraftKeys.has(`${upper}:${vid}`) || validDraftKeys.has(`${upper}:item`);
+      if (draftOk || mlWholesale) wholesale_configured_count += 1;
+    }
+  }
 
   const wholesale_missing_count = Math.max(0, synced_count - wholesale_configured_count);
 

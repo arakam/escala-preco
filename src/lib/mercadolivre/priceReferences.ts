@@ -1,14 +1,17 @@
 /**
  * Referências de preços / Sugestões de preços — Mercado Livre.
- * Endpoints oficiais: marketplace/benchmarks (pricing reference).
- * Documentação: https://global-selling.mercadolibre.com/devsite/pricing-reference
+ *
+ * - **Vendedor local (MLB, MLA, …):** `GET /suggestions/...` — documentação BR:
+ *   https://developers.mercadolivre.com.br/pt_br/referencias-de-precos
+ * - **Global Selling / CBT:** `GET /marketplace/benchmarks/...` — exige app certificado US e contexto CBT;
+ *   usar `benchmarks` com token de vendedor comum costuma retornar 403 `Invalid caller.id`.
  */
 
-/** Endpoint base para benchmarks (referências de preço). Troque aqui se a URL mudar. */
-export const PRICE_REFERENCE_BASE = "https://api.mercadolibre.com/marketplace/benchmarks";
+/** Base da API de sugestões de preço para vendedores por site (não usar benchmarks para conta local). */
+export const PRICE_REFERENCE_BASE = "https://api.mercadolibre.com/suggestions";
 /** Lista de item_ids com referência para um seller */
 export const PRICE_REFERENCE_USER_ITEMS = `${PRICE_REFERENCE_BASE}/user`;
-/** Detalhes da referência de um item: GET .../items/{ITEM_ID}/details */
+/** Detalhes da referência de um item: GET .../suggestions/items/{ITEM_ID}/details */
 export const PRICE_REFERENCE_ITEM_DETAILS = `${PRICE_REFERENCE_BASE}/items`;
 
 export type PriceReferenceStatus = "competitive" | "attention" | "high" | "none";
@@ -22,7 +25,7 @@ export interface PriceReferenceSummary {
   updated_at: string;
 }
 
-/** Resposta do GET .../marketplace/benchmarks/items/{ITEM_ID}/details */
+/** Resposta do GET .../suggestions/items/{ITEM_ID}/details */
 export interface MLPriceReferenceDetails {
   item_id: string;
   status?: string;
@@ -36,7 +39,7 @@ export interface MLPriceReferenceDetails {
   [key: string]: unknown;
 }
 
-/** Resposta do GET .../marketplace/benchmarks/user/{USER_ID}/items */
+/** Resposta do GET .../suggestions/user/{USER_ID}/items */
 export interface MLPriceReferenceUserItems {
   total?: number;
   items?: string[];
@@ -195,7 +198,7 @@ export async function fetchUserPriceReferenceItems(
   if (!res.ok) {
     if (res.status === 404) return [];
     const text = await res.text();
-    throw new Error(`benchmarks/user/items failed: ${res.status} ${text}`);
+    throw new Error(`suggestions/user/items failed: ${res.status} ${text}`);
   }
   const data = (await res.json()) as MLPriceReferenceUserItems;
   return data.items ?? [];
@@ -214,7 +217,7 @@ export async function fetchItemPriceReferenceDetails(
   if (res.status === 404) return null;
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`benchmarks/items/details failed: ${res.status} ${text}`);
+    throw new Error(`suggestions/items/details failed: ${res.status} ${text}`);
   }
   return (await res.json()) as MLPriceReferenceDetails;
 }

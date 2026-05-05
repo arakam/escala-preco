@@ -303,7 +303,7 @@ function AppHomeContent() {
                 </div>
               </div>
               <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                Itens prontos para edição e aplicação de atacado.
+                Linhas sincronizadas (anúncio ou variação), base para o editor de atacado.
               </p>
             </div>
 
@@ -323,7 +323,7 @@ function AppHomeContent() {
                 </div>
               </div>
               <p className="mt-2 text-xs text-emerald-800 dark:text-emerald-200/90">
-                Itens já aproveitando condições de volume.
+                Com preço por quantidade no ML (última sync) ou rascunho válido no EscalaPreço.
               </p>
             </div>
 
@@ -350,7 +350,7 @@ function AppHomeContent() {
                 </div>
               </div>
               <p className="mt-2 text-xs text-sky-800 dark:text-sky-200/90">
-                Percentual de anúncios com estratégia de atacado ativa.
+                % das linhas sincronizadas com atacado detectado (ML ou rascunho).
               </p>
             </div>
 
@@ -370,7 +370,7 @@ function AppHomeContent() {
                 </div>
               </div>
               <p className="mt-2 text-xs text-amber-800 dark:text-amber-200/90">
-                Oportunidade de aumentar ticket e giro com condições de volume.
+                Linhas sem tiers no ML (sync) nem rascunho com faixas válidas aqui.
               </p>
             </div>
 
