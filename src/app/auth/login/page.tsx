@@ -91,9 +91,17 @@ function LoginForm() {
             />
           </div>
           <div>
-            <label htmlFor="password" className="label">
-              Senha
-            </label>
+            <div className="flex items-baseline justify-between gap-2">
+              <label htmlFor="password" className="label">
+                Senha
+              </label>
+              <Link
+                href="/auth/forgot-password"
+                className="text-xs font-medium text-brand-blue hover:underline dark:text-blue-400"
+              >
+                Esqueceu a senha?
+              </Link>
+            </div>
             <input
               id="password"
               type="password"
