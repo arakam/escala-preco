@@ -76,13 +76,13 @@ export async function GET(req: NextRequest) {
       else if (linkedParam === "0") q = q.is("product_id", null);
       if (search) q = q.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
       if (skuFilter) q = q.ilike("sku", `%${skuFilter}%`);
-      if (onlyWithSales30d) q = q.gt("sales_30d", 0);
+      if (onlyWithSales30d) q = q.gt("orders_30d", 0);
       return q;
     };
 
     let dataQuery = buildCacheQuery(serviceSupabase.from("pricing_cache"));
-    if (orderBy === "sales_desc") dataQuery = dataQuery.order("sales_30d", { ascending: false });
-    else if (orderBy === "sales_asc") dataQuery = dataQuery.order("sales_30d", { ascending: true });
+    if (orderBy === "orders_desc") dataQuery = dataQuery.order("orders_30d", { ascending: false });
+    else if (orderBy === "orders_asc") dataQuery = dataQuery.order("orders_30d", { ascending: true });
     else dataQuery = dataQuery.order("sort_title", { ascending: true });
 
     const { data: cacheRows, error: cacheErr, count: totalCount } = await dataQuery.range(

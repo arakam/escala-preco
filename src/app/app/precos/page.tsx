@@ -125,8 +125,7 @@ const PRICING_COLUMNS: { label: string; minWidth: number }[] = [
   { label: "Título", minWidth: 300 },
   /** SKU costuma ser longo — evita truncar com col estreita */
   { label: "SKU", minWidth: 300 },
-  { label: "Vendas (30d)", minWidth: 88 },
-  { label: "Pedidos (30d)", minWidth: 88 },
+  { label: "Vendas 30d", minWidth: 88 },
   { label: "Custo", minWidth: 80 },
   { label: "Preço Atual", minWidth: 90 },
   { label: "Competitividade", minWidth: 110 },
@@ -141,6 +140,60 @@ const PRICING_COLUMNS: { label: string; minWidth: number }[] = [
   { label: "Desp. Fixas", minWidth: 88 },
   { label: "Link", minWidth: 88 },
 ];
+
+const PRICOS_STICKY_STORAGE_KEY = "escalapreco.precos.pinnedColumns.v2";
+const PRICOS_STICKY_LEGACY_KEY = "escalapreco.precos.pinnedColumns.v1";
+
+/** Migra índices da tabela com 20 colunas (havia coluna de unidades vendidas no índice 5). */
+function migratePricingStickyV1ToV2(v1: number[]): Set<number> {
+  const next = new Set<number>();
+  const maxOld = 19;
+  for (const c of v1) {
+    if (typeof c !== "number" || !Number.isInteger(c) || c < 0 || c > maxOld) continue;
+    if (c < 5) next.add(c);
+    else if (c === 5) continue;
+    else next.add(c - 1);
+  }
+  return next;
+}
+
+function readPrecosStickyInitial(): Set<number> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(PRICOS_STICKY_STORAGE_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw) as unknown;
+      if (!Array.isArray(arr)) return new Set([0, 1, 2, 3, 4]);
+      const n = PRICING_COLUMNS.length;
+      const nums = arr.filter(
+        (x): x is number =>
+          typeof x === "number" && Number.isInteger(x) && x >= 0 && x < n
+      );
+      return new Set(nums);
+    }
+    const legacy = localStorage.getItem(PRICOS_STICKY_LEGACY_KEY);
+    if (legacy) {
+      const arr = JSON.parse(legacy) as unknown;
+      const migrated =
+        Array.isArray(arr) && arr.every((x) => typeof x === "number")
+          ? migratePricingStickyV1ToV2(arr as number[])
+          : new Set([0, 1, 2, 3, 4]);
+      try {
+        localStorage.setItem(
+          PRICOS_STICKY_STORAGE_KEY,
+          JSON.stringify([...migrated].sort((a, b) => a - b))
+        );
+        localStorage.removeItem(PRICOS_STICKY_LEGACY_KEY);
+      } catch {
+        // ignore
+      }
+      return migrated;
+    }
+    return new Set([0, 1, 2, 3, 4]);
+  } catch {
+    return new Set([0, 1, 2, 3, 4]);
+  }
+}
 
 function PriceInput({
   value,
@@ -542,8 +595,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <h3 className="mb-2 font-medium text-fg-strong">Colunas da tabela</h3>
             <ul className="list-inside list-disc space-y-1">
               <li><strong>SKU:</strong> Código do produto vinculado ao anúncio</li>
-              <li><strong>Vendas (30d):</strong> Soma das quantidades vendidas em cada pedido (unidades) nos últimos 30 dias. Clique no cabeçalho para ordenar.</li>
-              <li><strong>Pedidos (30d):</strong> Número de pedidos pagos que contêm o item nos últimos 30 dias.</li>
+              <li><strong>Vendas 30d:</strong> Número de pedidos pagos que contêm o item nos últimos 30 dias. Clique no cabeçalho para ordenar.</li>
               <li><strong>Custo:</strong> Preço de custo do produto (cadastrado em Produtos)</li>
               <li><strong>Preço Atual:</strong> Preço atual do anúncio no Mercado Livre</li>
               <li><strong>Competitividade:</strong> Indicador da referência de preço do ML (sugestão / faixa), ao lado do preço atual. Use &quot;Atualizar referência&quot; para buscar dados novos sem refazer o cache de anúncios.</li>
@@ -654,7 +706,6 @@ function PrecosPageContent() {
   /** Filtro por % de lucro: "" = todos, "high" = >20%, "medium" = 10-20%, "low" = 0-10%, "negative" = ≤0% */
   const [profitFilter, setProfitFilter] = useState<"" | "high" | "medium" | "low" | "negative">("");
   /** Quantidade vendida (soma das quantidades nos pedidos) últimos 30 dias por item_id */
-  const [salesData, setSalesData] = useState<Record<string, number>>({});
   /** Número de pedidos (pagados) que contêm o item nos últimos 30 dias por item_id */
   const [ordersData, setOrdersData] = useState<Record<string, number>>({});
   /** Referências de preço ML por linha: `${ITEM}:${variação|item}` */
@@ -662,15 +713,14 @@ function PrecosPageContent() {
   const [mlAccountId, setMlAccountId] = useState<string>("");
   const [refJobId, setRefJobId] = useState<string | null>(null);
   const [refJob, setRefJob] = useState<{ status: string } | null>(null);
-  const [salesLoading, setSalesLoading] = useState(false);
   const [salesError, setSalesError] = useState(false);
   const [cacheRefreshing, setCacheRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const [cacheEmpty, setCacheEmpty] = useState(false);
   const [refreshingItemId, setRefreshingItemId] = useState<string | null>(null);
-  /** Ordenação: "" = padrão, "sales_desc" = mais vendas primeiro, "sales_asc" = menos vendas primeiro */
-  const [sortBy, setSortBy] = useState<"" | "sales_desc" | "sales_asc">("");
+  /** Ordenação: "" = padrão; orders_* = por quantidade de vendas (pedidos pagos) nos últimos 30 dias */
+  const [sortBy, setSortBy] = useState<"" | "orders_desc" | "orders_asc">("");
   /** Mostrar somente itens com vendas nos últimos 30 dias */
   const [onlyWithSales30d, setOnlyWithSales30d] = useState(false);
   /** Com filtros no cliente: carregar até 2000 itens de uma vez (em vez de 500) */
@@ -687,8 +737,9 @@ function PrecosPageContent() {
   const [campaignMessage, setCampaignMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   /** Barra de filtros lateral: expandida ao clicar, recolhe ao aplicar filtros */
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
-  /** Índices das colunas congeladas (0-based). Ordem dos congelados = ordem na tabela. */
-  const [stickyColumns, setStickyColumns] = useState<Set<number>>(() => new Set([0, 1, 2, 3, 4]));
+  /** Índices das colunas congeladas (0-based). Ordem dos congelados = ordem na tabela. Persistido em localStorage após hidratação. */
+  const [stickyColumns, setStickyColumns] = useState<Set<number>>(() => new Set());
+  const [stickyHydrated, setStickyHydrated] = useState(false);
   /** Menu de contexto (botão direito) no cabeçalho: índice da coluna e posição para posicionar o menu */
   const [contextMenuCol, setContextMenuCol] = useState<number | null>(null);
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -737,7 +788,7 @@ function PrecosPageContent() {
     if (statusFilter) params.set("status", statusFilter);
     if (linkFilter === "linked") params.set("linked", "1");
     if (linkFilter === "unlinked") params.set("linked", "0");
-    if (sortBy === "sales_desc" || sortBy === "sales_asc") params.set("order_by", sortBy);
+    if (sortBy === "orders_desc" || sortBy === "orders_asc") params.set("order_by", sortBy);
     if (skuFilter) params.set("sku", skuFilter);
     if (onlyWithSales30d) params.set("only_with_sales", "1");
 
@@ -749,9 +800,6 @@ function PrecosPageContent() {
 
       const listingsData = listingsRes.ok ? await listingsRes.json() : { listings: [], total: 0 };
       const items = (listingsData.listings ?? []) as PricingListing[];
-      if (listingsData.sales && typeof listingsData.sales === "object") {
-        setSalesData(listingsData.sales as Record<string, number>);
-      }
       if (listingsData.orders && typeof listingsData.orders === "object") {
         setOrdersData(listingsData.orders as Record<string, number>);
       }
@@ -928,7 +976,7 @@ function PrecosPageContent() {
     setPage(1);
   }, [profitFilter, onlyWithSales30d]);
 
-  /** Dados sempre vêm do cache (listings já inclui sales/orders). Não busca vendas em separado. */
+  /** Dados sempre vêm do cache (listings já inclui orders_30d). Não busca vendas em separado. */
 
   const doCalculate = useCallback(
     async (items: ListingWithPricing[], mercadoLider: boolean) => {
@@ -1708,11 +1756,11 @@ function PrecosPageContent() {
     }
 
     if (onlyWithSales30d) {
-      base = base.filter((listing) => (salesData[listing.item_id] ?? 0) > 0);
+      base = base.filter((listing) => (ordersData[listing.item_id] ?? 0) > 0);
     }
 
     return base;
-  }, [listings, profitFilter, skuFilter, getProfitPercent, onlyWithSales30d, salesData]);
+  }, [listings, profitFilter, skuFilter, getProfitPercent, onlyWithSales30d, ordersData]);
 
   /** Com filtros que dependem do cliente (lucro ou vendas 30d), paginação no cliente; senão usa total do servidor */
   const totalPages = clientSideFiltering
@@ -1755,6 +1803,23 @@ function PrecosPageContent() {
     setContextMenuCol(null);
     setContextMenuPos(null);
   }, []);
+
+  useEffect(() => {
+    setStickyColumns(readPrecosStickyInitial());
+    setStickyHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!stickyHydrated) return;
+    try {
+      localStorage.setItem(
+        PRICOS_STICKY_STORAGE_KEY,
+        JSON.stringify([...stickyColumns].sort((a, b) => a - b))
+      );
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [stickyColumns, stickyHydrated]);
 
   useEffect(() => {
     if (contextMenuCol === null) return;
@@ -2435,9 +2500,9 @@ function PrecosPageContent() {
         </div>
       )}
 
-      {salesError && !salesLoading && (
+      {salesError && (
         <div className="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-800">
-          Não foi possível carregar vendas/pedidos (30 dias). As colunas &quot;Vendas (30d)&quot; e &quot;Pedidos (30d)&quot; podem aparecer vazias. Verifique sua conexão ou tente novamente mais tarde.
+          Não foi possível carregar vendas (30 dias). A coluna &quot;Vendas 30d&quot; pode aparecer vazia. Verifique sua conexão ou tente novamente mais tarde.
         </div>
       )}
 
@@ -2677,24 +2742,28 @@ function PrecosPageContent() {
                 <th
                   className={`cursor-pointer select-none rounded p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 hover:bg-slate-100 ${stickyColumns.has(5) ? "sticky-col" : ""}`}
                   style={stickyHeaderStyles[5]}
-                  title="Clique para ordenar por vendas (30 dias)"
+                  title="Número de pedidos pagos (30 dias). Clique para ordenar."
                   onClick={() => {
-                    const next = sortBy === "" ? "sales_desc" : sortBy === "sales_desc" ? "sales_asc" : "";
+                    const next = sortBy === "" ? "orders_desc" : sortBy === "orders_desc" ? "orders_asc" : "";
                     setSortBy(next);
                     if (next) setPage(1);
                   }}
                   onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(5); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}
                 >
                   <div className="flex items-center justify-end gap-1">
-                    <span>Vendas (30d){sortBy === "sales_desc" && " ↓"}{sortBy === "sales_asc" && " ↑"}</span>
+                    <span>
+                      Vendas 30d
+                      {sortBy === "orders_desc" && " ↓"}
+                      {sortBy === "orders_asc" && " ↑"}
+                    </span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(5); }} title={stickyColumns.has(5) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(5)} className={stickyColumns.has(5) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(6) ? "sticky-col" : ""}`} style={stickyHeaderStyles[6]} title="Número de pedidos pagos (30 dias)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(6); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(6) ? "sticky-col" : ""}`} style={stickyHeaderStyles[6]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(6); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Pedidos (30d)</span>
+                    <span>Custo</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(6); }} title={stickyColumns.has(6) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(6)} className={stickyColumns.has(6) ? "text-primary" : ""} />
                     </button>
@@ -2702,39 +2771,39 @@ function PrecosPageContent() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(7) ? "sticky-col" : ""}`} style={stickyHeaderStyles[7]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(7); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Custo</span>
+                    <span>Preço Atual</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(7); }} title={stickyColumns.has(7) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(7)} className={stickyColumns.has(7) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(8) ? "sticky-col" : ""}`} style={stickyHeaderStyles[8]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(8); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(8) ? "sticky-col" : ""}`} style={stickyHeaderStyles[8]} title="Referência de preço do Mercado Livre (sugestão / faixa competitiva)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(8); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Preço Atual</span>
+                    <span>Competitividade</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(8); }} title={stickyColumns.has(8) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(8)} className={stickyColumns.has(8) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyHeaderStyles[9]} title="Referência de preço do Mercado Livre (sugestão / faixa competitiva)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(9); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyHeaderStyles[9]} title="(Vai receber − custo) ÷ preço novo. Edite para definir o preço pelo alvo de margem líquida." onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(9); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Competitividade</span>
+                    <span>Margem</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(9); }} title={stickyColumns.has(9) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(9)} className={stickyColumns.has(9) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyHeaderStyles[10]} title="(Vai receber − custo) ÷ preço novo. Edite para definir o preço pelo alvo de margem líquida." onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyHeaderStyles[10]} title="Promoção ML exige desconto ≥ 5%" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Margem</span>
+                    <span>Preço Novo</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(10); }} title={stickyColumns.has(10) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(10)} className={stickyColumns.has(10) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyHeaderStyles[11]} title="Promoção ML exige desconto ≥ 5%" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(11); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyHeaderStyles[11]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(11); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Preço Novo</span>
+                    <span>Vai Receber</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(11); }} title={stickyColumns.has(11) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(11)} className={stickyColumns.has(11) ? "text-primary" : ""} />
                     </button>
@@ -2742,7 +2811,7 @@ function PrecosPageContent() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyHeaderStyles[12]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(12); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Vai Receber</span>
+                    <span>Lucro</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(12); }} title={stickyColumns.has(12) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(12)} className={stickyColumns.has(12) ? "text-primary" : ""} />
                     </button>
@@ -2750,7 +2819,7 @@ function PrecosPageContent() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyHeaderStyles[13]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(13); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Lucro</span>
+                    <span>Taxa ML</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(13); }} title={stickyColumns.has(13) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(13)} className={stickyColumns.has(13) ? "text-primary" : ""} />
                     </button>
@@ -2758,49 +2827,41 @@ function PrecosPageContent() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyHeaderStyles[14]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(14); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Taxa ML</span>
+                    <span>Frete</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(14); }} title={stickyColumns.has(14) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(14)} className={stickyColumns.has(14) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyHeaderStyles[15]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(15); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyHeaderStyles[15]} title="Imposto sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(15); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Frete</span>
+                    <span>Imposto</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(15); }} title={stickyColumns.has(15) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(15)} className={stickyColumns.has(15) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyHeaderStyles[16]} title="Imposto sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(16); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyHeaderStyles[16]} title="Taxa extra sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(16); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Imposto</span>
+                    <span>Taxa Extra</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(16); }} title={stickyColumns.has(16) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(16)} className={stickyColumns.has(16) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyHeaderStyles[17]} title="Taxa extra sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(17); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyHeaderStyles[17]} title="Despesas fixas em R$ (cadastrado no produto)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(17); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Taxa Extra</span>
+                    <span>Desp. Fixas</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(17); }} title={stickyColumns.has(17) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(17)} className={stickyColumns.has(17) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyHeaderStyles[18]} title="Despesas fixas em R$ (cadastrado no produto)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(18); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
-                  <div className="flex items-center justify-end gap-1">
-                    <span>Desp. Fixas</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(18); }} title={stickyColumns.has(18) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
-                      <PinIcon pinned={stickyColumns.has(18)} className={stickyColumns.has(18) ? "text-primary" : ""} />
-                    </button>
-                  </div>
-                </th>
-                <th className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(19) ? "sticky-col" : ""}`} style={stickyHeaderStyles[19]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(19); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyHeaderStyles[18]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(18); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-between gap-1">
                     <span>Link</span>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(19); }} title={stickyColumns.has(19) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
-                      <PinIcon pinned={stickyColumns.has(19)} className={stickyColumns.has(19) ? "text-primary" : ""} />
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(18); }} title={stickyColumns.has(18) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                      <PinIcon pinned={stickyColumns.has(18)} className={stickyColumns.has(18) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
@@ -2924,41 +2985,18 @@ function PrecosPageContent() {
                       className={`p-2 text-right text-sm tabular-nums ${stickyColumns.has(5) ? "sticky-col" : ""}`}
                       style={stickyBodyStyles[5]}
                       title={
-                        salesLoading
-                          ? "Carregando vendas (30 dias)…"
-                          : salesData[listing.item_id] != null
-                            ? `${salesData[listing.item_id]} unidade(s) vendida(s) em 30 dias`
-                            : "Soma das quantidades vendidas (pedidos pagos). Indisponível ou sem vendas."
+                        ordersData[listing.item_id] != null
+                          ? `${ordersData[listing.item_id]} pedido(s) pago(s) em 30 dias`
+                          : "Número de pedidos pagos que contêm este item."
                       }
                     >
-                      {salesLoading ? (
-                        <span className="text-fg-muted">…</span>
-                      ) : salesData[listing.item_id] != null ? (
-                        salesData[listing.item_id]
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td
-                      className={`p-2 text-right text-sm tabular-nums ${stickyColumns.has(6) ? "sticky-col" : ""}`}
-                      style={stickyBodyStyles[6]}
-                      title={
-                        salesLoading
-                          ? "Carregando…"
-                          : ordersData[listing.item_id] != null
-                            ? `${ordersData[listing.item_id]} pedido(s) em 30 dias`
-                            : "Número de pedidos pagos que contêm este item."
-                      }
-                    >
-                      {salesLoading ? (
-                        <span className="text-fg-muted">…</span>
-                      ) : ordersData[listing.item_id] != null ? (
+                      {ordersData[listing.item_id] != null ? (
                         ordersData[listing.item_id]
                       ) : (
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(7) ? "sticky-col" : ""}`} style={stickyBodyStyles[7]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(6) ? "sticky-col" : ""}`} style={stickyBodyStyles[6]}>
                       {listing.cost_price != null ? (
                         <span className="text-fg">
                           R$ {formatBRL(listing.cost_price)}
@@ -2967,10 +3005,10 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm font-medium ${stickyColumns.has(8) ? "sticky-col" : ""}`} style={stickyBodyStyles[8]}>
+                    <td className={`p-2 text-right text-sm font-medium ${stickyColumns.has(7) ? "sticky-col" : ""}`} style={stickyBodyStyles[7]}>
                       R$ {formatBRL(listing.current_price)}
                     </td>
-                    <td className={`p-2 text-right ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyBodyStyles[9]}>
+                    <td className={`p-2 text-right ${stickyColumns.has(8) ? "sticky-col" : ""}`} style={stickyBodyStyles[8]}>
                       {(() => {
                         const ref = priceRefsByRow[priceRefRowKey(listing.item_id, listing.variation_id)];
                         const st = ref?.status ?? "none";
@@ -2988,7 +3026,7 @@ function PrecosPageContent() {
                         );
                       })()}
                     </td>
-                    <td className={`p-2 text-right ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyBodyStyles[10]}>
+                    <td className={`p-2 text-right ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyBodyStyles[9]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : (
@@ -3004,7 +3042,7 @@ function PrecosPageContent() {
                         />
                       )}
                     </td>
-                    <td className={`p-2 ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyBodyStyles[11]}>
+                    <td className={`p-2 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyBodyStyles[10]}>
                       <div className="flex flex-col items-end gap-0.5">
                         <PriceInput
                           value={listing.new_price}
@@ -3031,7 +3069,7 @@ function PrecosPageContent() {
                         )}
                       </div>
                     </td>
-                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
+                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyBodyStyles[11]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -3042,7 +3080,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : profit != null ? (
@@ -3071,7 +3109,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -3086,7 +3124,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -3105,7 +3143,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -3125,7 +3163,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -3145,7 +3183,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyBodyStyles[18]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -3165,7 +3203,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 ${stickyColumns.has(19) ? "sticky-col" : ""}`} style={stickyBodyStyles[19]}>
+                    <td className={`p-2 ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyBodyStyles[18]}>
                       {listing.permalink ? (
                         <a
                           href={listing.permalink}

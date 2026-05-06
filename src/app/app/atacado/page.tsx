@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
@@ -66,6 +66,70 @@ interface AtacadoRow {
   family_id?: string | null;
   /** Itens da mesma família (item_ids) */
   family_item_ids?: string[] | null;
+}
+
+const ATACADO_STICKY_STORAGE_KEY = "escalapreco.atacado.pinnedColumns.v1";
+
+/** Larguras mínimas (px): alinhadas ao `<colgroup>` para `position: sticky` e `left`. */
+const ATACADO_COLUMNS: { minWidth: number }[] = [
+  { minWidth: 108 },
+  { minWidth: 108 },
+  { minWidth: 180 },
+  { minWidth: 80 },
+  { minWidth: 120 },
+  { minWidth: 88 },
+  { minWidth: 96 },
+  { minWidth: 76 },
+  { minWidth: 92 },
+  { minWidth: 76 },
+  { minWidth: 92 },
+  { minWidth: 76 },
+  { minWidth: 92 },
+  { minWidth: 76 },
+  { minWidth: 92 },
+  { minWidth: 76 },
+  { minWidth: 92 },
+  { minWidth: 100 },
+  { minWidth: 220 },
+];
+
+function readAtacadoStickyInitial(): Set<number> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(ATACADO_STICKY_STORAGE_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return new Set();
+    const n = ATACADO_COLUMNS.length;
+    const nums = arr.filter(
+      (x): x is number =>
+        typeof x === "number" && Number.isInteger(x) && x >= 0 && x < n
+    );
+    return new Set(nums);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Ícone de alfinete para congelar/descongelar coluna no cabeçalho */
+function PinIcon({ pinned, className }: { pinned: boolean; className?: string }) {
+  const pathD = "M16 12V4h1V2H7v2h1v8l-4 4v2h12v-2l-4-4z";
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill={pinned ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d={pathD} />
+    </svg>
+  );
 }
 
 type RowStatus = "saved" | "edited" | "error";
@@ -223,76 +287,186 @@ function AtacadoPageContent() {
   const searchParams = useSearchParams();
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
 
+  const [stickyColumns, setStickyColumns] = useState<Set<number>>(() => new Set());
+  const [stickyHydrated, setStickyHydrated] = useState(false);
+
+  useEffect(() => {
+    setStickyColumns(readAtacadoStickyInitial());
+    setStickyHydrated(true);
+  }, []);
+
+  const toggleStickyColumn = useCallback((colIndex: number) => {
+    setStickyColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(colIndex)) next.delete(colIndex);
+      else next.add(colIndex);
+      return next;
+    });
+  }, []);
+
+  const { stickyHeaderStyles, stickyBodyStyles } = useMemo(() => {
+    const len = ATACADO_COLUMNS.length;
+    const head: (CSSProperties | undefined)[] = Array.from({ length: len }, () => undefined);
+    const body: (CSSProperties | undefined)[] = Array.from({ length: len }, () => undefined);
+    let left = 0;
+    let order = 0;
+    for (let i = 0; i < len; i++) {
+      if (stickyColumns.has(i)) {
+        const w = ATACADO_COLUMNS[i].minWidth;
+        const base = { position: "sticky" as const, left, boxSizing: "border-box" as const };
+        head[i] = { ...base, zIndex: 30 + order };
+        body[i] = { ...base, zIndex: 2 + order };
+        left += w;
+        order++;
+      }
+    }
+    return { stickyHeaderStyles: head, stickyBodyStyles: body };
+  }, [stickyColumns]);
+
+  useEffect(() => {
+    if (!stickyHydrated) return;
+    try {
+      localStorage.setItem(
+        ATACADO_STICKY_STORAGE_KEY,
+        JSON.stringify([...stickyColumns].sort((a, b) => a - b))
+      );
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [stickyColumns, stickyHydrated]);
+
+  function renderPinnedHeaderCell(
+    colIndex: number,
+    headerClassName: string,
+    label: React.ReactNode,
+    thProps?: React.ThHTMLAttributes<HTMLTableCellElement>
+  ) {
+    const pinned = stickyColumns.has(colIndex);
+    return (
+      <th
+        className={`${headerClassName} ${pinned ? "sticky-col" : ""}`}
+        style={stickyHeaderStyles[colIndex]}
+        {...thProps}
+      >
+        <div className="flex items-center justify-between gap-1">
+          <span className="min-w-0">{label}</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleStickyColumn(colIndex);
+            }}
+            title={pinned ? "Descongelar coluna" : "Congelar coluna"}
+            className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100 dark:text-slate-400 dark:hover:bg-slate-600"
+          >
+            <PinIcon pinned={pinned} className={pinned ? "text-primary" : ""} />
+          </button>
+        </div>
+      </th>
+    );
+  }
+
   /** Renderiza uma linha editável */
   function renderAtacadoRow(r: AtacadoRow) {
     const cur = getEditState(r);
     const tiers5 = ensureTiers5(cur.tiers);
     const err = validateRow(r);
     const isInvalid = cur.status === "edited" && err != null;
+    const stickyTd = (colIndex: number, className: string, children: React.ReactNode) => (
+      <td
+        className={`${className} ${stickyColumns.has(colIndex) ? "sticky-col" : ""}`}
+        style={stickyBodyStyles[colIndex]}
+      >
+        {children}
+      </td>
+    );
+
     return (
       <tr
         key={rowKey(r)}
         className={`border-b border-gray-100 dark:border-slate-700 ${isInvalid ? "bg-red-50 dark:bg-red-950/30" : ""} hover:bg-gray-50 dark:hover:bg-slate-800/50`}
       >
-        <td className="p-2">
+        {stickyTd(
+          0,
+          "p-2",
           <button type="button" onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)} title="Clique para copiar" className="font-mono text-fg hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
             {copiedCell === `${rowKey(r)}-mlb` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.item_id}
           </button>
-        </td>
-        <td className="p-2">
-          {r.user_product_id ? (
+        )}
+        {stickyTd(
+          1,
+          "p-2",
+          r.user_product_id ? (
             <button type="button" onClick={() => copyToClipboard(r.user_product_id ?? "", `${rowKey(r)}-mlbu`)} title="Clique para copiar" className="font-mono text-fg hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
               {copiedCell === `${rowKey(r)}-mlbu` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.user_product_id}
             </button>
           ) : (
             <span className="text-fg-muted">—</span>
-          )}
-        </td>
-        <td className="max-w-[180px] truncate p-2" title={r.title ?? ""}>{r.title ?? "—"}</td>
-        <td className="p-2">
-          {r.has_variations ? (
+          )
+        )}
+        {stickyTd(2, "max-w-[180px] truncate p-2", <span title={r.title ?? ""}>{r.title ?? "—"}</span>)}
+        {stickyTd(
+          3,
+          "p-2",
+          r.has_variations ? (
             <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800">Sim</span>
           ) : (
             <span className="text-fg-muted">Não</span>
-          )}
-        </td>
-        <td className="p-2 text-fg" title={r.sku ? "Clique para copiar" : "Configure SELLER_SKU no ML."}>
-          {r.sku ? (
-            <button type="button" onClick={() => copyToClipboard(r.sku ?? "", `${rowKey(r)}-sku`)} className="hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer max-w-full truncate block">
+          )
+        )}
+        {stickyTd(
+          4,
+          "p-2 text-fg",
+          r.sku ? (
+            <button type="button" onClick={() => copyToClipboard(r.sku ?? "", `${rowKey(r)}-sku`)} title="Clique para copiar" className="hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer max-w-full truncate block">
               {copiedCell === `${rowKey(r)}-sku` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.sku}
             </button>
           ) : (
-            <span className="cursor-help text-amber-600">Não configurado</span>
-          )}
-        </td>
-        <td className="p-2">{r.current_price != null ? Number(r.current_price).toFixed(2) : "—"}</td>
-        <td className="p-2 text-right tabular-nums">
-          {r.planned_price != null && !Number.isNaN(Number(r.planned_price))
-            ? Number(r.planned_price).toFixed(2)
-            : "—"}
-        </td>
+            <span className="cursor-help text-amber-600" title="Configure SELLER_SKU no ML.">
+              Não configurado
+            </span>
+          )
+        )}
+        {stickyTd(5, "p-2 tabular-nums", r.current_price != null ? Number(r.current_price).toFixed(2) : "—")}
+        {stickyTd(
+          6,
+          "p-2 text-right tabular-nums",
+          r.planned_price != null && !Number.isNaN(Number(r.planned_price)) ? Number(r.planned_price).toFixed(2) : "—"
+        )}
         {[0, 1, 2, 3, 4].map((i) => {
           const priceInputKey = `${rowKey(r)}-${i}`;
           const priceDisplay = editingPrice[priceInputKey] !== undefined ? editingPrice[priceInputKey] : tiers5[i]?.price != null ? formatPriceDisplay(tiers5[i].price) : "";
+          const minCol = 7 + i * 2;
+          const priceCol = 8 + i * 2;
           return (
             <React.Fragment key={i}>
-              <td className="p-2">
+              {stickyTd(
+                minCol,
+                "p-2",
                 <input type="number" min={2} step={1} placeholder={i === 0 ? "2" : ""} value={tiers5[i]?.min_qty ?? ""} onChange={(e) => updateTier(r, i, "min_qty", e.target.value)} className={`w-16 rounded border px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : "border-gray-200"}`} />
-              </td>
-              <td className="p-2">
+              )}
+              {stickyTd(
+                priceCol,
+                "p-2",
                 <input type="text" inputMode="decimal" placeholder="0,00" value={priceDisplay} onChange={(e) => setEditingPrice((prev) => ({ ...prev, [priceInputKey]: e.target.value }))} onBlur={(e) => { const raw = e.target.value.trim(); const parsed = raw !== "" ? parsePriceInput(raw) : tiers5[i]?.price ?? 0; updateTier(r, i, "price", parsed); setEditingPrice((prev) => { const next = { ...prev }; delete next[priceInputKey]; return next; }); }} className={`w-20 rounded border px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : "border-gray-200"}`} />
-              </td>
+              )}
             </React.Fragment>
           );
         })}
-        <td className="p-2">
+        {stickyTd(
+          17,
+          "p-2",
           <span className={`rounded px-2 py-0.5 text-xs ${cur.status === "error" ? "bg-red-200 text-red-800" : cur.status === "edited" ? "bg-amber-200 text-amber-800" : "bg-green-100 text-green-800"}`}>{cur.status === "error" ? "erro" : cur.status === "edited" ? "alterado" : "salvo"}</span>
-        </td>
-        <td className="p-2">
-          <button type="button" onClick={() => saveRow(r)} disabled={saving} className="mr-1 text-brand-blue hover:underline disabled:opacity-50">Salvar</button>
-          <button type="button" onClick={() => revertRow(r)} className="mr-1 text-fg hover:underline">Reverter</button>
-          <button type="button" onClick={() => setReceivableRowKey(rowKey(r))} title="Ver recebível" className="text-fg hover:underline">Ver recebível</button>
-        </td>
+        )}
+        {stickyTd(
+          18,
+          "p-2",
+          <>
+            <button type="button" onClick={() => saveRow(r)} disabled={saving} className="mr-1 text-brand-blue hover:underline disabled:opacity-50">Salvar</button>
+            <button type="button" onClick={() => revertRow(r)} className="mr-1 text-fg hover:underline">Reverter</button>
+            <button type="button" onClick={() => setReceivableRowKey(rowKey(r))} title="Ver recebível" className="text-fg hover:underline">Ver recebível</button>
+          </>
+        )}
       </tr>
     );
   }
@@ -1789,59 +1963,90 @@ function AtacadoPageContent() {
                 )}
               </div>
             </div>
-            <AppTable maxHeight="70vh">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  MLB
-                </th>
-                <th
-                  className="whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
-                  title="Código User Product (MLBU)"
-                >
-                  MLBU
-                </th>
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Título
-                </th>
-                <th
-                  className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
-                  title="Indica se o anúncio possui variações"
-                >
-                  Variação
-                </th>
-                <th
-                  className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
-                  title="SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação."
-                >
-                  SKU
-                </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Preço R$
-                </th>
-                <th
-                  className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
-                  title="Valor salvo na calculadora (Preços / planned_prices)"
-                >
-                  Promoção R$
-                </th>
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <th
-                    key={i}
-                    colSpan={2}
-                    className="whitespace-nowrap p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
-                  >
-                    Atacado {i}
-                  </th>
+            <AppTable
+              maxHeight="70vh"
+              tableClassName="table-fixed w-max min-w-[max(100%,max-content)]"
+            >
+              <colgroup>
+                {ATACADO_COLUMNS.map((c, i) => (
+                  <col key={i} style={{ width: c.minWidth }} />
                 ))}
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Status
-                </th>
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Ações
-                </th>
-              </tr>
-            </thead>
+              </colgroup>
+              <thead className="bg-slate-50">
+                <tr>
+                  {renderPinnedHeaderCell(
+                    0,
+                    "whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                    "MLB"
+                  )}
+                  {renderPinnedHeaderCell(
+                    1,
+                    "whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                    "MLBU",
+                    { title: "Código User Product (MLBU)" }
+                  )}
+                  {renderPinnedHeaderCell(
+                    2,
+                    "p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                    "Título"
+                  )}
+                  {renderPinnedHeaderCell(
+                    3,
+                    "p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                    "Variação",
+                    { title: "Indica se o anúncio possui variações" }
+                  )}
+                  {renderPinnedHeaderCell(
+                    4,
+                    "p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                    "SKU",
+                    {
+                      title:
+                        "SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.",
+                    }
+                  )}
+                  {renderPinnedHeaderCell(
+                    5,
+                    "p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                    "Preço R$"
+                  )}
+                  {renderPinnedHeaderCell(
+                    6,
+                    "p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                    "Promoção R$",
+                    { title: "Valor salvo na calculadora (Preços / planned_prices)" }
+                  )}
+                  {[1, 2, 3, 4, 5].map((n) => {
+                    const t = n - 1;
+                    const minIdx = 7 + t * 2;
+                    const priceIdx = 8 + t * 2;
+                    return (
+                      <React.Fragment key={n}>
+                        {renderPinnedHeaderCell(
+                          minIdx,
+                          "whitespace-nowrap p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                          <>Atacado {n} · mín.</>
+                        )}
+                        {renderPinnedHeaderCell(
+                          priceIdx,
+                          "whitespace-nowrap p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                          <>Atacado {n} · R$</>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                  {renderPinnedHeaderCell(
+                    17,
+                    "p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                    "Status"
+                  )}
+                  {renderPinnedHeaderCell(
+                    18,
+                    "p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
+                    "Ações"
+                  )}
+                </tr>
+              </thead>
               <tbody>
                 {rows.map((r) => renderAtacadoRow(r))}
               </tbody>
