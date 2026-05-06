@@ -58,6 +58,8 @@ interface AtacadoRow {
   sku: string | null;
   title: string | null;
   current_price: number | null;
+  /** Preço informado na calculadora (tela Preços / planned_prices) */
+  planned_price?: number | null;
   listing_type_id?: string | null;
   category_id?: string | null;
   tiers: Tier[];
@@ -220,6 +222,11 @@ function AtacadoPageContent() {
           )}
         </td>
         <td className="p-2">{r.current_price != null ? Number(r.current_price).toFixed(2) : "—"}</td>
+        <td className="p-2 text-right tabular-nums">
+          {r.planned_price != null && !Number.isNaN(Number(r.planned_price))
+            ? Number(r.planned_price).toFixed(2)
+            : "—"}
+        </td>
         <td className="relative p-2">
           {(() => {
             const status = r.price_reference_status ?? "none";
@@ -1216,6 +1223,12 @@ function AtacadoPageContent() {
                 </th>
                 <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Preço R$
+                </th>
+                <th
+                  className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
+                  title="Valor salvo na calculadora (Preços)"
+                >
+                  Preço novo R$
                 </th>
                 <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Competitividade

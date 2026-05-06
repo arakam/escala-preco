@@ -31,6 +31,15 @@ type VariationRow = {
   raw_json: unknown;
 };
 
+/** Alinhado a planned_prices / pricing-cache: -1 = anúncio sem variação ou preço no nível do item */
+const PLANNED_VARIATION_ITEM = -1;
+
+type PlannedPriceRow = {
+  item_id: string;
+  variation_id: number | null;
+  planned_price: number;
+};
+
 /**
  * GET /api/atacado/rows?accountId=...&search=...&filter=...&page=...&limit=...
  * Retorna linhas achatadas (item/variação) combinadas com drafts.
@@ -207,7 +216,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Executar todas as buscas em PARALELO
-  const [variations, priceRefs, drafts, familyItemsData] = await Promise.all([
+  const [variations, priceRefs, drafts, plannedRows, familyItemsData] = await Promise.all([
     // Variações
     fetchInParallelBatches<VariationRow>(itemIds, 100, async (batchIds) => {
       const { data } = await supabase
@@ -237,6 +246,17 @@ export async function GET(request: NextRequest) {
         .in("item_id", batchIds);
       if (error) console.error("[atacado/rows] drafts batch error:", error);
       return (data ?? []) as DraftRow[];
+    }),
+
+    // Preços planejados (calculadora / Preços)
+    fetchInParallelBatches<PlannedPriceRow>(itemIdsUpper, 100, async (batchIds) => {
+      const { data, error } = await supabase
+        .from("planned_prices")
+        .select("item_id, variation_id, planned_price")
+        .eq("account_id", accountId)
+        .in("item_id", batchIds);
+      if (error) console.error("[atacado/rows] planned_prices batch error:", error);
+      return (data ?? []) as PlannedPriceRow[];
     }),
 
     // Family items mapping
@@ -276,6 +296,24 @@ export async function GET(request: NextRequest) {
       tiers: (d.tiers_json as unknown[]) ?? [],
       updated_at: d.updated_at ?? "",
     });
+  }
+
+  const plannedByKey = new Map<string, number>();
+  const plannedLookupKey = (itemId: string, variationId: number | null) => {
+    const vid = variationId == null ? PLANNED_VARIATION_ITEM : variationId;
+    return `${String(itemId).trim().toUpperCase()}:${vid}`;
+  };
+  for (const p of plannedRows) {
+    const vid =
+      p.variation_id == null || p.variation_id === PLANNED_VARIATION_ITEM
+        ? PLANNED_VARIATION_ITEM
+        : Number(p.variation_id);
+    plannedByKey.set(`${String(p.item_id).trim().toUpperCase()}:${vid}`, Number(p.planned_price));
+  }
+
+  function getPlannedPrice(itemId: string, variationId: number | null): number | null {
+    const v = plannedByKey.get(plannedLookupKey(itemId, variationId));
+    return v != null && !Number.isNaN(v) ? v : null;
   }
 
   // Criar mapa de variações por item_id para lookup O(1)
@@ -346,6 +384,8 @@ export async function GET(request: NextRequest) {
     sku: string | null;
     title: string | null;
     current_price: number | null;
+    /** Preço novo da calculadora (planned_prices), mesma conta */
+    planned_price: number | null;
     listing_type_id: string | null;
     category_id: string | null;
     tiers: { min_qty: number; price: number }[];
@@ -388,6 +428,7 @@ export async function GET(request: NextRequest) {
           sku: getSku(item, v),
           title: item.title ?? null,
           current_price: v.price != null ? Number(v.price) : null,
+          planned_price: getPlannedPrice(item.item_id, v.variation_id),
           listing_type_id: item.listing_type_id ?? null,
           category_id: item.category_id ?? null,
           tiers,
@@ -428,6 +469,7 @@ export async function GET(request: NextRequest) {
         sku: getSku(item, null),
         title: item.title ?? null,
         current_price: item.price != null ? Number(item.price) : null,
+        planned_price: getPlannedPrice(item.item_id, null),
         listing_type_id: item.listing_type_id ?? null,
         category_id: item.category_id ?? null,
         tiers,
