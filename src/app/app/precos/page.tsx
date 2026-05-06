@@ -100,6 +100,7 @@ const PRICING_COLUMNS: { label: string; minWidth: number }[] = [
   { label: "Pedidos (30d)", minWidth: 88 },
   { label: "Custo", minWidth: 80 },
   { label: "Preço Atual", minWidth: 90 },
+  { label: "Margem", minWidth: 76 },
   { label: "Preço Novo", minWidth: 100 },
   { label: "Vai Receber", minWidth: 95 },
   { label: "Lucro", minWidth: 95 },
@@ -175,6 +176,185 @@ function PriceInput({
       }`}
     />
   );
+}
+
+/** % margem líquida: (valor líquido − custo) / preço de venda — alinhado a getProfitPercent quando há calculated. */
+function MarginInput({
+  valuePercent,
+  disabled,
+  dirty,
+  onCommit,
+}: {
+  valuePercent: number | null;
+  disabled?: boolean;
+  dirty?: boolean;
+  onCommit: (pct: number) => void;
+}) {
+  const fmt = (v: number) => v.toFixed(1).replace(".", ",");
+  const [localValue, setLocalValue] = useState(() => (valuePercent != null ? fmt(valuePercent) : ""));
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) {
+      if (valuePercent != null) setLocalValue(fmt(valuePercent));
+      else setLocalValue("");
+    }
+  }, [valuePercent, isFocused]);
+
+  if (disabled) {
+    return <span className="text-fg-muted text-sm">—</span>;
+  }
+
+  const handleBlur = () => {
+    setIsFocused(false);
+    const cleaned = localValue.replace(/[^\d,.-]/g, "").replace(",", ".");
+    const num = parseFloat(cleaned);
+    if (!isNaN(num)) {
+      setLocalValue(fmt(num));
+      onCommit(num);
+    } else if (valuePercent != null) {
+      setLocalValue(fmt(valuePercent));
+    } else {
+      setLocalValue("");
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-end gap-0.5">
+      <input
+        type="text"
+        inputMode="decimal"
+        value={localValue}
+        onChange={(e) => setLocalValue(e.target.value)}
+        onFocus={() => setIsFocused(true)}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        title="Margem líquida sobre o preço novo. Ao confirmar, o preço é ajustado pela calculadora (taxas ML, frete, impostos)."
+        className={`w-[4.25rem] rounded border px-1.5 py-1 text-right text-sm tabular-nums ${
+          dirty ? "border-amber-400 bg-amber-50" : "border-gray-300 dark:border-slate-600"
+        }`}
+      />
+      <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">%</span>
+    </div>
+  );
+}
+
+async function fetchCalculatedPricingAtPrice(
+  listing: ListingWithPricing,
+  price: number,
+  isMercadoLider: boolean
+): Promise<CalculatedPricing | null> {
+  if (!listing.listing_type_id || !listing.category_id || !Number.isFinite(price) || price <= 0) return null;
+  try {
+    const res = await fetch("/api/pricing/calculate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [
+          {
+            item_id: listing.item_id,
+            variation_id: listing.variation_id,
+            price,
+            listing_type_id: listing.listing_type_id,
+            category_id: listing.category_id,
+            weight_kg: listing.weight_kg,
+            height_cm: listing.height_cm,
+            width_cm: listing.width_cm,
+            length_cm: listing.length_cm,
+          },
+        ],
+        is_mercado_lider: isMercadoLider,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const result = data.results?.[0] as { price: number; fee: number; shipping_cost: number } | undefined;
+    if (!result) return null;
+    return calculateFullPricing(listing, result);
+  } catch {
+    return null;
+  }
+}
+
+function achievedNetMarginPercent(
+  listing: Pick<ListingWithPricing, "cost_price">,
+  price: number,
+  calc: CalculatedPricing
+): number {
+  const C = listing.cost_price!;
+  return ((calc.net_amount - C) / price) * 100;
+}
+
+/** Busca binária no preço até a margem líquida (líquido − custo) / preço ≈ alvo. */
+async function solvePriceForTargetNetMarginPercent(
+  listing: ListingWithPricing,
+  targetPct: number,
+  isMercadoLider: boolean
+): Promise<{ price: number; calculated: CalculatedPricing } | null> {
+  if (listing.cost_price == null) return null;
+
+  const marginAtPrice = async (p: number): Promise<number | null> => {
+    const calc = await fetchCalculatedPricingAtPrice(listing, p, isMercadoLider);
+    if (!calc) return null;
+    return achievedNetMarginPercent(listing, p, calc);
+  };
+
+  let low = Math.max(0.01, listing.cost_price * 0.01);
+  let high = Math.max(
+    listing.new_price > 0 ? listing.new_price * 2 : 0,
+    listing.current_price * 2,
+    listing.cost_price * 3,
+    50
+  );
+
+  let mHigh = await marginAtPrice(high);
+  if (mHigh == null) return null;
+  let expand = 0;
+  while (mHigh < targetPct && high < 5_000_000 && expand < 28) {
+    high = Math.min(high * 1.5, 5_000_000);
+    mHigh = await marginAtPrice(high);
+    if (mHigh == null) return null;
+    expand++;
+  }
+
+  let mLow = await marginAtPrice(low);
+  if (mLow == null) return null;
+  expand = 0;
+  while (mLow > targetPct && low > 0.01 && expand < 28) {
+    low = Math.max(0.01, low * 0.85);
+    mLow = await marginAtPrice(low);
+    if (mLow == null) return null;
+    expand++;
+  }
+
+  let best: { price: number; calculated: CalculatedPricing } | null = null;
+  let bestErr = Infinity;
+
+  for (let i = 0; i < 28; i++) {
+    const mid = (low + high) / 2;
+    const calc = await fetchCalculatedPricingAtPrice(listing, mid, isMercadoLider);
+    if (!calc) break;
+    const m = achievedNetMarginPercent(listing, mid, calc);
+    const err = Math.abs(m - targetPct);
+    if (err < bestErr) {
+      bestErr = err;
+      best = { price: mid, calculated: calc };
+    }
+    if (err < 0.02) {
+      return { price: mid, calculated: calc };
+    }
+    if (m < targetPct) low = mid;
+    else high = mid;
+  }
+
+  return best;
 }
 
 function calculateFullPricing(
@@ -336,6 +516,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li><strong>Pedidos (30d):</strong> Número de pedidos pagos que contêm o item nos últimos 30 dias.</li>
               <li><strong>Custo:</strong> Preço de custo do produto (cadastrado em Produtos)</li>
               <li><strong>Preço Atual:</strong> Preço atual do anúncio no Mercado Livre</li>
+              <li><strong>Margem:</strong> Percentual (líquido − custo) ÷ preço novo. Editável: ao confirmar, o preço novo é recalculado para atingir essa margem com taxas ML, frete e impostos. Sem custo cadastrado fica indisponível.</li>
               <li><strong>Preço Novo:</strong> Campo editável para simular um novo preço</li>
               <li><strong>Vai Receber:</strong> Valor líquido após descontar taxa ML, frete, imposto, taxa extra e despesas fixas</li>
               <li><strong>Lucro:</strong> Diferença entre o valor recebido e o custo do produto</li>
@@ -351,8 +532,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <h3 className="mb-2 font-medium text-fg-strong">Como usar</h3>
             <ol className="list-inside list-decimal space-y-1">
               <li>Os anúncios são carregados automaticamente ao abrir a página</li>
-              <li>Edite o campo &quot;Preço Novo&quot; para simular um valor diferente</li>
-              <li>Pressione Enter ou clique fora do campo para recalcular</li>
+              <li>Edite &quot;Preço Novo&quot; ou &quot;Margem&quot; (com custo e tipo de anúncio): em ambos, confirme com Enter ou clique fora para recalcular</li>
               <li>Use &quot;Calcular Todos&quot; para recalcular todos os itens de uma vez</li>
               <li>Use &quot;Salvar preços alterados&quot; para guardar o novo preço vinculado ao MLB e ao SKU de cada anúncio</li>
             </ol>
@@ -480,6 +660,11 @@ export default function PrecosPage() {
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const bulkActionsRef = useRef<HTMLDivElement | null>(null);
   const bulkDiscountBusyRef = useRef(false);
+  /** Modal: definir margem líquida (%) nos anúncios selecionados */
+  const [bulkMarginModalOpen, setBulkMarginModalOpen] = useState(false);
+  const [bulkMarginPercentInput, setBulkMarginPercentInput] = useState("");
+  const bulkMarginBusyRef = useRef(false);
+  const bulkRestoreOriginalBusyRef = useRef(false);
 
   const loadReputation = useCallback(async () => {
     setReputationLoading(true);
@@ -883,6 +1068,87 @@ export default function PrecosPage() {
     [isMercadoLider]
   );
 
+  const handleMarginCommit = useCallback(
+    async (listing: ListingWithPricing, targetPct: number) => {
+      if (
+        listing.cost_price == null ||
+        !listing.listing_type_id ||
+        !listing.category_id
+      ) {
+        setSaveMessage({
+          type: "error",
+          text: "Para ajustar pela margem é necessário custo cadastrado e tipo de anúncio (sincronize os anúncios se faltar).",
+        });
+        setTimeout(() => setSaveMessage(null), 6000);
+        return;
+      }
+
+      setListings((prev) =>
+        prev.map((item) =>
+          item.id === listing.id && item.variation_id === listing.variation_id
+            ? { ...item, calculating: true }
+            : item
+        )
+      );
+
+      try {
+        const solved = await solvePriceForTargetNetMarginPercent(
+          listing,
+          targetPct,
+          isMercadoLider
+        );
+        if (!solved) {
+          setSaveMessage({
+            type: "error",
+            text: "Não foi possível encontrar um preço para essa margem. Tente outro valor ou ajuste o preço manualmente.",
+          });
+          setTimeout(() => setSaveMessage(null), 6000);
+          setListings((prev) =>
+            prev.map((item) =>
+              item.id === listing.id && item.variation_id === listing.variation_id
+                ? { ...item, calculating: false }
+                : item
+            )
+          );
+          return;
+        }
+
+        const p = Math.round(solved.price * 100) / 100;
+        const finalCalc =
+          (await fetchCalculatedPricingAtPrice(listing, p, isMercadoLider)) ??
+          solved.calculated;
+
+        setListings((prev) =>
+          prev.map((item) =>
+            item.id === listing.id && item.variation_id === listing.variation_id
+              ? {
+                  ...item,
+                  new_price: p,
+                  dirty: true,
+                  calculated: finalCalc,
+                  calculating: false,
+                }
+              : item
+          )
+        );
+      } catch {
+        setListings((prev) =>
+          prev.map((item) =>
+            item.id === listing.id && item.variation_id === listing.variation_id
+              ? { ...item, calculating: false }
+              : item
+          )
+        );
+        setSaveMessage({
+          type: "error",
+          text: "Erro ao calcular preço pela margem.",
+        });
+        setTimeout(() => setSaveMessage(null), 5000);
+      }
+    },
+    [isMercadoLider]
+  );
+
   /** Ajusta o preço novo para o mínimo aceito na promoção ML (desconto de 5%). Arredonda para baixo para nunca ultrapassar 95%. */
   const handleApplyMinDiscount = useCallback(
     async (listing: ListingWithPricing) => {
@@ -1053,6 +1319,208 @@ export default function PrecosPage() {
       setCalculating(false);
     }
   }, [listings, selectedIds, isMercadoLider]);
+
+  /** Preço novo = preço atual do anúncio no ML (coluna Preço Atual), com recálculo em lote. */
+  const handleBulkRestoreOriginalPrice = useCallback(async () => {
+    setBulkActionsOpen(false);
+    if (bulkRestoreOriginalBusyRef.current) return;
+    const selected = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
+    if (selected.length === 0) {
+      setSaveMessage({
+        type: "error",
+        text: "Selecione pelo menos um anúncio para usar ações em massa.",
+      });
+      setTimeout(() => setSaveMessage(null), 5000);
+      return;
+    }
+    const eligible = selected.filter(
+      (l) => l.current_price > 0 && l.listing_type_id && l.category_id
+    );
+    if (eligible.length === 0) {
+      setSaveMessage({
+        type: "error",
+        text: "Nenhum anúncio selecionado tem preço atual no ML e tipo de listagem para calcular. Sincronize os anúncios se necessário.",
+      });
+      setTimeout(() => setSaveMessage(null), 6000);
+      return;
+    }
+
+    const keySet = new Set(eligible.map((l) => listingSelectionKey(l)));
+    const priceByKey = new Map<string, number>();
+    for (const l of eligible) {
+      priceByKey.set(listingSelectionKey(l), Math.round(l.current_price * 100) / 100);
+    }
+
+    bulkRestoreOriginalBusyRef.current = true;
+    setListings((prev) =>
+      prev.map((item) => {
+        const key = listingSelectionKey(item);
+        if (!keySet.has(key)) return item;
+        const np = priceByKey.get(key)!;
+        return { ...item, new_price: np, dirty: true, calculated: undefined };
+      })
+    );
+
+    setCalculating(true);
+    try {
+      const itemsToCalculate = eligible.map((item) => ({
+        item_id: item.item_id,
+        variation_id: item.variation_id,
+        price: priceByKey.get(listingSelectionKey(item))!,
+        listing_type_id: item.listing_type_id!,
+        category_id: item.category_id!,
+        weight_kg: item.weight_kg,
+        height_cm: item.height_cm,
+        width_cm: item.width_cm,
+        length_cm: item.length_cm,
+      }));
+
+      const { results, errors } = await fetchPricingCalculateBatches(itemsToCalculate, isMercadoLider);
+
+      setListings((prev) =>
+        prev.map((listing) => {
+          if (!keySet.has(listingSelectionKey(listing))) return listing;
+          const result = findPricingResultForListing(results, listing);
+          if (result) {
+            return {
+              ...listing,
+              calculated: calculateFullPricing(listing, result),
+            };
+          }
+          return listing;
+        })
+      );
+
+      const skippedNoType = selected.length - eligible.length;
+      const errCount = errors.length;
+      let msg = `Preço novo restaurado para o preço atual do ML em ${eligible.length} anúncio(s).`;
+      if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem preço ou dados para cálculo).`;
+      if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); use Calcular Todos se precisar.`;
+      setSaveMessage({ type: errCount > 0 ? "error" : "ok", text: msg });
+      setTimeout(() => setSaveMessage(null), 8000);
+    } catch {
+      setSaveMessage({
+        type: "error",
+        text: "Erro ao recalcular após restaurar o preço.",
+      });
+      setTimeout(() => setSaveMessage(null), 6000);
+    } finally {
+      bulkRestoreOriginalBusyRef.current = false;
+      setCalculating(false);
+    }
+  }, [listings, selectedIds, isMercadoLider]);
+
+  const handleBulkMarginConfirm = useCallback(async () => {
+    const targetPct = parseFloat(bulkMarginPercentInput.replace(",", "."));
+    if (!Number.isFinite(targetPct)) {
+      setSaveMessage({ type: "error", text: "Informe um percentual de margem válido (ex.: 15 ou 15,5)." });
+      setTimeout(() => setSaveMessage(null), 5000);
+      return;
+    }
+
+    if (bulkMarginBusyRef.current) return;
+
+    const selected = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
+    if (selected.length === 0) {
+      setSaveMessage({
+        type: "error",
+        text: "Selecione pelo menos um anúncio para usar ações em massa.",
+      });
+      setTimeout(() => setSaveMessage(null), 5000);
+      return;
+    }
+
+    const eligible = selected.filter(
+      (l) => l.cost_price != null && l.listing_type_id && l.category_id
+    );
+    if (eligible.length === 0) {
+      setSaveMessage({
+        type: "error",
+        text: "Nenhum anúncio selecionado tem custo cadastrado e tipo de listagem. Vincule produtos e sincronize anúncios.",
+      });
+      setTimeout(() => setSaveMessage(null), 7000);
+      return;
+    }
+
+    const keySet = new Set(eligible.map((l) => listingSelectionKey(l)));
+    bulkMarginBusyRef.current = true;
+    setBulkMarginModalOpen(false);
+    setBulkMarginPercentInput("");
+
+    setListings((prev) =>
+      prev.map((item) =>
+        keySet.has(listingSelectionKey(item)) ? { ...item, calculating: true } : item
+      )
+    );
+
+    setCalculating(true);
+    try {
+      const updates = new Map<string, { price: number; calculated: CalculatedPricing }>();
+      let fail = 0;
+      for (const l of eligible) {
+        const key = listingSelectionKey(l);
+        try {
+          const solved = await solvePriceForTargetNetMarginPercent(l, targetPct, isMercadoLider);
+          if (!solved) {
+            fail++;
+            continue;
+          }
+          const p = Math.round(solved.price * 100) / 100;
+          const finalCalc =
+            (await fetchCalculatedPricingAtPrice(l, p, isMercadoLider)) ?? solved.calculated;
+          updates.set(key, { price: p, calculated: finalCalc });
+        } catch {
+          fail++;
+        }
+      }
+
+      setListings((prev) =>
+        prev.map((item) => {
+          const key = listingSelectionKey(item);
+          if (!keySet.has(key)) return item;
+          const u = updates.get(key);
+          if (u) {
+            return {
+              ...item,
+              new_price: u.price,
+              dirty: true,
+              calculated: u.calculated,
+              calculating: false,
+            };
+          }
+          return { ...item, calculating: false };
+        })
+      );
+
+      const skippedNoData = selected.length - eligible.length;
+      const ok = updates.size;
+      const pctLabel = targetPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+      let msg = `Margem líquida alvo ${pctLabel}% aplicada em ${ok} anúncio(s).`;
+      if (fail > 0) msg += ` ${fail} sem solução ou com erro.`;
+      if (skippedNoData > 0) {
+        msg += ` ${skippedNoData} ignorado(s) (sem custo ou tipo de anúncio).`;
+      }
+      setSaveMessage({
+        type: ok === 0 ? "error" : "ok",
+        text: msg,
+      });
+      setTimeout(() => setSaveMessage(null), 9000);
+    } catch {
+      setSaveMessage({
+        type: "error",
+        text: "Erro ao aplicar margem em massa.",
+      });
+      setTimeout(() => setSaveMessage(null), 6000);
+      setListings((prev) =>
+        prev.map((item) =>
+          keySet.has(listingSelectionKey(item)) ? { ...item, calculating: false } : item
+        )
+      );
+    } finally {
+      bulkMarginBusyRef.current = false;
+      setCalculating(false);
+    }
+  }, [bulkMarginPercentInput, listings, selectedIds, isMercadoLider]);
 
   const handleCopyToClipboard = useCallback((value: string, cellKey: string) => {
     if (!value) return;
@@ -1457,6 +1925,58 @@ export default function PrecosPage() {
         </div>
       )}
 
+      {bulkMarginModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => !bulkMarginBusyRef.current && setBulkMarginModalOpen(false)}
+          />
+          <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
+            <h2 className="mb-2 text-lg font-semibold">Margem nos selecionados</h2>
+            <p className="mb-4 text-xs text-fg-muted">
+              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço novo) em todos os anúncios marcados que tenham custo e tipo de listagem. Pode levar um tempo — há vários cálculos por item.
+            </p>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleBulkMarginConfirm();
+              }}
+            >
+              <div>
+                <label className="mb-1 block text-sm text-fg">Margem líquida desejada (%)</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={bulkMarginPercentInput}
+                  onChange={(e) => setBulkMarginPercentInput(e.target.value)}
+                  className="input w-full py-2 text-sm"
+                  placeholder="Ex.: 18 ou 12,5"
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBulkMarginModalOpen(false)}
+                  className="btn btn-secondary px-4 py-2 text-sm"
+                  disabled={bulkMarginBusyRef.current}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={bulkMarginBusyRef.current}
+                  className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+                >
+                  Aplicar nos selecionados
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="flex w-full min-h-0 gap-4">
         <aside
           className={`flex shrink-0 flex-col self-start rounded-r-lg border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 shadow-sm transition-[width] duration-200 ease-out ${
@@ -1719,6 +2239,30 @@ export default function PrecosPage() {
                   {calculating
                     ? "Aguarde o cálculo em andamento…"
                     : "Ajustar todos para 5% (preço novo = 95% do atual)"}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void handleBulkRestoreOriginalPrice()}
+                  disabled={calculating}
+                  className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                  title="Define o preço novo igual ao preço atual do Mercado Livre (última sync) em cada selecionado"
+                >
+                  Voltar preço novo ao preço atual (ML)
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setBulkActionsOpen(false);
+                    setBulkMarginPercentInput("");
+                    setBulkMarginModalOpen(true);
+                  }}
+                  disabled={calculating}
+                  className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                  title="Informe a margem líquida desejada (%); o preço novo de cada selecionado será recalculado"
+                >
+                  Definir margem líquida (%)…
                 </button>
               </div>
             )}
@@ -2040,17 +2584,17 @@ export default function PrecosPage() {
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyHeaderStyles[9]} title="Promoção ML exige desconto ≥ 5%" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(9); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyHeaderStyles[9]} title="(Vai receber − custo) ÷ preço novo. Edite para definir o preço pelo alvo de margem líquida." onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(9); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Preço Novo</span>
+                    <span>Margem</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(9); }} title={stickyColumns.has(9) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(9)} className={stickyColumns.has(9) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyHeaderStyles[10]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyHeaderStyles[10]} title="Promoção ML exige desconto ≥ 5%" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Vai Receber</span>
+                    <span>Preço Novo</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(10); }} title={stickyColumns.has(10) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(10)} className={stickyColumns.has(10) ? "text-primary" : ""} />
                     </button>
@@ -2058,7 +2602,7 @@ export default function PrecosPage() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyHeaderStyles[11]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(11); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Lucro</span>
+                    <span>Vai Receber</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(11); }} title={stickyColumns.has(11) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(11)} className={stickyColumns.has(11) ? "text-primary" : ""} />
                     </button>
@@ -2066,7 +2610,7 @@ export default function PrecosPage() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyHeaderStyles[12]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(12); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Taxa ML</span>
+                    <span>Lucro</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(12); }} title={stickyColumns.has(12) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(12)} className={stickyColumns.has(12) ? "text-primary" : ""} />
                     </button>
@@ -2074,41 +2618,49 @@ export default function PrecosPage() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyHeaderStyles[13]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(13); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Frete</span>
+                    <span>Taxa ML</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(13); }} title={stickyColumns.has(13) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(13)} className={stickyColumns.has(13) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyHeaderStyles[14]} title="Imposto sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(14); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyHeaderStyles[14]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(14); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Imposto</span>
+                    <span>Frete</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(14); }} title={stickyColumns.has(14) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(14)} className={stickyColumns.has(14) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyHeaderStyles[15]} title="Taxa extra sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(15); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyHeaderStyles[15]} title="Imposto sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(15); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Taxa Extra</span>
+                    <span>Imposto</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(15); }} title={stickyColumns.has(15) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(15)} className={stickyColumns.has(15) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyHeaderStyles[16]} title="Despesas fixas em R$ (cadastrado no produto)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(16); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyHeaderStyles[16]} title="Taxa extra sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(16); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Desp. Fixas</span>
+                    <span>Taxa Extra</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(16); }} title={stickyColumns.has(16) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(16)} className={stickyColumns.has(16) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyHeaderStyles[17]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(17); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
-                  <div className="flex items-center justify-between gap-1">
-                    <span>Link</span>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyHeaderStyles[17]} title="Despesas fixas em R$ (cadastrado no produto)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(17); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                  <div className="flex items-center justify-end gap-1">
+                    <span>Desp. Fixas</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(17); }} title={stickyColumns.has(17) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(17)} className={stickyColumns.has(17) ? "text-primary" : ""} />
+                    </button>
+                  </div>
+                </th>
+                <th className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyHeaderStyles[18]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(18); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                  <div className="flex items-center justify-between gap-1">
+                    <span>Link</span>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(18); }} title={stickyColumns.has(18) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                      <PinIcon pinned={stickyColumns.has(18)} className={stickyColumns.has(18) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
@@ -2278,7 +2830,23 @@ export default function PrecosPage() {
                     <td className={`p-2 text-right text-sm font-medium ${stickyColumns.has(8) ? "sticky-col" : ""}`} style={stickyBodyStyles[8]}>
                       R$ {formatBRL(listing.current_price)}
                     </td>
-                    <td className={`p-2 ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyBodyStyles[9]}>
+                    <td className={`p-2 text-right ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyBodyStyles[9]}>
+                      {listing.calculating ? (
+                        <span className="text-fg-muted">…</span>
+                      ) : (
+                        <MarginInput
+                          valuePercent={getProfitPercent(listing)}
+                          disabled={
+                            listing.cost_price == null ||
+                            !listing.listing_type_id ||
+                            !listing.category_id
+                          }
+                          dirty={listing.dirty}
+                          onCommit={(pct) => void handleMarginCommit(listing, pct)}
+                        />
+                      )}
+                    </td>
+                    <td className={`p-2 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyBodyStyles[10]}>
                       <div className="flex flex-col items-end gap-0.5">
                         <PriceInput
                           value={listing.new_price}
@@ -2305,7 +2873,7 @@ export default function PrecosPage() {
                         )}
                       </div>
                     </td>
-                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyBodyStyles[10]}>
+                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyBodyStyles[11]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2316,7 +2884,7 @@ export default function PrecosPage() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyBodyStyles[11]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : profit != null ? (
@@ -2345,7 +2913,7 @@ export default function PrecosPage() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2360,7 +2928,7 @@ export default function PrecosPage() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2379,7 +2947,7 @@ export default function PrecosPage() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2399,7 +2967,7 @@ export default function PrecosPage() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2419,7 +2987,7 @@ export default function PrecosPage() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2439,7 +3007,7 @@ export default function PrecosPage() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
+                    <td className={`p-2 ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyBodyStyles[18]}>
                       {listing.permalink ? (
                         <a
                           href={listing.permalink}
