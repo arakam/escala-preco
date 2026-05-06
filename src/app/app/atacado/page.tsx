@@ -7,7 +7,7 @@ import { AppTable } from "@/components/AppTable";
 import { OnboardingGate } from "@/components/OnboardingGate";
 import { ReceivableModal } from "@/components/ReceivableModal";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
-import type { Tier } from "@/lib/atacado";
+import { normalizeTiers, validateTiers, type Tier } from "@/lib/atacado";
 
 interface ImportPreviewRow {
   row: number;
@@ -897,10 +897,11 @@ function AtacadoPageContent() {
 
   const saveRow = async (r: AtacadoRow) => {
     const cur = getEditState(r);
-    const err = validateRow(r);
-    if (err) {
+    const normalized = normalizeTiers(cur.tiers);
+    const tierErrs = validateTiers(normalized);
+    if (tierErrs.length > 0) {
       const key = rowKey(r);
-      setEdits((prev) => ({ ...prev, [key]: { ...cur, status: "error", error: err } }));
+      setEdits((prev) => ({ ...prev, [key]: { ...cur, status: "error", error: tierErrs.join(" ") } }));
       return;
     }
     setSaving(true);
@@ -910,16 +911,28 @@ function AtacadoPageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           accountId,
-          rows: [{ item_id: r.item_id, variation_id: r.variation_id, tiers: cur.tiers }],
+          rows: [{ item_id: r.item_id, variation_id: r.variation_id, tiers: normalized }],
         }),
       });
-      const data = await res.json();
-      if (data.ok || data.saved_count > 0) {
-        setMessage({ type: "success", text: "Linha salva." });
-        loadRows();
-      } else {
-        setMessage({ type: "error", text: data.errors?.[0]?.message ?? "Erro ao salvar." });
+      let data: { ok?: boolean; saved_count?: number; errors?: { message?: string }[]; error?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        /* ignore */
       }
+      if (!res.ok) {
+        setMessage({
+          type: "error",
+          text: data.error ?? data.errors?.[0]?.message ?? `Erro ao salvar (${res.status}).`,
+        });
+        return;
+      }
+      if (data.ok === false && (data.saved_count ?? 0) === 0) {
+        setMessage({ type: "error", text: data.errors?.[0]?.message ?? "Erro ao salvar." });
+        return;
+      }
+      setMessage({ type: "success", text: "Linha salva." });
+      await loadRows();
     } catch {
       setMessage({ type: "error", text: "Erro de conexão." });
     } finally {
@@ -929,30 +942,59 @@ function AtacadoPageContent() {
 
   /** Salva alterações pendentes nos drafts. Retorna true se salvou (ou não havia nada) e false se deu erro. */
   const savePendingEdits = async (): Promise<boolean> => {
-    const toSave = rows.filter((r) => getEditState(r).status === "edited");
-    const valid: AtacadoRow[] = [];
+    const toSave = rows.filter((r) => {
+      const s = getEditState(r).status;
+      return s === "edited" || s === "error";
+    });
+    const pendingElsewhere = Object.entries(edits).some(
+      ([key, e]) =>
+        (e.status === "edited" || e.status === "error") && !rows.some((r) => rowKey(r) === key)
+    );
+    if (toSave.length === 0) {
+      if (pendingElsewhere) {
+        setMessage({
+          type: "error",
+          text: "Há alterações em outra página. Volte à página onde editou para salvar, ou percorra todas as páginas com itens alterados.",
+        });
+        return false;
+      }
+      return true;
+    }
+
+    const valid: { r: AtacadoRow; tiers: Tier[] }[] = [];
     const invalid: { r: AtacadoRow; err: string }[] = [];
     for (const r of toSave) {
-      const err = validateRow(r);
-      if (err) invalid.push({ r, err });
-      else valid.push(r);
+      const normalized = normalizeTiers(getEditState(r).tiers);
+      const tierErrs = validateTiers(normalized);
+      if (tierErrs.length > 0) {
+        invalid.push({ r, err: tierErrs.join(" ") });
+      } else {
+        valid.push({ r, tiers: normalized });
+      }
     }
     if (invalid.length > 0) {
       for (const { r, err } of invalid) {
         const key = rowKey(r);
         setEdits((prev) => ({ ...prev, [key]: { ...getEditState(r), status: "error", error: err } }));
       }
-      setMessage({ type: "error", text: `${invalid.length} linha(s) com erro. Corrija e tente novamente.` });
+      setMessage({
+        type: "error",
+        text:
+          invalid.length === toSave.length
+            ? `${invalid.length} linha(s) com erro de validação. Corrija preços/quantidades e tente novamente.`
+            : `${invalid.length} linha(s) com erro (não salvas). ${valid.length} linha(s) válida(s) serão gravadas.`,
+      });
+    }
+    if (valid.length === 0) {
       return false;
     }
-    if (valid.length === 0) return true;
     try {
       const payload = {
         accountId,
-        rows: valid.map((r) => ({
+        rows: valid.map(({ r, tiers }) => ({
           item_id: r.item_id,
           variation_id: r.variation_id,
-          tiers: getEditState(r).tiers,
+          tiers,
         })),
       };
       const res = await fetch("/api/atacado/drafts", {
@@ -960,14 +1002,34 @@ function AtacadoPageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (data.ok !== false) {
-        setMessage({ type: "success", text: `${data.saved_count ?? 0} linha(s) salva(s).` });
-        await loadRows();
-        return true;
+      let data: { ok?: boolean; saved_count?: number; errors?: { message?: string }[]; error?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        /* ignore */
       }
-      setMessage({ type: "error", text: data.errors?.[0]?.message ?? "Erro ao salvar." });
-      return false;
+      if (!res.ok) {
+        setMessage({
+          type: "error",
+          text: data.error ?? data.errors?.[0]?.message ?? `Erro ao salvar (${res.status}).`,
+        });
+        return false;
+      }
+      if (data.ok === false && (data.saved_count ?? 0) === 0) {
+        setMessage({ type: "error", text: data.errors?.[0]?.message ?? "Erro ao salvar." });
+        return false;
+      }
+      const saved = data.saved_count ?? 0;
+      if (invalid.length > 0) {
+        setMessage({
+          type: "success",
+          text: `${saved} linha(s) salva(s). ${invalid.length} linha(s) ainda com erro — corrija e salve de novo.`,
+        });
+      } else {
+        setMessage({ type: "success", text: `${saved} linha(s) salva(s).` });
+      }
+      await loadRows();
+      return true;
     } catch {
       setMessage({ type: "error", text: "Erro de conexão." });
       return false;
