@@ -10,6 +10,7 @@ type ValidItem = { item_id: string; variation_id: number | null; tiers: { min_qt
  * - JSON: { accountId, items: ValidItem[] } — persiste exatamente os itens do preview (recomendado).
  * - multipart/form-data: file (CSV), accountId — parseia de novo e persiste (fallback).
  * NÃO envia ao Mercado Livre.
+ * Importação CSV: só as colunas atacado1…atacado5 (qtd_min/preco) atualizam rascunhos; preco_atual e promocao não são gravadas.
  */
 export async function POST(request: NextRequest) {
   const supabase = await createClient();

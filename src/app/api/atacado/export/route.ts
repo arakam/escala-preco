@@ -1,11 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
+const PLANNED_VARIATION_ITEM = -1;
+
 /**
  * GET /api/atacado/export?accountId=...&mlb=...&mlbu_code=...&title=...&sku=...&variation=...&filter=...&hide_variations=...
- * Retorna CSV com colunas item_id, variation_id, sku, title, price_atual,
- * tier1_min_qty, tier1_price, ... tier5_min_qty, tier5_price
- * Inclui os preços de atacado já configurados (drafts) nos tiers.
+ * Retorna CSV: item_id, variation_id, sku, titulo, preco_atual, promocao (calculadora),
+ * atacado1_qtd_min, atacado1_preco, … atacado5_*. Inclui drafts nas faixas de atacado.
  */
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -70,11 +71,11 @@ export async function GET(request: NextRequest) {
         itemsQuery = itemsQuery.ilike("item_id", `%${filterMlb}%`);
       }
     }
-    if (filterMlbu) {
-      itemsQuery = itemsQuery.ilike("user_product_id", `%${filterMlbu}%`);
-    }
     if (filterTitle) {
       itemsQuery = itemsQuery.ilike("title", `%${filterTitle}%`);
+    }
+    if (filterMlbu) {
+      itemsQuery = itemsQuery.ilike("user_product_id", `%${filterMlbu}%`);
     }
     if (filterVariation === "com") {
       itemsQuery = itemsQuery.eq("has_variations", true);
@@ -107,9 +108,10 @@ export async function GET(request: NextRequest) {
       "item_id",
       "variation_id",
       "sku",
-      "title",
-      "price_atual",
-      ...Array.from({ length: 5 }, (_, i) => [`tier${i + 1}_min_qty`, `tier${i + 1}_price`]).flat(),
+      "titulo",
+      "preco_atual",
+      "promocao",
+      ...Array.from({ length: 5 }, (_, i) => [`atacado${i + 1}_qtd_min`, `atacado${i + 1}_preco`]).flat(),
     ].join(";");
     return new NextResponse(headers + "\n", {
       headers: {
@@ -196,6 +198,33 @@ export async function GET(request: NextRequest) {
     draftsByKey.set(key, tiers);
   }
 
+  const plannedByKey = new Map<string, number>();
+  const plannedLookupKey = (itemId: string, variationId: number | null) => {
+    const vid = variationId == null ? PLANNED_VARIATION_ITEM : variationId;
+    return `${String(itemId).trim().toUpperCase()}:${vid}`;
+  };
+  for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
+    const batchIds = itemIds.slice(i, i + BATCH_SIZE);
+    const { data: plannedBatch } = await supabase
+      .from("planned_prices")
+      .select("item_id, variation_id, planned_price")
+      .eq("account_id", accountId)
+      .in("item_id", batchIds);
+    for (const row of plannedBatch ?? []) {
+      const pr = row as { item_id: string; variation_id: number | null; planned_price: number };
+      const vid =
+        pr.variation_id == null || pr.variation_id === PLANNED_VARIATION_ITEM
+          ? PLANNED_VARIATION_ITEM
+          : Number(pr.variation_id);
+      plannedByKey.set(`${String(pr.item_id).trim().toUpperCase()}:${vid}`, Number(pr.planned_price));
+    }
+  }
+
+  function getPlannedPrice(itemId: string, variationId: number | null): number | null {
+    const v = plannedByKey.get(plannedLookupKey(itemId, variationId));
+    return v != null && !Number.isNaN(v) ? v : null;
+  }
+
   function extractSkuFromAttributes(attributes: unknown): string | null {
     if (!Array.isArray(attributes)) return null;
     const skuAttr = attributes.find(
@@ -252,14 +281,15 @@ export async function GET(request: NextRequest) {
     "item_id",
     "variation_id",
     "sku",
-    "title",
-    "price_atual",
-    ...Array.from({ length: 5 }, (_, i) => [`tier${i + 1}_min_qty`, `tier${i + 1}_price`]).flat(),
+    "titulo",
+    "preco_atual",
+    "promocao",
+    ...Array.from({ length: 5 }, (_, i) => [`atacado${i + 1}_qtd_min`, `atacado${i + 1}_preco`]).flat(),
   ];
 
-  interface CsvRow { 
-    values: string[]; 
-    hasDraft: boolean; 
+  interface CsvRow {
+    values: string[];
+    hasDraft: boolean;
     sku: string | null;
     title: string | null;
     userProductId: string | null;
@@ -281,13 +311,14 @@ export async function GET(request: NextRequest) {
           sku,
           escapeCsv(item.title ?? ""),
           formatPriceCsv(price ?? undefined),
+          formatPriceCsv(getPlannedPrice(item.item_id, Number(v.variation_id)) ?? undefined),
           ...Array.from({ length: 5 }, (_, i) => {
             const t = tiers[i];
             return t ? [String(t.min_qty), formatPriceCsv(t.price)] : ["", ""];
           }).flat(),
         ];
-        dataRows.push({ 
-          values, 
+        dataRows.push({
+          values,
           hasDraft: tiers.length > 0,
           sku: sku || null,
           title: item.title,
@@ -304,13 +335,14 @@ export async function GET(request: NextRequest) {
         sku,
         escapeCsv(item.title ?? ""),
         formatPriceCsv(item.price ?? undefined),
+        formatPriceCsv(getPlannedPrice(item.item_id, null) ?? undefined),
         ...Array.from({ length: 5 }, (_, i) => {
           const t = tiers[i];
           return t ? [String(t.min_qty), formatPriceCsv(t.price)] : ["", ""];
         }).flat(),
       ];
-      dataRows.push({ 
-        values, 
+      dataRows.push({
+        values,
         hasDraft: tiers.length > 0,
         sku: sku || null,
         title: item.title,
@@ -321,13 +353,13 @@ export async function GET(request: NextRequest) {
 
   // Aplicar filtros pós-processamento
   let filtered = dataRows;
-  
+
   // Filtro de SKU (precisa ser feito aqui porque o SKU pode vir da variação)
   if (filterSku) {
     const skuUpper = filterSku.toUpperCase();
     filtered = filtered.filter((r) => r.sku && r.sku.toUpperCase().includes(skuUpper));
   }
-  
+
   // Filtros de status
   if (filter === "com_rascunho") {
     filtered = filtered.filter((r) => r.hasDraft);

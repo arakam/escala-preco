@@ -3,6 +3,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { NextRequest, NextResponse } from "next/server";
 
 const PAGE_SIZE = 50;
+/** Máximo por requisição (alinhado à tela de Preços para regras em massa em catálogos maiores). */
+const MAX_PAGE_LIMIT = 10000;
 
 type DraftRow = {
   item_id: string;
@@ -41,7 +43,7 @@ type PlannedPriceRow = {
 };
 
 /**
- * GET /api/atacado/rows?accountId=...&search=...&filter=...&page=...&limit=...
+ * GET /api/atacado/rows?accountId=...&filter=...&page=...&limit=...
  * Retorna linhas achatadas (item/variação) combinadas com drafts.
  */
 export async function GET(request: NextRequest) {
@@ -56,7 +58,6 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get("accountId")?.trim();
   const filter = searchParams.get("filter") ?? "";
-  // Filtros específicos
   const filterMlb = searchParams.get("mlb")?.trim() ?? "";
   const filterMlbu = searchParams.get("mlbu_code")?.trim() ?? "";
   const filterTitle = searchParams.get("title")?.trim() ?? "";
@@ -64,7 +65,10 @@ export async function GET(request: NextRequest) {
   const filterVariation = searchParams.get("variation") ?? ""; // "com" | "sem" | ""
   const hideVariations = searchParams.get("hide_variations") === "true"; // Mostrar só anúncios, sem expandir variações
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? String(PAGE_SIZE), 10) || PAGE_SIZE));
+  const limit = Math.min(
+    MAX_PAGE_LIMIT,
+    Math.max(1, parseInt(searchParams.get("limit") ?? String(PAGE_SIZE), 10) || PAGE_SIZE)
+  );
   const from = (page - 1) * limit;
 
   if (!accountId) {
@@ -111,18 +115,17 @@ export async function GET(request: NextRequest) {
 
       // Filtros específicos
       if (filterMlb) {
-        // Busca exata se parece ser um MLB completo, senão busca parcial
         if (filterMlb.toUpperCase().startsWith("MLB") && filterMlb.length >= 10) {
           query = query.eq("item_id", filterMlb.toUpperCase());
         } else {
           query = query.ilike("item_id", `%${filterMlb}%`);
         }
       }
-      if (filterMlbu) {
-        query = query.ilike("user_product_id", `%${filterMlbu}%`);
-      }
       if (filterTitle) {
         query = query.ilike("title", `%${filterTitle}%`);
+      }
+      if (filterMlbu) {
+        query = query.ilike("user_product_id", `%${filterMlbu}%`);
       }
       // SKU não é filtrado aqui porque pode estar na variação, não no item
       // O filtro de SKU é aplicado no pós-processamento após extrair o SKU corretamente
@@ -515,13 +518,13 @@ export async function GET(request: NextRequest) {
       filtered = filtered.filter((r) => r.item_id.toUpperCase().includes(mlbUpper));
     }
   }
-  
+
   // Filtro de SKU (busca no campo sku que já foi extraído corretamente)
   if (filterSku) {
     const skuUpper = filterSku.toUpperCase();
     filtered = filtered.filter((r) => r.sku && r.sku.toUpperCase().includes(skuUpper));
   }
-  
+
   // Filtro de título
   if (filterTitle) {
     const titleUpper = filterTitle.toUpperCase();

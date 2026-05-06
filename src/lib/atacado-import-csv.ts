@@ -1,16 +1,17 @@
 /**
  * Parser de CSV de importação de preços de atacado.
  * Formato OFICIAL: separador SEMPRE ";", cabeçalho exato, sem autodetecção.
+ * Após importar, só atacado1…atacado5 persistem em wholesale_drafts; preco_atual e promocao são só informativas no arquivo.
  */
 
 import { validateTiers, type Tier } from "./atacado";
 
-/** Cabeçalho exato em uma única linha (separador ;) */
+/** Cabeçalho exato em uma única linha (separador ;). `promocao` = preço da calculadora (somente leitura na importação). */
 export const CSV_HEADER_EXACT =
-  "item_id;variation_id;sku;title;price_atual;tier1_min_qty;tier1_price;tier2_min_qty;tier2_price;tier3_min_qty;tier3_price;tier4_min_qty;tier4_price;tier5_min_qty;tier5_price";
+  "item_id;variation_id;sku;titulo;preco_atual;promocao;atacado1_qtd_min;atacado1_preco;atacado2_qtd_min;atacado2_preco;atacado3_qtd_min;atacado3_preco;atacado4_qtd_min;atacado4_preco;atacado5_qtd_min;atacado5_preco";
 
 const SEP = ";";
-const EXPECTED_COLUMNS = 15;
+const EXPECTED_COLUMNS = 16;
 
 export interface ImportRowParsed {
   item_id: string;
@@ -40,6 +41,8 @@ export interface ImportPreviewRow {
   sku: string;
   title: string;
   price_atual: string;
+  /** Valor da coluna promocao no CSV (não é gravado no import — só Atacado 1–5 atualizam rascunho). */
+  promocao: string;
   tiers: Tier[];
   valid: boolean;
   error?: string;
@@ -164,6 +167,7 @@ export function parseWholesaleCsv(buffer: ArrayBuffer): ImportParseResult {
       sku: cols[2] ?? "",
       title: cols[3] ?? "",
       price_atual: cols[4] ?? "",
+      promocao: cols[5] ?? "",
       tiers: [],
       valid: false,
     };
@@ -198,14 +202,18 @@ export function parseWholesaleCsv(buffer: ArrayBuffer): ImportParseResult {
 
     const tiers: Tier[] = [];
     for (let t = 0; t < 5; t++) {
-      const base = 5 + t * 2;
+      const base = 6 + t * 2;
       const minQtyStr = unquoteCsvCell(cols[base] ?? "");
       const priceStr = unquoteCsvCell(cols[base + 1] ?? "");
       if (minQtyStr === "" && priceStr === "") continue;
       const minQty = parseInt(minQtyStr, 10);
       const price = parsePriceBr(priceStr);
       if (Number.isNaN(minQty) || Number.isNaN(price)) {
-        errors.push({ row: rowNum, field: `tier${t + 1}`, message: `Tier ${t + 1}: min_qty e price devem ser números (use vírgula para decimais, ex: 10,50)` });
+        errors.push({
+          row: rowNum,
+          field: `atacado${t + 1}`,
+          message: `Atacado ${t + 1}: quantidade mínima e preço devem ser números (use vírgula para decimais, ex: 10,50)`,
+        });
         break;
       }
       tiers.push({ min_qty: minQty, price });
@@ -215,15 +223,19 @@ export function parseWholesaleCsv(buffer: ArrayBuffer): ImportParseResult {
 
     const tierErrors = validateTiers(tiers);
     if (tierErrors.length > 0) {
-      errors.push({ row: rowNum, field: "tiers", message: tierErrors[0] });
+      errors.push({ row: rowNum, field: "atacados", message: tierErrors[0] });
       preview.error = tierErrors[0];
       if (previewRows.length < PREVIEW_MAX) previewRows.push(preview);
       continue;
     }
 
     if (tiers.length === 0) {
-      errors.push({ row: rowNum, field: "tiers", message: "Pelo menos um tier (min_qty e price) é obrigatório" });
-      preview.error = "Pelo menos um tier obrigatório";
+      errors.push({
+        row: rowNum,
+        field: "atacados",
+        message: "Pelo menos um atacado (quantidade mínima e preço) é obrigatório",
+      });
+      preview.error = "Pelo menos um atacado obrigatório";
       if (previewRows.length < PREVIEW_MAX) previewRows.push(preview);
       continue;
     }

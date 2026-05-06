@@ -9,17 +9,6 @@ import { ReceivableModal } from "@/components/ReceivableModal";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 import type { Tier } from "@/lib/atacado";
 
-type PriceReferenceStatus = "competitive" | "attention" | "high" | "none";
-
-interface ReferenceSummary {
-  suggested_price: number | null;
-  min_reference_price: number | null;
-  max_reference_price: number | null;
-  status: string;
-  explanation: string;
-  updated_at: string | null;
-}
-
 interface ImportPreviewRow {
   row: number;
   item_id: string;
@@ -27,6 +16,7 @@ interface ImportPreviewRow {
   sku: string;
   title: string;
   price_atual: string;
+  promocao: string;
   tiers: Tier[];
   valid: boolean;
   error?: string;
@@ -59,7 +49,7 @@ interface AtacadoRow {
   sku: string | null;
   title: string | null;
   current_price: number | null;
-  /** Preço informado na calculadora (tela Preços / planned_prices) */
+  /** Preço promoção / calculadora (planned_prices) */
   planned_price?: number | null;
   listing_type_id?: string | null;
   category_id?: string | null;
@@ -67,8 +57,6 @@ interface AtacadoRow {
   has_draft: boolean;
   has_variations: boolean;
   draft_updated_at: string | null;
-  price_reference_status?: PriceReferenceStatus;
-  reference_summary?: ReferenceSummary | null;
   /** Nome da família (modelo User Product); null para itens clássicos */
   family_name?: string | null;
   /** true = anúncio do modelo User Product (MLBU) */
@@ -95,27 +83,66 @@ function ensureTiers5(tiers: Tier[]): (Tier | null)[] {
   return result;
 }
 
-function competitivenessBadge(status: PriceReferenceStatus | undefined): { label: string; className: string } {
-  switch (status) {
-    case "competitive":
-      return { label: "Competitivo", className: "bg-green-200 text-green-800" };
-    case "attention":
-      return { label: "Atenção", className: "bg-amber-200 text-amber-800" };
-    case "high":
-      return { label: "Preço alto", className: "bg-red-200 text-red-800" };
+/** Mesma regra de `updateTier`: só mantém faixas com min_qty ≥ 2 e ordena. */
+function tiersFromSlots(slots: (Tier | null)[]): Tier[] {
+  const toKeep = slots.filter((x): x is Tier => x != null && x.min_qty >= 2);
+  return [...toKeep].sort((a, b) => a.min_qty - b.min_qty);
+}
+
+function bulkBasePrice(r: AtacadoRow, base: "current" | "promotion"): number | null {
+  if (base === "current") {
+    if (r.current_price == null) return null;
+    const n = Number(r.current_price);
+    return !Number.isNaN(n) && n > 0 ? n : null;
+  }
+  if (r.planned_price == null || Number.isNaN(Number(r.planned_price))) return null;
+  const n = Number(r.planned_price);
+  return n > 0 ? n : null;
+}
+
+/** Valor usado nas condições (promoção = planned_prices; atual = ML). */
+function bulkCompareFieldValue(r: AtacadoRow, field: "promotion" | "current"): number | null {
+  return bulkBasePrice(r, field);
+}
+
+function parseBulkPercentInput(s: string): number | null {
+  const pct = parseFloat(s.trim().replace(",", "."));
+  if (Number.isNaN(pct) || pct < 0 || pct > 100) return null;
+  return pct;
+}
+
+function parseBulkThresholdInput(s: string): number | null {
+  const n = parseFloat(s.trim().replace(",", "."));
+  if (Number.isNaN(n) || n < 0) return null;
+  return n;
+}
+
+type BulkDiscountCompareOp = "gt" | "gte" | "lt" | "lte" | "eq";
+
+function bulkConditionalPasses(compareVal: number, th: number, op: BulkDiscountCompareOp): boolean {
+  switch (op) {
+    case "gt":
+      return compareVal > th;
+    case "gte":
+      return compareVal >= th;
+    case "lt":
+      return compareVal < th;
+    case "lte":
+      return compareVal <= th;
+    case "eq":
+      return Math.round(compareVal * 100) === Math.round(th * 100);
     default:
-      return { label: "Sem referência", className: "bg-gray-200 text-fg dark:bg-slate-600 dark:text-slate-200" };
+      return false;
   }
 }
 
-function formatRefPrice(summary: ReferenceSummary | null | undefined): string {
-  if (!summary) return "—";
-  const { suggested_price, min_reference_price, max_reference_price } = summary;
-  if (min_reference_price != null && max_reference_price != null && min_reference_price !== max_reference_price) {
-    return `R$ ${Number(min_reference_price).toFixed(2)} – R$ ${Number(max_reference_price).toFixed(2)}`;
-  }
-  const p = suggested_price ?? min_reference_price ?? max_reference_price;
-  return p != null ? `R$ ${Number(p).toFixed(2)}` : "—";
+interface BulkDiscountConditional {
+  id: string;
+  op: BulkDiscountCompareOp;
+  compareField: "promotion" | "current";
+  thresholdStr: string;
+  discountStr: string;
+  discountBase: "current" | "promotion";
 }
 
 function AtacadoPageContent() {
@@ -127,27 +154,36 @@ function AtacadoPageContent() {
   const [total, setTotal] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
   const [page, setPage] = useState(1);
-  const [limit] = useState(50);
+  const [pageSize, setPageSize] = useState(50);
   const [loadingRows, setLoadingRows] = useState(true);
   const [saving, setSaving] = useState(false);
   
-  // Filtros
-  const [filterMlb, setFilterMlb] = useState("");
-  const [filterMlbu, setFilterMlbu] = useState("");
-  const [filterTitle, setFilterTitle] = useState("");
-  const [filterSku, setFilterSku] = useState("");
-  const [filterVariation, setFilterVariation] = useState<"" | "com" | "sem">("");
-  const [filterStatus, setFilterStatus] = useState("");
-  const [hideVariations, setHideVariations] = useState(false);
+  /** Painel de filtros lateral (só critérios de atacado) */
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [draftMlb, setDraftMlb] = useState("");
+  const [draftMlbu, setDraftMlbu] = useState("");
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftSku, setDraftSku] = useState("");
+  const [draftVariation, setDraftVariation] = useState<"" | "com" | "sem">("");
+  const [draftFilterExtra, setDraftFilterExtra] = useState("");
+  const [draftHideVariations, setDraftHideVariations] = useState(false);
   const [filtersApplied, setFiltersApplied] = useState<{
     mlb: string;
     mlbu: string;
     title: string;
     sku: string;
     variation: "" | "com" | "sem";
-    status: string;
+    filterExtra: string;
     hideVariations: boolean;
-  }>({ mlb: "", mlbu: "", title: "", sku: "", variation: "", status: "", hideVariations: false });
+  }>({
+    mlb: "",
+    mlbu: "",
+    title: "",
+    sku: "",
+    variation: "",
+    filterExtra: "",
+    hideVariations: false,
+  });
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -172,10 +208,17 @@ function AtacadoPageContent() {
   /** Linha cujo modal "Ver recebível" está aberto (rowKey ou null) */
   const [receivableRowKey, setReceivableRowKey] = useState<string | null>(null);
 
-  /** Linha cujo popover de competitividade está aberto */
-  const [competitivenessPopoverKey, setCompetitivenessPopoverKey] = useState<string | null>(null);
-  const [refJobId, setRefJobId] = useState<string | null>(null);
-  const [refJob, setRefJob] = useState<{ status: string } | null>(null);
+  /** Regras em massa (somente linhas da página atual) */
+  const [bulkTierIdx, setBulkTierIdx] = useState(0);
+  const [bulkMinQtyStr, setBulkMinQtyStr] = useState("2");
+  const [bulkDiscountStr, setBulkDiscountStr] = useState("5");
+  const [bulkPriceBase, setBulkPriceBase] = useState<"current" | "promotion">("current");
+  /** Critérios opcionais avaliados em ordem; o primeiro que bater define % e base do desconto. */
+  const [bulkDiscountConditionals, setBulkDiscountConditionals] = useState<BulkDiscountConditional[]>([]);
+  const [bulkActionsMenuOpen, setBulkActionsMenuOpen] = useState(false);
+  const [bulkMinQtyModalOpen, setBulkMinQtyModalOpen] = useState(false);
+  const [bulkDiscountModalOpen, setBulkDiscountModalOpen] = useState(false);
+  const bulkActionsRef = useRef<HTMLDivElement>(null);
 
   const searchParams = useSearchParams();
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
@@ -227,34 +270,6 @@ function AtacadoPageContent() {
           {r.planned_price != null && !Number.isNaN(Number(r.planned_price))
             ? Number(r.planned_price).toFixed(2)
             : "—"}
-        </td>
-        <td className="relative p-2">
-          {(() => {
-            const status = r.price_reference_status ?? "none";
-            const { label, className } = competitivenessBadge(status);
-            const key = rowKey(r);
-            const isOpen = competitivenessPopoverKey === key;
-            return (
-              <div className="relative inline-block">
-                <button type="button" onClick={() => setCompetitivenessPopoverKey(isOpen ? null : key)} className={`rounded px-2 py-0.5 text-xs font-medium ${className} hover:opacity-90`}>{label}</button>
-                {isOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" aria-hidden onClick={() => setCompetitivenessPopoverKey(null)} />
-                    <div className="absolute left-0 top-full z-20 mt-1 min-w-[280px] rounded-lg border border-stroke bg-card p-3 shadow-lg dark:border-slate-600">
-                      <p className="text-sm font-medium text-fg-strong">Referência de preço</p>
-                      <dl className="mt-2 space-y-1 text-sm">
-                        <div><dt className="text-fg-muted">Preço atual</dt><dd>{r.current_price != null ? `R$ ${Number(r.current_price).toFixed(2)}` : "—"}</dd></div>
-                        <div><dt className="text-fg-muted">Referência / sugestão</dt><dd>{formatRefPrice(r.reference_summary)}</dd></div>
-                        {r.reference_summary?.explanation && <div><dt className="text-fg-muted">Status</dt><dd className="text-fg">{r.reference_summary.explanation}</dd></div>}
-                        {r.reference_summary?.updated_at && <div><dt className="text-fg-muted">Última atualização</dt><dd className="text-fg">{new Date(r.reference_summary.updated_at).toLocaleString("pt-BR")}</dd></div>}
-                      </dl>
-                      <button type="button" disabled={!!refJobId && refJob?.status !== "success" && refJob?.status !== "failed" && refJob?.status !== "partial"} onClick={async () => { setRefJobId(null); setRefJob(null); const res = await fetch("/api/price-references/refresh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, scope: "item", item_id: r.item_id }) }); const data = await res.json(); if (res.ok && data.job_id) { setRefJobId(data.job_id); setRefJob({ status: "queued" }); } setCompetitivenessPopoverKey(null); }} className="mt-3 w-full rounded bg-gray-100 px-2 py-1.5 text-xs font-medium text-fg hover:bg-gray-200 disabled:opacity-50">{refJobId && (refJob?.status === "running" || refJob?.status === "queued") ? "Atualizando…" : "Atualizar referência"}</button>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })()}
         </td>
         {[0, 1, 2, 3, 4].map((i) => {
           const priceInputKey = `${rowKey(r)}-${i}`;
@@ -308,13 +323,13 @@ function AtacadoPageContent() {
   const loadRows = useCallback(async (forceRefresh = false) => {
     if (!accountId) return;
     setLoadingRows(true);
-    const params = new URLSearchParams({ accountId, page: String(page), limit: String(limit) });
-    if (filtersApplied.mlb) params.set("mlb", filtersApplied.mlb.trim());
-    if (filtersApplied.mlbu) params.set("mlbu_code", filtersApplied.mlbu.trim());
-    if (filtersApplied.title) params.set("title", filtersApplied.title.trim());
-    if (filtersApplied.sku) params.set("sku", filtersApplied.sku.trim());
+    const params = new URLSearchParams({ accountId, page: String(page), limit: String(pageSize) });
+    if (filtersApplied.mlb.trim()) params.set("mlb", filtersApplied.mlb.trim());
+    if (filtersApplied.mlbu.trim()) params.set("mlbu_code", filtersApplied.mlbu.trim());
+    if (filtersApplied.title.trim()) params.set("title", filtersApplied.title.trim());
+    if (filtersApplied.sku.trim()) params.set("sku", filtersApplied.sku.trim());
     if (filtersApplied.variation) params.set("variation", filtersApplied.variation);
-    if (filtersApplied.status) params.set("filter", filtersApplied.status);
+    if (filtersApplied.filterExtra) params.set("filter", filtersApplied.filterExtra);
     if (filtersApplied.hideVariations) params.set("hide_variations", "true");
     if (forceRefresh) params.set("_", String(Date.now()));
     const res = await fetch(`/api/atacado/rows?${params}`);
@@ -326,7 +341,7 @@ function AtacadoPageContent() {
       setEdits({});
     }
     setLoadingRows(false);
-  }, [accountId, page, limit, filtersApplied]);
+  }, [accountId, page, pageSize, filtersApplied]);
 
   useEffect(() => {
     loadAccounts();
@@ -347,38 +362,82 @@ function AtacadoPageContent() {
     }
   }, [urlAccountId, accounts]);
   useEffect(() => {
-    if (urlFilter === "price_high" || urlFilter === "mlbu" || urlFilter === "com_familia" || urlFilter === "com_rascunho" || urlFilter === "sem_rascunho") {
-      setFilterStatus(urlFilter);
-      setFiltersApplied((prev) => ({ ...prev, status: urlFilter }));
+    if (
+      urlFilter === "price_high" ||
+      urlFilter === "mlbu" ||
+      urlFilter === "com_familia" ||
+      urlFilter === "com_rascunho" ||
+      urlFilter === "sem_rascunho"
+    ) {
+      setDraftFilterExtra(urlFilter);
+      setFiltersApplied((prev) => ({ ...prev, filterExtra: urlFilter }));
     }
   }, [urlFilter]);
 
-  const applyFilters = useCallback(() => {
+  useEffect(() => {
+    if (!bulkActionsMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (bulkActionsRef.current && !bulkActionsRef.current.contains(e.target as Node)) {
+        setBulkActionsMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [bulkActionsMenuOpen]);
+
+  const handleFilterSubmit = useCallback((e: React.FormEvent) => {
+    e.preventDefault();
     setFiltersApplied({
-      mlb: filterMlb,
-      mlbu: filterMlbu,
-      title: filterTitle,
-      sku: filterSku,
-      variation: filterVariation,
-      status: filterStatus,
-      hideVariations,
+      mlb: draftMlb.trim(),
+      mlbu: draftMlbu.trim(),
+      title: draftTitle.trim(),
+      sku: draftSku.trim(),
+      variation: draftVariation,
+      filterExtra: draftFilterExtra,
+      hideVariations: draftHideVariations,
     });
     setPage(1);
-  }, [filterMlb, filterMlbu, filterTitle, filterSku, filterVariation, filterStatus, hideVariations]);
+    setFilterPanelOpen(false);
+  }, [draftMlb, draftMlbu, draftTitle, draftSku, draftVariation, draftFilterExtra, draftHideVariations]);
 
   const clearFilters = useCallback(() => {
-    setFilterMlb("");
-    setFilterMlbu("");
-    setFilterTitle("");
-    setFilterSku("");
-    setFilterVariation("");
-    setFilterStatus("");
-    setHideVariations(false);
-    setFiltersApplied({ mlb: "", mlbu: "", title: "", sku: "", variation: "", status: "", hideVariations: false });
+    setDraftMlb("");
+    setDraftMlbu("");
+    setDraftTitle("");
+    setDraftSku("");
+    setDraftVariation("");
+    setDraftFilterExtra("");
+    setDraftHideVariations(false);
+    setFiltersApplied({
+      mlb: "",
+      mlbu: "",
+      title: "",
+      sku: "",
+      variation: "",
+      filterExtra: "",
+      hideVariations: false,
+    });
     setPage(1);
   }, []);
 
-  const hasActiveFilters = filtersApplied.mlb || filtersApplied.mlbu || filtersApplied.title || filtersApplied.sku || filtersApplied.variation || filtersApplied.status || filtersApplied.hideVariations;
+  const showFilterResetButton =
+    draftMlb ||
+    draftMlbu ||
+    draftTitle ||
+    draftSku ||
+    draftVariation ||
+    draftFilterExtra ||
+    draftHideVariations;
+
+  const filterPanelHasActiveDot = Boolean(
+    filtersApplied.mlb ||
+      filtersApplied.mlbu ||
+      filtersApplied.title ||
+      filtersApplied.sku ||
+      filtersApplied.variation ||
+      filtersApplied.filterExtra ||
+      filtersApplied.hideVariations
+  );
 
   useEffect(() => {
     if (accountId) loadRows();
@@ -434,6 +493,209 @@ function AtacadoPageContent() {
     }));
   };
 
+  const applyBulkMinQtyToPage = useCallback((): boolean => {
+    const minQty = parseInt(bulkMinQtyStr.trim(), 10);
+    if (Number.isNaN(minQty) || minQty < 2) {
+      setMessage({ type: "error", text: "Quantidade mínima deve ser um inteiro ≥ 2." });
+      return false;
+    }
+    if (rows.length === 0) {
+      setMessage({ type: "error", text: "Nenhuma linha nesta página." });
+      return false;
+    }
+    setEdits((prev) => {
+      const next = { ...prev };
+      for (const r of rows) {
+        const key = rowKey(r);
+        const cur = next[key] ?? { tiers: r.tiers, status: "saved" as RowStatus };
+        const tiers5 = ensureTiers5(cur.tiers);
+        const slots: (Tier | null)[] = [...tiers5];
+        if (slots[bulkTierIdx] == null) {
+          slots[bulkTierIdx] = { min_qty: minQty, price: 0 };
+        } else {
+          slots[bulkTierIdx] = { ...slots[bulkTierIdx]!, min_qty: minQty };
+        }
+        next[key] = { tiers: tiersFromSlots(slots), status: "edited" };
+      }
+      return next;
+    });
+    setEditingPrice((ep) => {
+      const n = { ...ep };
+      for (const r of rows) {
+        delete n[`${rowKey(r)}-${bulkTierIdx}`];
+      }
+      return n;
+    });
+    setMessage({
+      type: "success",
+      text: `Quantidade mínima ${minQty} aplicada em Atacado ${bulkTierIdx + 1} em ${rows.length} linha(s). Faixas novas podem ficar sem preço válido até você preencher ou aplicar o desconto em massa no preço.`,
+    });
+    return true;
+  }, [rows, bulkMinQtyStr, bulkTierIdx]);
+
+  const addBulkDiscountConditional = useCallback(() => {
+    setBulkDiscountConditionals((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        op: "gte",
+        compareField: "promotion",
+        thresholdStr: "",
+        discountStr: "",
+        discountBase: "promotion",
+      },
+    ]);
+  }, []);
+
+  const removeBulkDiscountConditional = useCallback((id: string) => {
+    setBulkDiscountConditionals((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
+  const updateBulkDiscountConditional = useCallback((id: string, patch: Partial<BulkDiscountConditional>) => {
+    setBulkDiscountConditionals((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }, []);
+
+  const applyBulkDiscountToPage = useCallback((): boolean => {
+    const defaultPct = parseBulkPercentInput(bulkDiscountStr);
+    if (defaultPct == null) {
+      setMessage({ type: "error", text: "Informe um desconto padrão entre 0 e 100%." });
+      return false;
+    }
+    if (rows.length === 0) {
+      setMessage({ type: "error", text: "Nenhuma linha nesta página." });
+      return false;
+    }
+
+    const matchCount = new Map<string, number>();
+    matchCount.set("default", 0);
+    for (const c of bulkDiscountConditionals) matchCount.set(c.id, 0);
+
+    let skipped = 0;
+    setEdits((prev) => {
+      const next = { ...prev };
+      for (const r of rows) {
+        let pct = defaultPct;
+        let baseChoice: "current" | "promotion" = bulkPriceBase;
+        let matchedId = "default";
+
+        for (const rule of bulkDiscountConditionals) {
+          const th = parseBulkThresholdInput(rule.thresholdStr);
+          const p = parseBulkPercentInput(rule.discountStr);
+          if (th == null || p == null) continue;
+          const compareVal = bulkCompareFieldValue(r, rule.compareField);
+          if (compareVal == null) continue;
+          if (!bulkConditionalPasses(compareVal, th, rule.op)) continue;
+          pct = p;
+          baseChoice = rule.discountBase;
+          matchedId = rule.id;
+          break;
+        }
+
+        const base = bulkBasePrice(r, baseChoice);
+        if (base == null) {
+          skipped++;
+          continue;
+        }
+        matchCount.set(matchedId, (matchCount.get(matchedId) ?? 0) + 1);
+        const factor = 1 - pct / 100;
+        const newPrice = Math.round(base * factor * 100) / 100;
+        const key = rowKey(r);
+        const cur = next[key] ?? { tiers: r.tiers, status: "saved" as RowStatus };
+        const tiers5 = ensureTiers5(cur.tiers);
+        const slots: (Tier | null)[] = [...tiers5];
+        if (slots[bulkTierIdx] == null) {
+          slots[bulkTierIdx] = { min_qty: 2, price: newPrice };
+        } else {
+          slots[bulkTierIdx] = { ...slots[bulkTierIdx]!, price: newPrice };
+        }
+        next[key] = { tiers: tiersFromSlots(slots), status: "edited" };
+      }
+      return next;
+    });
+    setEditingPrice((ep) => {
+      const n = { ...ep };
+      for (const r of rows) {
+        delete n[`${rowKey(r)}-${bulkTierIdx}`];
+      }
+      return n;
+    });
+
+    const applied = rows.length - skipped;
+    if (applied === 0) {
+      setMessage({
+        type: "error",
+        text:
+          "Nenhuma linha foi atualizada: falta preço atual ou promoção onde a regra aplicável exige (incluindo a base do desconto após critérios condicionais).",
+      });
+      return false;
+    }
+    const parts: string[] = [];
+    const defN = matchCount.get("default") ?? 0;
+    if (bulkDiscountConditionals.length === 0) {
+      const baseLabel = bulkPriceBase === "current" ? "preço atual (ML)" : "promoção (calculadora)";
+      setMessage({
+        type: "success",
+        text:
+          `Atacado ${bulkTierIdx + 1}: ${defaultPct}% sobre ${baseLabel} em ${applied} linha(s).` +
+          (skipped > 0 ? ` ${skipped} ignorada(s) sem preço base.` : ""),
+      });
+      return true;
+    }
+    if (defN > 0) parts.push(`${defN} pela regra padrão (${defaultPct}%)`);
+    bulkDiscountConditionals.forEach((c, idx) => {
+      const n = matchCount.get(c.id) ?? 0;
+      if (n > 0) {
+        const p = parseBulkPercentInput(c.discountStr);
+        parts.push(`${n} pelo critério #${idx + 1}${p != null ? ` (${p}%)` : ""}`);
+      }
+    });
+    setMessage({
+      type: "success",
+      text:
+        `Atacado ${bulkTierIdx + 1}: desconto aplicado em ${applied} linha(s). ` +
+        parts.join("; ") +
+        "." +
+        (skipped > 0 ? ` ${skipped} ignorada(s) sem preço base para a regra que valeria na linha.` : ""),
+    });
+    return true;
+  }, [rows, bulkDiscountStr, bulkPriceBase, bulkTierIdx, bulkDiscountConditionals]);
+
+  const clearAllAtacadoOnPage = useCallback(() => {
+    if (rows.length === 0) {
+      setMessage({ type: "error", text: "Nenhuma linha nesta página." });
+      return;
+    }
+    if (
+      !window.confirm(
+        `Limpar todas as faixas de atacado (Atacado 1–5) nas ${rows.length} linha(s) desta página?\n\n` +
+          "Ao salvar, os rascunhos serão removidos para esses itens. Esta ação não altera o Mercado Livre até você usar «Aplicar Preços»."
+      )
+    ) {
+      return;
+    }
+    setEdits((prev) => {
+      const next = { ...prev };
+      for (const r of rows) {
+        next[rowKey(r)] = { tiers: [], status: "edited" };
+      }
+      return next;
+    });
+    setEditingPrice((ep) => {
+      const n = { ...ep };
+      for (const r of rows) {
+        const k = rowKey(r);
+        for (let i = 0; i < 5; i++) {
+          delete n[`${k}-${i}`];
+        }
+      }
+      return n;
+    });
+    setMessage({
+      type: "success",
+      text: `Faixas de atacado limpas em ${rows.length} linha(s). Clique em «Salvar alterações» para remover os rascunhos no banco.`,
+    });
+  }, [rows]);
+
   const revertRow = (r: AtacadoRow) => {
     const key = rowKey(r);
     setEdits((prev) => {
@@ -449,13 +711,13 @@ function AtacadoPageContent() {
     if (t.length === 0) return null;
     const minQtys = new Set<number>();
     for (let i = 0; i < t.length; i++) {
-      if (t[i].min_qty < 2 || !Number.isInteger(t[i].min_qty)) return `Tier ${i + 1}: min_qty deve ser inteiro >= 2`;
-      if (t[i].price <= 0) return `Tier ${i + 1}: price deve ser > 0`;
+      if (t[i].min_qty < 2 || !Number.isInteger(t[i].min_qty)) return `Atacado ${i + 1}: quantidade mínima deve ser inteiro >= 2`;
+      if (t[i].price <= 0) return `Atacado ${i + 1}: preço deve ser > 0`;
       if (minQtys.has(t[i].min_qty)) return "Quantidades mínimas duplicadas";
       minQtys.add(t[i].min_qty);
     }
     const sorted = [...t].sort((a, b) => a.min_qty - b.min_qty);
-    if (JSON.stringify(t) !== JSON.stringify(sorted)) return "Tiers devem estar em ordem crescente por min_qty";
+    if (JSON.stringify(t) !== JSON.stringify(sorted)) return "Atacado: faixas devem estar em ordem crescente por quantidade mínima";
     return null;
   };
 
@@ -553,12 +815,12 @@ function AtacadoPageContent() {
 
   const exportCsv = () => {
     const params = new URLSearchParams({ accountId });
-    if (filtersApplied.mlb) params.set("mlb", filtersApplied.mlb);
-    if (filtersApplied.mlbu) params.set("mlbu_code", filtersApplied.mlbu);
-    if (filtersApplied.title) params.set("title", filtersApplied.title);
-    if (filtersApplied.sku) params.set("sku", filtersApplied.sku);
+    if (filtersApplied.mlb.trim()) params.set("mlb", filtersApplied.mlb.trim());
+    if (filtersApplied.mlbu.trim()) params.set("mlbu_code", filtersApplied.mlbu.trim());
+    if (filtersApplied.title.trim()) params.set("title", filtersApplied.title.trim());
+    if (filtersApplied.sku.trim()) params.set("sku", filtersApplied.sku.trim());
     if (filtersApplied.variation) params.set("variation", filtersApplied.variation);
-    if (filtersApplied.status) params.set("filter", filtersApplied.status);
+    if (filtersApplied.filterExtra) params.set("filter", filtersApplied.filterExtra);
     if (filtersApplied.hideVariations) params.set("hide_variations", "true");
     window.open(`/api/atacado/export?${params}`, "_blank");
     setMessage({ type: "success", text: "Exportação iniciada." });
@@ -722,50 +984,7 @@ function AtacadoPageContent() {
     }
   }, [applyJobId, applyJob?.job?.status, fetchApplyJob]);
 
-  const fetchRefJob = useCallback(async (jobId: string) => {
-    const res = await fetch(`/api/jobs/${jobId}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    setRefJob({ status: data.job?.status ?? "unknown" });
-    if (["success", "failed", "partial"].includes(data.job?.status ?? "")) {
-      setRefJobId(null);
-      loadRows(true);
-    }
-  }, [loadRows]);
-
-  useEffect(() => {
-    if (!refJobId) return;
-    fetchRefJob(refJobId);
-    const status = refJob?.status;
-    if (status === "queued" || status === "running") {
-      const interval = setInterval(() => fetchRefJob(refJobId), 2500);
-      return () => clearInterval(interval);
-    }
-  }, [refJobId, refJob?.status, fetchRefJob]);
-
-  const refRefreshing =
-    !!refJobId && (refJob?.status === "queued" || refJob?.status === "running");
-  const atacadoLoaderOpen = loadingRows || refRefreshing;
-  const atacadoLoaderMessages =
-    loadingRows
-      ? [
-          "Carregando anúncios…",
-          "Buscando itens e variações no banco…",
-          "Mesclando rascunhos de atacado…",
-          "Montando a grade de preços…",
-        ]
-      : refRefreshing
-        ? [
-            "Atualizando referências de preço…",
-            "Consultando dados de mercado no Mercado Livre…",
-            "Calculando faixas de referência e competitividade…",
-            "Gravando referências nos anúncios…",
-          ]
-        : ["Processando…"];
-
-  const totalPages = Math.ceil(total / limit) || 1;
-
-  const TABLE_COL_COUNT = 18;
+  const totalPages = Math.ceil(total / pageSize) || 1;
 
   if (!accountsLoaded) {
     return (
@@ -794,7 +1013,164 @@ function AtacadoPageContent() {
 
   return (
     <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
-      <SmartLoaderOverlay open={atacadoLoaderOpen} messages={atacadoLoaderMessages} />
+      <SmartLoaderOverlay
+        open={loadingRows}
+        messages={[
+          "Carregando anúncios…",
+          "Buscando itens e variações no banco…",
+          "Mesclando rascunhos de atacado…",
+          "Montando a grade de preços…",
+        ]}
+      />
+      <div className="flex w-full min-h-0 gap-4">
+        <aside
+          className={`flex shrink-0 flex-col self-start rounded-r-lg border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 shadow-sm transition-[width] duration-200 ease-out ${
+            filterPanelOpen ? "w-[280px]" : "w-10"
+          }`}
+        >
+          {filterPanelOpen ? (
+            <div className="flex max-h-[min(85vh,48rem)] flex-col gap-3 overflow-y-auto p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtros</span>
+                <button
+                  type="button"
+                  onClick={() => setFilterPanelOpen(false)}
+                  className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                  title="Fechar"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <form onSubmit={handleFilterSubmit} className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">MLB</span>
+                  <input
+                    type="text"
+                    value={draftMlb}
+                    onChange={(e) => setDraftMlb(e.target.value)}
+                    placeholder="ex: MLB1234567890"
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">MLBU</span>
+                  <input
+                    type="text"
+                    value={draftMlbu}
+                    onChange={(e) => setDraftMlbu(e.target.value)}
+                    placeholder="ex: MLBU…"
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Título</span>
+                  <input
+                    type="text"
+                    value={draftTitle}
+                    onChange={(e) => setDraftTitle(e.target.value)}
+                    placeholder="Buscar no título…"
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">SKU</span>
+                  <input
+                    type="text"
+                    value={draftSku}
+                    onChange={(e) => setDraftSku(e.target.value)}
+                    placeholder="Filtrar por SKU…"
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Variação</span>
+                  <select
+                    value={draftVariation}
+                    onChange={(e) => setDraftVariation(e.target.value as "" | "com" | "sem")}
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    <option value="">Todas</option>
+                    <option value="com">Com variação</option>
+                    <option value="sem">Sem variação</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Refino</span>
+                  <select
+                    value={draftFilterExtra}
+                    onChange={(e) => setDraftFilterExtra(e.target.value)}
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    <option value="">Nenhum</option>
+                    <option value="mlbu">Só MLBU</option>
+                    <option value="com_familia">Com família</option>
+                    <option value="com_rascunho">Com rascunho</option>
+                    <option value="sem_rascunho">Sem rascunho</option>
+                    <option value="price_high">Preço alto (ref.)</option>
+                  </select>
+                </div>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={draftHideVariations}
+                    onChange={(e) => setDraftHideVariations(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
+                  />
+                  <span className="text-xs text-slate-700 dark:text-slate-200">Só anúncios (ocultar variações)</span>
+                </label>
+                <div className="flex flex-col gap-2 pt-1">
+                  <button
+                    type="submit"
+                    className="w-full rounded bg-primary py-2 text-xs font-semibold text-white hover:bg-primary-dark"
+                  >
+                    Aplicar filtros
+                  </button>
+                  {showFilterResetButton && (
+                    <button
+                      type="button"
+                      onClick={() => clearFilters()}
+                      className="w-full rounded border border-slate-300 bg-white py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/50"
+                    >
+                      Limpar filtros
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setDraftMlb(filtersApplied.mlb);
+                setDraftMlbu(filtersApplied.mlbu);
+                setDraftTitle(filtersApplied.title);
+                setDraftSku(filtersApplied.sku);
+                setDraftVariation(filtersApplied.variation);
+                setDraftFilterExtra(filtersApplied.filterExtra);
+                setDraftHideVariations(filtersApplied.hideVariations);
+                setFilterPanelOpen(true);
+              }}
+              className="flex w-full flex-col items-center gap-0.5 py-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50 dark:hover:text-slate-200"
+              title="Abrir filtros"
+            >
+              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                />
+              </svg>
+              {filterPanelHasActiveDot && (
+                <span className="rounded-full bg-primary h-1.5 w-1.5" title="Filtros ativos" />
+              )}
+            </button>
+          )}
+        </aside>
+
+        <main className="min-w-0 flex-1">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 sm:text-xl">Editor de Preço de Atacado</h1>
@@ -816,28 +1192,6 @@ function AtacadoPageContent() {
 
       {/* Ações */}
       <div className="mb-4 flex flex-wrap items-center gap-4 rounded-app bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
-        <button
-          type="button"
-          disabled={!!refJobId && (refJob?.status === "queued" || refJob?.status === "running")}
-          onClick={async () => {
-            if (!accountId) return;
-            const res = await fetch("/api/price-references/refresh", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ accountId, scope: "all" }),
-            });
-            const data = await res.json();
-            if (res.ok && data.job_id) {
-              setRefJobId(data.job_id);
-              setRefJob({ status: "queued" });
-            }
-          }}
-          className="rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {refJobId && (refJob?.status === "queued" || refJob?.status === "running")
-            ? "Atualizando referências…"
-            : "Atualizar referências"}
-        </button>
         <button
           type="button"
           onClick={saveAll}
@@ -876,6 +1230,59 @@ function AtacadoPageContent() {
         >
           {applyLoading ? (editedCount > 0 ? "Salvando e aplicando…" : "Aplicando…") : "Aplicar Preços no Mercado Livre"}
         </button>
+        <div className="relative" ref={bulkActionsRef}>
+          <button
+            type="button"
+            onClick={() => setBulkActionsMenuOpen((o) => !o)}
+            disabled={loadingRows || rows.length === 0}
+            className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700/50"
+          >
+            Ações em massa
+            <svg className="h-3.5 w-3.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {bulkActionsMenuOpen && (
+            <div
+              className="absolute left-0 top-full z-50 mt-1 min-w-[14rem] rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-800"
+              role="menu"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="block w-full px-3 py-2 text-left text-xs text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-700/50"
+                onClick={() => {
+                  setBulkActionsMenuOpen(false);
+                  setBulkMinQtyModalOpen(true);
+                }}
+              >
+                Editar quantidade mínima…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="block w-full px-3 py-2 text-left text-xs text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-700/50"
+                onClick={() => {
+                  setBulkActionsMenuOpen(false);
+                  setBulkDiscountModalOpen(true);
+                }}
+              >
+                Preço com desconto %…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="block w-full px-3 py-2 text-left text-xs text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                onClick={() => {
+                  setBulkActionsMenuOpen(false);
+                  clearAllAtacadoOnPage();
+                }}
+              >
+                Limpar todas as colunas de atacado…
+              </button>
+            </div>
+          )}
+        </div>
         <span className="text-sm text-fg-muted">
           Aplicar envia os preços de atacado salvos para o Mercado Livre. Alterações não salvas serão salvas automaticamente ao clicar.
         </span>
@@ -884,160 +1291,266 @@ function AtacadoPageContent() {
         )}
       </div>
 
-      {/* Filtros */}
-      <div className="mb-6 rounded-app border border-slate-200 bg-slate-50 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Filtros</h3>
-          {hasActiveFilters && (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-800 dark:text-slate-100 hover:underline"
-            >
-              Limpar filtros
-            </button>
-          )}
-        </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            applyFilters();
-          }}
-          className="flex flex-wrap items-end gap-4"
-        >
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-slate-500">MLB</label>
-            <input
-              type="text"
-              value={filterMlb}
-              onChange={(e) => setFilterMlb(e.target.value)}
-              placeholder="ex: MLB123"
-              className="w-32 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-100 shadow-sm"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-slate-500">MLBU</label>
-            <input
-              type="text"
-              value={filterMlbu}
-              onChange={(e) => setFilterMlbu(e.target.value)}
-              placeholder="ex: MLBU123"
-              className="w-32 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-100 shadow-sm"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-slate-500">Título</label>
-            <input
-              type="text"
-              value={filterTitle}
-              onChange={(e) => setFilterTitle(e.target.value)}
-              placeholder="Buscar no título"
-              className="w-48 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 shadow-sm"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-slate-500">SKU</label>
-            <input
-              type="text"
-              value={filterSku}
-              onChange={(e) => setFilterSku(e.target.value)}
-              placeholder="ex: SKU-001"
-              className="w-32 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs font-mono text-slate-800 dark:text-slate-100 shadow-sm"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-slate-500">Variação</label>
-            <select
-              value={filterVariation}
-              onChange={(e) => setFilterVariation(e.target.value as "" | "com" | "sem")}
-              className="w-32 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 shadow-sm"
-            >
-              <option value="">Todas</option>
-              <option value="com">Com variação</option>
-              <option value="sem">Sem variação</option>
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-slate-500">Status</label>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="w-36 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-100 shadow-sm"
-            >
-              <option value="">Todos</option>
-              <option value="mlbu">Só MLBU</option>
-              <option value="com_familia">Com família</option>
-              <option value="com_rascunho">Com rascunho</option>
-              <option value="sem_rascunho">Sem rascunho</option>
-              <option value="price_high">Preço alto</option>
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-slate-500">&nbsp;</label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={hideVariations}
-                onChange={(e) => setHideVariations(e.target.checked)}
-                className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary"
-              />
-              <span className="text-xs text-slate-700 dark:text-slate-200">Só anúncios</span>
-            </label>
-          </div>
+      {bulkMinQtyModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <button
-            type="submit"
-            className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary-dark"
+            type="button"
+            className="absolute inset-0 bg-black/50"
+            aria-label="Fechar"
+            onClick={() => setBulkMinQtyModalOpen(false)}
+          />
+          <div
+            className="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-600 dark:bg-slate-800"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bulk-minqty-title"
           >
-            Filtrar
-          </button>
-        </form>
-        {hasActiveFilters && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {filtersApplied.mlb && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
-                MLB: {filtersApplied.mlb}
-                <button type="button" onClick={() => { setFilterMlb(""); setFiltersApplied((p) => ({ ...p, mlb: "" })); }} className="hover:text-blue-600">×</button>
-              </span>
-            )}
-            {filtersApplied.mlbu && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
-                MLBU: {filtersApplied.mlbu}
-                <button type="button" onClick={() => { setFilterMlbu(""); setFiltersApplied((p) => ({ ...p, mlbu: "" })); }} className="hover:text-indigo-600">×</button>
-              </span>
-            )}
-            {filtersApplied.title && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
-                Título: {filtersApplied.title}
-                <button type="button" onClick={() => { setFilterTitle(""); setFiltersApplied((p) => ({ ...p, title: "" })); }} className="hover:text-green-600">×</button>
-              </span>
-            )}
-            {filtersApplied.sku && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                SKU: {filtersApplied.sku}
-                <button type="button" onClick={() => { setFilterSku(""); setFiltersApplied((p) => ({ ...p, sku: "" })); }} className="hover:text-amber-600">×</button>
-              </span>
-            )}
-            {filtersApplied.variation && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
-                Variação: {filtersApplied.variation === "com" ? "Com" : "Sem"}
-                <button type="button" onClick={() => { setFilterVariation(""); setFiltersApplied((p) => ({ ...p, variation: "" })); }} className="hover:text-purple-600">×</button>
-              </span>
-            )}
-            {filtersApplied.status && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-fg-strong">
-                Status: {filtersApplied.status.replace(/_/g, " ")}
-                <button type="button" onClick={() => { setFilterStatus(""); setFiltersApplied((p) => ({ ...p, status: "" })); }} className="hover:text-fg">×</button>
-              </span>
-            )}
-            {filtersApplied.hideVariations && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800">
-                Só anúncios
-                <button type="button" onClick={() => { setHideVariations(false); setFiltersApplied((p) => ({ ...p, hideVariations: false })); }} className="hover:text-teal-600">×</button>
-              </span>
-            )}
+            <h2 id="bulk-minqty-title" className="mb-2 text-lg font-semibold text-slate-900 dark:text-slate-50">
+              Quantidade mínima em massa
+            </h2>
+            <p className="mb-4 text-xs text-slate-600 dark:text-slate-300">
+              Aplica só nas <strong>{rows.length}</strong> linha{rows.length !== 1 ? "s" : ""} desta página (filtros atuais). Faixas novas podem ficar sem preço até você preencher ou usar desconto em massa.
+            </p>
+            <div className="mb-4 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-200">Coluna</label>
+                <select
+                  value={bulkTierIdx}
+                  onChange={(e) => setBulkTierIdx(Number(e.target.value))}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                >
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n - 1}>
+                      Atacado {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-200">Quantidade mínima</label>
+                <input
+                  type="number"
+                  min={2}
+                  step={1}
+                  value={bulkMinQtyStr}
+                  onChange={(e) => setBulkMinQtyStr(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setBulkMinQtyModalOpen(false)}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (applyBulkMinQtyToPage()) setBulkMinQtyModalOpen(false);
+                }}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+              >
+                Aplicar na página
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {bulkDiscountModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50"
+            aria-label="Fechar"
+            onClick={() => setBulkDiscountModalOpen(false)}
+          />
+          <div
+            className="relative max-h-[min(90vh,40rem)] w-full max-w-5xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-600 dark:bg-slate-800"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bulk-discount-title"
+          >
+            <h2 id="bulk-discount-title" className="mb-2 text-lg font-semibold text-slate-900 dark:text-slate-50">
+              Preço com desconto %
+            </h2>
+            <p className="mb-3 text-xs text-slate-600 dark:text-slate-300">
+              {rows.length} linha{rows.length !== 1 ? "s" : ""} nesta página. Regra padrão quando nenhum critério condicional se aplica; critérios são avaliados em ordem.
+            </p>
+            <div className="mb-4">
+              <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-200">Coluna de atacado</label>
+              <select
+                value={bulkTierIdx}
+                onChange={(e) => setBulkTierIdx(Number(e.target.value))}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+              >
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n - 1}>
+                    Atacado {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-900/40">
+              <span className="mb-2 block text-xs font-medium text-slate-800 dark:text-slate-100">Regra padrão</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="ex: 5"
+                  value={bulkDiscountStr}
+                  onChange={(e) => setBulkDiscountStr(e.target.value)}
+                  className="w-16 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                />
+                <span className="text-xs text-slate-700 dark:text-slate-200">% sobre</span>
+                <label className="flex cursor-pointer items-center gap-1 text-xs text-slate-800 dark:text-slate-100">
+                  <input
+                    type="radio"
+                    name="bulkPriceBaseModal"
+                    checked={bulkPriceBase === "current"}
+                    onChange={() => setBulkPriceBase("current")}
+                    className="text-indigo-600"
+                  />
+                  Preço atual (ML)
+                </label>
+                <label className="flex cursor-pointer items-center gap-1 text-xs text-slate-800 dark:text-slate-100">
+                  <input
+                    type="radio"
+                    name="bulkPriceBaseModal"
+                    checked={bulkPriceBase === "promotion"}
+                    onChange={() => setBulkPriceBase("promotion")}
+                    className="text-indigo-600"
+                  />
+                  Promoção
+                </label>
+              </div>
+            </div>
+            <div className="mb-4 rounded-lg border border-indigo-200/80 bg-indigo-50/40 p-3 dark:border-indigo-800 dark:bg-slate-900/30">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-800 dark:text-indigo-200">
+                  Critérios condicionais (opcional)
+                </span>
+                <button
+                  type="button"
+                  onClick={addBulkDiscountConditional}
+                  className="rounded-md border border-indigo-300 bg-white px-2 py-1 text-[10px] font-medium text-indigo-800 hover:bg-indigo-50 dark:border-indigo-600 dark:bg-slate-800 dark:text-indigo-200 dark:hover:bg-slate-800/80"
+                >
+                  + Adicionar critério
+                </button>
+              </div>
+              {bulkDiscountConditionals.length === 0 ? (
+                <p className="text-[10px] text-indigo-800/80 dark:text-indigo-300/80">Nenhum critério extra.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {bulkDiscountConditionals.map((rule, idx) => (
+                    <li
+                      key={rule.id}
+                      className="flex flex-nowrap items-center gap-x-2 gap-y-1 overflow-x-auto rounded-md border border-indigo-100 bg-white/80 px-2 py-2 dark:border-indigo-900 dark:bg-slate-900/50"
+                    >
+                      <span className="w-6 shrink-0 text-center text-[10px] font-bold text-indigo-700 dark:text-indigo-300">
+                        {idx + 1}
+                      </span>
+                      <span className="text-[10px] text-indigo-800 dark:text-indigo-200">Se</span>
+                      <select
+                        value={rule.compareField}
+                        onChange={(e) =>
+                          updateBulkDiscountConditional(rule.id, {
+                            compareField: e.target.value as "promotion" | "current",
+                          })
+                        }
+                        className="max-w-[9rem] rounded border border-indigo-200 bg-white px-1.5 py-1 text-[10px] dark:border-indigo-700 dark:bg-slate-900 dark:text-slate-100"
+                      >
+                        <option value="promotion">promoção (calculadora)</option>
+                        <option value="current">preço atual (ML)</option>
+                      </select>
+                      <select
+                        value={rule.op}
+                        onChange={(e) =>
+                          updateBulkDiscountConditional(rule.id, { op: e.target.value as BulkDiscountCompareOp })
+                        }
+                        className="shrink-0 rounded border border-indigo-200 bg-white px-1.5 py-1 text-[10px] dark:border-indigo-700 dark:bg-slate-900 dark:text-slate-100"
+                      >
+                        <option value="gt">maior que (&gt;)</option>
+                        <option value="gte">maior ou igual (≥)</option>
+                        <option value="lt">menor que (&lt;)</option>
+                        <option value="lte">menor ou igual (≤)</option>
+                        <option value="eq">igual a (=)</option>
+                      </select>
+                      <span className="text-[10px] text-indigo-800 dark:text-indigo-200">R$</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="200"
+                        value={rule.thresholdStr}
+                        onChange={(e) => updateBulkDiscountConditional(rule.id, { thresholdStr: e.target.value })}
+                        className="w-16 rounded border border-indigo-200 bg-white px-1.5 py-1 text-[10px] dark:border-indigo-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                      <span className="text-[10px] text-indigo-800 dark:text-indigo-200">→</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="%"
+                        value={rule.discountStr}
+                        onChange={(e) => updateBulkDiscountConditional(rule.id, { discountStr: e.target.value })}
+                        className="w-12 rounded border border-indigo-200 bg-white px-1.5 py-1 text-[10px] dark:border-indigo-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                      <span className="text-[10px] text-indigo-800 dark:text-indigo-200">% sobre</span>
+                      <label className="flex cursor-pointer items-center gap-0.5 text-[10px] text-indigo-900 dark:text-indigo-100">
+                        <input
+                          type="radio"
+                          name={`bulkCondBase-${rule.id}`}
+                          checked={rule.discountBase === "current"}
+                          onChange={() => updateBulkDiscountConditional(rule.id, { discountBase: "current" })}
+                          className="text-indigo-600"
+                        />
+                        atual
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-0.5 text-[10px] text-indigo-900 dark:text-indigo-100">
+                        <input
+                          type="radio"
+                          name={`bulkCondBase-${rule.id}`}
+                          checked={rule.discountBase === "promotion"}
+                          onChange={() => updateBulkDiscountConditional(rule.id, { discountBase: "promotion" })}
+                          className="text-indigo-600"
+                        />
+                        promoção
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeBulkDiscountConditional(rule.id)}
+                        className="ml-auto rounded px-2 py-0.5 text-[10px] text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                      >
+                        Remover
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-600">
+              <button
+                type="button"
+                onClick={() => setBulkDiscountModalOpen(false)}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (applyBulkDiscountToPage()) setBulkDiscountModalOpen(false);
+                }}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+              >
+                Aplicar desconto na página
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {applyJob && (
         <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
@@ -1106,9 +1619,10 @@ function AtacadoPageContent() {
                     <th className="p-2 font-medium">item_id</th>
                     <th className="p-2 font-medium">variation_id</th>
                     <th className="p-2 font-medium">sku</th>
-                    <th className="max-w-[120px] truncate p-2 font-medium">title</th>
+                    <th className="max-w-[120px] truncate p-2 font-medium">Título</th>
                     <th className="p-2 font-medium">Preço atual R$</th>
-                    <th className="p-2 font-medium">Tiers</th>
+                    <th className="p-2 font-medium">Promoção R$</th>
+                    <th className="p-2 font-medium">Atacado 1–5</th>
                     <th className="p-2 font-medium">Status</th>
                   </tr>
                 </thead>
@@ -1126,6 +1640,7 @@ function AtacadoPageContent() {
                         {pr.title || "—"}
                       </td>
                       <td className="p-2">{pr.price_atual || "—"}</td>
+                      <td className="p-2">{pr.promocao?.trim() ? pr.promocao : "—"}</td>
                       <td className="p-2">
                         {pr.tiers.length > 0
                           ? pr.tiers.map((t) => `${t.min_qty}→${t.price}`).join(", ")
@@ -1192,10 +1707,89 @@ function AtacadoPageContent() {
         </p>
       ) : (
         <>
-          <AppTable
-            summary={`${rows.length} linha(s) — página ${page} de ${totalPages}`}
-            maxHeight="70vh"
-          >
+          <div className="pricing-table-with-sticky">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                <span className="font-medium text-slate-800 dark:text-slate-100">{rows.length}</span>
+                {" linhas filtradas de "}
+                <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
+                {totalItems > 0 && total !== totalItems && (
+                  <>
+                    {" · "}
+                    <span className="font-medium text-slate-800 dark:text-slate-100">{totalItems}</span>
+                    {" anúncio(s) no resultado"}
+                  </>
+                )}
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                  <span>Linhas por página</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      setPageSize(value);
+                      setPage(1);
+                    }}
+                    className="rounded border border-slate-200 bg-white px-2 py-1.5 text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={200}>200</option>
+                    <option value={500}>500</option>
+                    <option value={1000}>1000</option>
+                  </select>
+                </label>
+                {totalPages > 1 && (
+                  <>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      Página {page} de {totalPages}
+                    </span>
+                    <div className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-1 text-xs ring-1 ring-slate-200 dark:bg-slate-700 dark:ring-slate-600">
+                      <button
+                        type="button"
+                        onClick={() => setPage(1)}
+                        disabled={page === 1}
+                        className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        title="Primeira página"
+                      >
+                        «
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={page <= 1}
+                        className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Anterior
+                      </button>
+                      <span className="min-w-[2ch] px-1.5 py-1 text-center font-semibold text-slate-800 dark:text-slate-100">
+                        {page}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={page >= totalPages}
+                        className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Próxima
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPage(totalPages)}
+                        disabled={page === totalPages}
+                        className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        title="Última página"
+                      >
+                        »
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+            <AppTable maxHeight="70vh">
             <thead className="bg-slate-50">
               <tr>
                 <th className="whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
@@ -1227,12 +1821,9 @@ function AtacadoPageContent() {
                 </th>
                 <th
                   className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
-                  title="Valor salvo na calculadora (Preços)"
+                  title="Valor salvo na calculadora (Preços / planned_prices)"
                 >
-                  Preço novo R$
-                </th>
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Competitividade
+                  Promoção R$
                 </th>
                 {[1, 2, 3, 4, 5].map((i) => (
                   <th
@@ -1240,7 +1831,7 @@ function AtacadoPageContent() {
                     colSpan={2}
                     className="whitespace-nowrap p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
                   >
-                    T{i}
+                    Atacado {i}
                   </th>
                 ))}
                 <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
@@ -1254,52 +1845,8 @@ function AtacadoPageContent() {
               <tbody>
                 {rows.map((r) => renderAtacadoRow(r))}
               </tbody>
-          </AppTable>
-
-          {totalPages > 1 && (
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs text-slate-500">
-                Mostrando página {page} de {totalPages} · {totalItems} anúncio(s)
-              </p>
-              <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setPage(1)}
-                  disabled={page === 1}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  «
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Anterior
-                </button>
-                <span className="px-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
-                  {page}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Próxima
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPage(totalPages)}
-                  disabled={page === totalPages}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  »
-                </button>
-              </div>
-            </div>
-          )}
+            </AppTable>
+          </div>
         </>
       )}
 
@@ -1312,7 +1859,7 @@ function AtacadoPageContent() {
         if (basePrice > 0) scenarios.push({ label: "Base", unitPrice: basePrice });
         (cur.tiers ?? []).forEach((t, i) => {
           if (t && typeof t.min_qty === "number" && typeof t.price === "number" && t.price > 0) {
-            scenarios.push({ label: `Tier ${i + 1} (${t.min_qty}+)`, unitPrice: t.price });
+            scenarios.push({ label: `Atacado ${i + 1} (${t.min_qty}+)`, unitPrice: t.price });
           }
         });
         return (
@@ -1344,6 +1891,8 @@ function AtacadoPageContent() {
         );
       })()}
 
+        </main>
+      </div>
     </div>
   );
 }

@@ -54,6 +54,34 @@ interface ReputationData {
   };
 }
 
+type PriceReferenceStatus = "competitive" | "attention" | "high" | "none";
+
+interface PriceReferenceCell {
+  status: string;
+  suggested_price: number | null;
+  min_reference_price: number | null;
+  max_reference_price: number | null;
+  explanation: string | null;
+  updated_at: string | null;
+}
+
+function priceRefRowKey(itemId: string, variationId: number | null): string {
+  return `${String(itemId).trim().toUpperCase()}:${variationId ?? "item"}`;
+}
+
+function competitivenessBadge(status: string | undefined): { label: string; className: string } {
+  switch (status as PriceReferenceStatus) {
+    case "competitive":
+      return { label: "Competitivo", className: "bg-green-200 text-green-800 dark:bg-green-900/50 dark:text-green-200" };
+    case "attention":
+      return { label: "Atenção", className: "bg-amber-200 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" };
+    case "high":
+      return { label: "Preço alto", className: "bg-red-200 text-red-800 dark:bg-red-900/40 dark:text-red-200" };
+    default:
+      return { label: "Sem referência", className: "bg-gray-200 text-fg dark:bg-slate-600 dark:text-slate-200" };
+  }
+}
+
 /** Configuração das colunas da tabela de preços (ordem = índice na tabela). Usado para congelar colunas. */
 /** Ícone do Mercado Livre para link "Ver no ML" — usa favicon oficial */
 function MLIcon({ className }: { className?: string }) {
@@ -101,6 +129,7 @@ const PRICING_COLUMNS: { label: string; minWidth: number }[] = [
   { label: "Pedidos (30d)", minWidth: 88 },
   { label: "Custo", minWidth: 80 },
   { label: "Preço Atual", minWidth: 90 },
+  { label: "Competitividade", minWidth: 110 },
   { label: "Margem", minWidth: 76 },
   { label: "Preço Novo", minWidth: 100 },
   { label: "Vai Receber", minWidth: 95 },
@@ -517,6 +546,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li><strong>Pedidos (30d):</strong> Número de pedidos pagos que contêm o item nos últimos 30 dias.</li>
               <li><strong>Custo:</strong> Preço de custo do produto (cadastrado em Produtos)</li>
               <li><strong>Preço Atual:</strong> Preço atual do anúncio no Mercado Livre</li>
+              <li><strong>Competitividade:</strong> Indicador da referência de preço do ML (sugestão / faixa), ao lado do preço atual. Use &quot;Atualizar referência&quot; para buscar dados novos sem refazer o cache de anúncios.</li>
               <li><strong>Margem:</strong> Percentual (líquido − custo) ÷ preço novo. Editável: ao confirmar, o preço novo é recalculado para atingir essa margem com taxas ML, frete e impostos. Sem custo cadastrado fica indisponível.</li>
               <li><strong>Preço Novo:</strong> Campo editável para simular um novo preço</li>
               <li><strong>Vai Receber:</strong> Valor líquido após descontar taxa ML, frete, imposto, taxa extra e despesas fixas</li>
@@ -627,6 +657,11 @@ function PrecosPageContent() {
   const [salesData, setSalesData] = useState<Record<string, number>>({});
   /** Número de pedidos (pagados) que contêm o item nos últimos 30 dias por item_id */
   const [ordersData, setOrdersData] = useState<Record<string, number>>({});
+  /** Referências de preço ML por linha: `${ITEM}:${variação|item}` */
+  const [priceRefsByRow, setPriceRefsByRow] = useState<Record<string, PriceReferenceCell>>({});
+  const [mlAccountId, setMlAccountId] = useState<string>("");
+  const [refJobId, setRefJobId] = useState<string | null>(null);
+  const [refJob, setRefJob] = useState<{ status: string } | null>(null);
   const [salesLoading, setSalesLoading] = useState(false);
   const [salesError, setSalesError] = useState(false);
   const [cacheRefreshing, setCacheRefreshing] = useState(false);
@@ -720,6 +755,14 @@ function PrecosPageContent() {
       if (listingsData.orders && typeof listingsData.orders === "object") {
         setOrdersData(listingsData.orders as Record<string, number>);
       }
+      if (listingsData.price_references && typeof listingsData.price_references === "object") {
+        setPriceRefsByRow(listingsData.price_references as Record<string, PriceReferenceCell>);
+      } else {
+        setPriceRefsByRow({});
+      }
+      if (typeof (listingsData as { account_id?: string }).account_id === "string") {
+        setMlAccountId((listingsData as { account_id: string }).account_id);
+      }
       const plannedMap = new Map<string, number>();
       if (plannedRes.ok) {
         const plannedData = await plannedRes.json();
@@ -772,6 +815,54 @@ function PrecosPageContent() {
       setLoading(false);
     }
   }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, onlyWithSales30d]);
+
+  const fetchRefJob = useCallback(
+    async (jobId: string) => {
+      const res = await fetch(`/api/jobs/${jobId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setRefJob({ status: data.job?.status ?? "unknown" });
+      if (["success", "failed", "partial"].includes(data.job?.status ?? "")) {
+        setRefJobId(null);
+        await loadListings();
+      }
+    },
+    [loadListings]
+  );
+
+  useEffect(() => {
+    if (!refJobId) return;
+    void fetchRefJob(refJobId);
+    const interval = setInterval(() => void fetchRefJob(refJobId), 2500);
+    return () => clearInterval(interval);
+  }, [refJobId, fetchRefJob]);
+
+  const handleRefreshPriceReferences = useCallback(async () => {
+    const accountId = mlAccountId || listings[0]?.account_id;
+    if (!accountId) return;
+    try {
+      const res = await fetch("/api/price-references/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId, scope: "all" }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { job_id?: string; error?: string };
+      if (res.ok && data.job_id) {
+        setRefJobId(data.job_id);
+        setRefJob({ status: "queued" });
+        return;
+      }
+      setSaveMessage({
+        type: "error",
+        text: data.error ?? "Não foi possível iniciar a atualização da referência de preço.",
+      });
+    } catch {
+      setSaveMessage({
+        type: "error",
+        text: "Erro de conexão ao atualizar referência de preço.",
+      });
+    }
+  }, [mlAccountId, listings]);
 
   const handleRefreshCache = useCallback(async () => {
     setCacheRefreshing(true);
@@ -1851,11 +1942,23 @@ function PrecosPageContent() {
     );
   }
 
+  const refRefreshing =
+    !!refJobId && (refJob?.status === "queued" || refJob?.status === "running");
+
   return (
     <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
       <SmartLoaderOverlay
-        open={cacheRefreshing || calculating}
+        open={cacheRefreshing || calculating || refRefreshing}
+        messages={
+          refRefreshing
+            ? [
+                "Atualizando referências de preço…",
+                "Consultando sugestões no Mercado Livre…",
+                "Gravando referências para a tabela…",
+              ]
+            : undefined
+        }
         phase={
           cacheRefreshing ? "refresh-cache" : calculating ? "calculate" : "default"
         }
@@ -2183,6 +2286,19 @@ function PrecosPageContent() {
           </button>
           <button
             type="button"
+            onClick={() => void handleRefreshPriceReferences()}
+            disabled={
+              refRefreshing ||
+              cacheRefreshing ||
+              (!mlAccountId && listings.length === 0)
+            }
+            className="rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-semibold text-sky-800 shadow-sm hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/40"
+            title="Atualiza só as referências de preço / competitividade no Mercado Livre, sem refazer o cache inteiro de anúncios"
+          >
+            {refRefreshing ? "Atualizando referência…" : "Atualizar referência"}
+          </button>
+          <button
+            type="button"
             onClick={handleCalculateAll}
             disabled={calculating || listings.length === 0}
             className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
@@ -2345,14 +2461,29 @@ function PrecosPageContent() {
           {refreshError && (
             <p className="mt-2 text-xs font-medium text-red-600">{refreshError}</p>
           )}
-          <button
-            type="button"
-            onClick={handleRefreshCache}
-            disabled={cacheRefreshing}
-            className="mt-3 rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
-          >
-            {cacheRefreshing ? "Atualizando…" : "Atualizar dados"}
-          </button>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={handleRefreshCache}
+              disabled={cacheRefreshing}
+              className="rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              {cacheRefreshing ? "Atualizando…" : "Atualizar dados"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleRefreshPriceReferences()}
+              disabled={
+                refRefreshing ||
+                cacheRefreshing ||
+                !mlAccountId
+              }
+              className="rounded-full border border-sky-300 bg-white px-4 py-2 text-xs font-semibold text-sky-800 shadow-sm hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-700 dark:bg-slate-800 dark:text-sky-200 dark:hover:bg-sky-950/40"
+              title="Atualiza referências de preço / competitividade no ML (útil mesmo antes de encher o cache)"
+            >
+              {refRefreshing ? "Atualizando referência…" : "Atualizar referência"}
+            </button>
+          </div>
         </div>
       ) : listings.length === 0 ? (
         <p className="text-sm text-slate-500 dark:text-slate-400">Nenhum anúncio encontrado com os filtros selecionados.</p>
@@ -2585,25 +2716,25 @@ function PrecosPageContent() {
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyHeaderStyles[9]} title="(Vai receber − custo) ÷ preço novo. Edite para definir o preço pelo alvo de margem líquida." onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(9); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyHeaderStyles[9]} title="Referência de preço do Mercado Livre (sugestão / faixa competitiva)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(9); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Margem</span>
+                    <span>Competitividade</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(9); }} title={stickyColumns.has(9) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(9)} className={stickyColumns.has(9) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyHeaderStyles[10]} title="Promoção ML exige desconto ≥ 5%" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyHeaderStyles[10]} title="(Vai receber − custo) ÷ preço novo. Edite para definir o preço pelo alvo de margem líquida." onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Preço Novo</span>
+                    <span>Margem</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(10); }} title={stickyColumns.has(10) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(10)} className={stickyColumns.has(10) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyHeaderStyles[11]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(11); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyHeaderStyles[11]} title="Promoção ML exige desconto ≥ 5%" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(11); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Vai Receber</span>
+                    <span>Preço Novo</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(11); }} title={stickyColumns.has(11) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(11)} className={stickyColumns.has(11) ? "text-primary" : ""} />
                     </button>
@@ -2611,7 +2742,7 @@ function PrecosPageContent() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyHeaderStyles[12]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(12); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Lucro</span>
+                    <span>Vai Receber</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(12); }} title={stickyColumns.has(12) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(12)} className={stickyColumns.has(12) ? "text-primary" : ""} />
                     </button>
@@ -2619,7 +2750,7 @@ function PrecosPageContent() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyHeaderStyles[13]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(13); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Taxa ML</span>
+                    <span>Lucro</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(13); }} title={stickyColumns.has(13) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(13)} className={stickyColumns.has(13) ? "text-primary" : ""} />
                     </button>
@@ -2627,41 +2758,49 @@ function PrecosPageContent() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyHeaderStyles[14]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(14); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Frete</span>
+                    <span>Taxa ML</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(14); }} title={stickyColumns.has(14) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(14)} className={stickyColumns.has(14) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyHeaderStyles[15]} title="Imposto sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(15); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyHeaderStyles[15]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(15); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Imposto</span>
+                    <span>Frete</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(15); }} title={stickyColumns.has(15) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(15)} className={stickyColumns.has(15) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyHeaderStyles[16]} title="Taxa extra sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(16); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyHeaderStyles[16]} title="Imposto sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(16); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Taxa Extra</span>
+                    <span>Imposto</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(16); }} title={stickyColumns.has(16) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(16)} className={stickyColumns.has(16) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyHeaderStyles[17]} title="Despesas fixas em R$ (cadastrado no produto)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(17); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyHeaderStyles[17]} title="Taxa extra sobre o preço" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(17); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Desp. Fixas</span>
+                    <span>Taxa Extra</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(17); }} title={stickyColumns.has(17) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(17)} className={stickyColumns.has(17) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyHeaderStyles[18]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(18); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
-                  <div className="flex items-center justify-between gap-1">
-                    <span>Link</span>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyHeaderStyles[18]} title="Despesas fixas em R$ (cadastrado no produto)" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(18); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                  <div className="flex items-center justify-end gap-1">
+                    <span>Desp. Fixas</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(18); }} title={stickyColumns.has(18) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(18)} className={stickyColumns.has(18) ? "text-primary" : ""} />
+                    </button>
+                  </div>
+                </th>
+                <th className={`p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(19) ? "sticky-col" : ""}`} style={stickyHeaderStyles[19]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(19); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                  <div className="flex items-center justify-between gap-1">
+                    <span>Link</span>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(19); }} title={stickyColumns.has(19) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
+                      <PinIcon pinned={stickyColumns.has(19)} className={stickyColumns.has(19) ? "text-primary" : ""} />
                     </button>
                   </div>
                 </th>
@@ -2832,6 +2971,24 @@ function PrecosPageContent() {
                       R$ {formatBRL(listing.current_price)}
                     </td>
                     <td className={`p-2 text-right ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyBodyStyles[9]}>
+                      {(() => {
+                        const ref = priceRefsByRow[priceRefRowKey(listing.item_id, listing.variation_id)];
+                        const st = ref?.status ?? "none";
+                        const { label, className } = competitivenessBadge(st);
+                        const tip = [
+                          ref?.explanation,
+                          ref?.updated_at ? `Atualizado: ${new Date(ref.updated_at).toLocaleString("pt-BR")}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join("\n");
+                        return (
+                          <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${className}`} title={tip || undefined}>
+                            {label}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td className={`p-2 text-right ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyBodyStyles[10]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : (
@@ -2847,7 +3004,7 @@ function PrecosPageContent() {
                         />
                       )}
                     </td>
-                    <td className={`p-2 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyBodyStyles[10]}>
+                    <td className={`p-2 ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyBodyStyles[11]}>
                       <div className="flex flex-col items-end gap-0.5">
                         <PriceInput
                           value={listing.new_price}
@@ -2874,7 +3031,7 @@ function PrecosPageContent() {
                         )}
                       </div>
                     </td>
-                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyBodyStyles[11]}>
+                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2885,7 +3042,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : profit != null ? (
@@ -2914,7 +3071,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2929,7 +3086,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2948,7 +3105,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2968,7 +3125,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -2988,7 +3145,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyBodyStyles[18]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -3008,7 +3165,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyBodyStyles[18]}>
+                    <td className={`p-2 ${stickyColumns.has(19) ? "sticky-col" : ""}`} style={stickyBodyStyles[19]}>
                       {listing.permalink ? (
                         <a
                           href={listing.permalink}

@@ -109,6 +109,8 @@ export async function GET(req: NextRequest) {
           limit,
           sales: {},
           orders: {},
+          price_references: {},
+          account_id: account.id,
           last_updated_at: null,
           cache_empty: true,
         },
@@ -127,6 +129,8 @@ export async function GET(req: NextRequest) {
         limit,
         sales: {},
         orders: {},
+        price_references: {},
+        account_id: account.id,
         last_updated_at: lastUpdatedAt,
         cache_empty: true,
       });
@@ -170,6 +174,55 @@ export async function GET(req: NextRequest) {
       return row;
     });
 
+    const uniqueItemIds = Array.from(
+      new Set(listings.map((l) => String(l.item_id).trim().toUpperCase()))
+    );
+    const priceRefsMap: Record<
+      string,
+      {
+        status: string;
+        suggested_price: number | null;
+        min_reference_price: number | null;
+        max_reference_price: number | null;
+        explanation: string | null;
+        updated_at: string | null;
+      }
+    > = {};
+    const REF_BATCH = 100;
+    for (let i = 0; i < uniqueItemIds.length; i += REF_BATCH) {
+      const batch = uniqueItemIds.slice(i, i + REF_BATCH);
+      if (batch.length === 0) continue;
+      const { data: refRows } = await serviceSupabase
+        .from("price_references")
+        .select(
+          "item_id, variation_id, status, suggested_price, min_reference_price, max_reference_price, explanation, updated_at"
+        )
+        .eq("account_id", account.id)
+        .in("item_id", batch);
+      for (const ref of refRows ?? []) {
+        const r = ref as {
+          item_id: string;
+          variation_id: number | null;
+          status: string;
+          suggested_price: number | null;
+          min_reference_price: number | null;
+          max_reference_price: number | null;
+          explanation: string | null;
+          updated_at: string | null;
+        };
+        const vid = r.variation_id == null ? "item" : String(r.variation_id);
+        const key = `${String(r.item_id).trim().toUpperCase()}:${vid}`;
+        priceRefsMap[key] = {
+          status: r.status,
+          suggested_price: r.suggested_price != null ? Number(r.suggested_price) : null,
+          min_reference_price: r.min_reference_price != null ? Number(r.min_reference_price) : null,
+          max_reference_price: r.max_reference_price != null ? Number(r.max_reference_price) : null,
+          explanation: r.explanation ?? null,
+          updated_at: r.updated_at ?? null,
+        };
+      }
+    }
+
     return NextResponse.json({
       listings,
       total,
@@ -177,6 +230,8 @@ export async function GET(req: NextRequest) {
       limit,
       sales: salesMap,
       orders: ordersMap,
+      price_references: priceRefsMap,
+      account_id: account.id,
       last_updated_at: lastUpdatedAt,
       cache_empty: false,
     });

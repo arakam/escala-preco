@@ -51,22 +51,22 @@ export function validateTiers(tiers: Tier[]): string[] {
   const errors: string[] = [];
 
   if (tiers.length > MAX_TIERS) {
-    errors.push(`Máximo ${MAX_TIERS} tiers permitidos`);
+    errors.push(`No máximo ${MAX_TIERS} faixas de atacado permitidas`);
     return errors;
   }
 
-  // Validar cada tier
+  // Validar cada faixa (Atacado 1…5 no CSV / UI)
   for (let i = 0; i < tiers.length; i++) {
     const t = tiers[i];
     if (typeof t.min_qty !== "number" || typeof t.price !== "number") {
-      errors.push(`Tier ${i + 1}: min_qty e price são obrigatórios`);
+      errors.push(`Atacado ${i + 1}: quantidade mínima e preço são obrigatórios`);
       continue;
     }
     if (t.min_qty < MIN_QTY_MIN || !Number.isInteger(t.min_qty)) {
-      errors.push(`Tier ${i + 1}: min_qty deve ser inteiro >= ${MIN_QTY_MIN}`);
+      errors.push(`Atacado ${i + 1}: quantidade mínima deve ser inteiro >= ${MIN_QTY_MIN}`);
     }
     if (t.price <= 0) {
-      errors.push(`Tier ${i + 1}: price deve ser > 0`);
+      errors.push(`Atacado ${i + 1}: preço deve ser > 0`);
     }
   }
 
