@@ -328,7 +328,7 @@ function AtacadoPageContent() {
     try {
       localStorage.setItem(
         ATACADO_STICKY_STORAGE_KEY,
-        JSON.stringify([...stickyColumns].sort((a, b) => a - b))
+        JSON.stringify(Array.from(stickyColumns).sort((a, b) => a - b))
       );
     } catch {
       // ignore quota / private mode
