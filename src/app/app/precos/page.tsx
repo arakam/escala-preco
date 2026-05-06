@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useMemo, useRef, type CSSProperties } from "react";
 import { AppTable } from "@/components/AppTable";
+import { OnboardingGate } from "@/components/OnboardingGate";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 import { PRICING_CALCULATE_CLIENT_BATCH_SIZE } from "@/lib/pricing/calculate-limits";
 
@@ -602,7 +603,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   );
 }
 
-export default function PrecosPage() {
+function PrecosPageContent() {
   const [listings, setListings] = useState<ListingWithPricing[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -3033,5 +3034,13 @@ export default function PrecosPage() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function PrecosPage() {
+  return (
+    <OnboardingGate required="catalog">
+      <PrecosPageContent />
+    </OnboardingGate>
   );
 }

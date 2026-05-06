@@ -4,6 +4,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { OnboardingProvider, useOnboarding } from "@/contexts/onboarding-context";
+import { isPrecoAtacadoAllowed, navBlockedHref } from "@/lib/onboarding-gating";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
 
@@ -32,6 +34,327 @@ function AppLayoutFallback() {
       </header>
       <main className="w-full px-3 py-4 sm:px-4 sm:py-6" style={{ color: "var(--body-text)" }}>
         <div className="h-24 w-full animate-pulse rounded-app bg-stroke/50" />
+      </main>
+    </div>
+  );
+}
+
+function AppShell({
+  children,
+  accountLabel,
+  isMenuOpen,
+  setIsMenuOpen,
+}: {
+  children: React.ReactNode;
+  accountLabel: string;
+  isMenuOpen: boolean;
+  setIsMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
+  const { status, loading } = useOnboarding();
+
+  const allowAnuncios = !loading && !!status?.ml_connected;
+  const allowProdutos = !loading && !!status?.ml_connected && !!status?.listings_synced;
+  const allowPrecoAtacado = isPrecoAtacadoAllowed(status, loading);
+
+  const produtosBlocked = navBlockedHref(
+    status ?? { ml_connected: false, listings_synced: false, products_imported: false }
+  );
+  const precoAtacadoBlocked = produtosBlocked;
+
+  const gatedActive =
+    "inline-flex items-center gap-2 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white";
+  const gatedBlocked =
+    "inline-flex items-center gap-2 rounded-app px-3 py-2 text-sm font-medium text-white/45 transition hover:bg-white/5 hover:text-white/65";
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: "var(--body-bg)" }}>
+      <header className="sticky top-0 z-30 overflow-visible border-b border-primary-darker/50 bg-gradient-to-r from-primary-darker via-primary to-primary-dark shadow-md">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4">
+          <Link href="/app" className="flex items-center gap-2">
+            <Image
+              src="/logo.png"
+              alt="Escala Preço"
+              width={360}
+              height={100}
+              className="h-10 w-auto object-contain brightness-0 invert sm:h-14"
+            />
+          </Link>
+
+          {accountLabel && (
+            <div className="hidden max-w-[180px] truncate md:block">
+              <span className="rounded-app border border-white/20 bg-white/10 px-3 py-1.5 text-sm font-medium text-white backdrop-blur">
+                {accountLabel}
+              </span>
+            </div>
+          )}
+
+          <nav className="hidden items-center gap-1 md:flex">
+            <Link href="/app" className={gatedActive}>
+              <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                <HomeIcon />
+              </span>
+              <span>Início</span>
+            </Link>
+            {allowAnuncios ? (
+              <Link href="/app/anuncios" className={gatedActive}>
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                  <MegaphoneIcon />
+                </span>
+                <span>Anúncios</span>
+              </Link>
+            ) : (
+              <Link
+                href="/app/configuracao"
+                className={gatedBlocked}
+                title="Passo 1: conecte sua conta do Mercado Livre em Configuração."
+              >
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/50">
+                  <MegaphoneIcon />
+                </span>
+                <span>Anúncios</span>
+              </Link>
+            )}
+            {allowPrecoAtacado ? (
+              <Link href="/app/atacado" className={gatedActive}>
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                  <BoxesIcon />
+                </span>
+                <span>Atacado</span>
+              </Link>
+            ) : (
+              <Link
+                href={precoAtacadoBlocked}
+                className={gatedBlocked}
+                title="Disponível após sincronizar anúncios e importar produtos."
+              >
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/50">
+                  <BoxesIcon />
+                </span>
+                <span>Atacado</span>
+              </Link>
+            )}
+            {allowProdutos ? (
+              <Link href="/app/produtos" className={gatedActive}>
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                  <TagIcon />
+                </span>
+                <span>Produtos</span>
+              </Link>
+            ) : (
+              <Link
+                href={produtosBlocked}
+                className={gatedBlocked}
+                title={
+                  !status?.ml_connected
+                    ? "Conecte o Mercado Livre antes de gerenciar produtos."
+                    : "Sincronize os anúncios antes de importar produtos."
+                }
+              >
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/50">
+                  <TagIcon />
+                </span>
+                <span>Produtos</span>
+              </Link>
+            )}
+            {allowPrecoAtacado ? (
+              <Link href="/app/precos" className={gatedActive}>
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                  <PriceIcon />
+                </span>
+                <span>Preço</span>
+              </Link>
+            ) : (
+              <Link
+                href={precoAtacadoBlocked}
+                className={gatedBlocked}
+                title="Disponível após sincronizar anúncios e importar produtos."
+              >
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/50">
+                  <PriceIcon />
+                </span>
+                <span>Preço</span>
+              </Link>
+            )}
+            <Link href="/app/configuracao" className={gatedActive}>
+              <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                <SettingsIcon />
+              </span>
+              <span>Configuração</span>
+            </Link>
+            <form action="/api/auth/logout" method="post">
+              <button
+                type="submit"
+                className="ml-2 inline-flex items-center gap-2 rounded-app bg-white/5 px-3 py-2 text-sm font-medium text-white/90 backdrop-blur transition hover:bg-white/15 hover:text-orange-100"
+              >
+                <LogoutIcon />
+                <span>Sair</span>
+              </button>
+            </form>
+          </nav>
+
+          <button
+            type="button"
+            onClick={() => setIsMenuOpen((open) => !open)}
+            className="inline-flex items-center justify-center rounded-app p-2 text-white/90 ring-primary-light transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 md:hidden"
+            aria-label="Abrir menu"
+            aria-expanded={isMenuOpen}
+          >
+            {isMenuOpen ? <CloseIcon /> : <MenuIcon />}
+          </button>
+        </div>
+
+        {isMenuOpen && (
+          <div className="border-t border-primary-darker/40 bg-primary-darker/95 backdrop-blur md:hidden">
+            {accountLabel && (
+              <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
+                <span className="text-xs font-medium text-white/70">Conta Mercado Livre</span>
+                <p className="truncate rounded-app border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white backdrop-blur">
+                  {accountLabel}
+                </p>
+              </div>
+            )}
+            <nav className="mx-auto flex w-full max-w-6xl flex-col gap-1 px-4 py-3">
+              <Link
+                href="/app"
+                onClick={() => setIsMenuOpen(false)}
+                className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white"
+              >
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                  <HomeIcon />
+                </span>
+                <span>Início</span>
+              </Link>
+              {allowAnuncios ? (
+                <Link
+                  href="/app/anuncios"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white"
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                    <MegaphoneIcon />
+                  </span>
+                  <span>Anúncios</span>
+                </Link>
+              ) : (
+                <Link
+                  href="/app/configuracao"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/45 transition hover:bg-white/5 hover:text-white/65"
+                  title="Passo 1: conecte sua conta do Mercado Livre em Configuração."
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-white/50">
+                    <MegaphoneIcon />
+                  </span>
+                  <span>Anúncios</span>
+                </Link>
+              )}
+              {allowPrecoAtacado ? (
+                <Link
+                  href="/app/atacado"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white"
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                    <BoxesIcon />
+                  </span>
+                  <span>Atacado</span>
+                </Link>
+              ) : (
+                <Link
+                  href={precoAtacadoBlocked}
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/45 transition hover:bg-white/5 hover:text-white/65"
+                  title="Disponível após sincronizar anúncios e importar produtos."
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-white/50">
+                    <BoxesIcon />
+                  </span>
+                  <span>Atacado</span>
+                </Link>
+              )}
+              {allowProdutos ? (
+                <Link
+                  href="/app/produtos"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white"
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                    <TagIcon />
+                  </span>
+                  <span>Produtos</span>
+                </Link>
+              ) : (
+                <Link
+                  href={produtosBlocked}
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/45 transition hover:bg-white/5 hover:text-white/65"
+                  title={
+                    !status?.ml_connected
+                      ? "Conecte o Mercado Livre antes de gerenciar produtos."
+                      : "Sincronize os anúncios antes de importar produtos."
+                  }
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-white/50">
+                    <TagIcon />
+                  </span>
+                  <span>Produtos</span>
+                </Link>
+              )}
+              {allowPrecoAtacado ? (
+                <Link
+                  href="/app/precos"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white"
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                    <PriceIcon />
+                  </span>
+                  <span>Preço</span>
+                </Link>
+              ) : (
+                <Link
+                  href={precoAtacadoBlocked}
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/45 transition hover:bg-white/5 hover:text-white/65"
+                  title="Disponível após sincronizar anúncios e importar produtos."
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-white/50">
+                    <PriceIcon />
+                  </span>
+                  <span>Preço</span>
+                </Link>
+              )}
+              <Link
+                href="/app/configuracao"
+                onClick={() => setIsMenuOpen(false)}
+                className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white"
+              >
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                  <SettingsIcon />
+                </span>
+                <span>Configuração</span>
+              </Link>
+              <form action="/api/auth/logout" method="post" className="pt-1">
+                <button
+                  type="submit"
+                  className="flex w-full items-center justify-center gap-2 rounded-app bg-white/10 px-3 py-2 text-sm font-medium text-orange-100 backdrop-blur transition hover:bg-white/20"
+                >
+                  <LogoutIcon />
+                  <span>Sair</span>
+                </button>
+              </form>
+            </nav>
+          </div>
+        )}
+      </header>
+
+      <main
+        className="w-full px-3 py-4 sm:px-4 sm:py-6"
+        style={{ color: "var(--body-text)" }}
+      >
+        <Suspense fallback={<div className="min-h-24 animate-pulse rounded-app bg-stroke/50" />}>
+          {children}
+        </Suspense>
       </main>
     </div>
   );
@@ -94,130 +417,11 @@ function AppLayoutInner({
     : "";
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "var(--body-bg)" }}>
-      <header className="sticky top-0 z-30 overflow-visible border-b border-primary-darker/50 bg-gradient-to-r from-primary-darker via-primary to-primary-dark shadow-md">
-        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4">
-          <Link href="/app" className="flex items-center gap-2">
-            <Image
-              src="/logo.png"
-              alt="Escala Preço"
-              width={360}
-              height={100}
-              className="h-10 w-auto object-contain brightness-0 invert sm:h-14"
-            />
-          </Link>
-
-          {/* Conta ML fixa no header - só exibição (uma conta) - desktop */}
-          {accountLabel && (
-            <div className="hidden max-w-[180px] truncate md:block">
-              <span className="rounded-app border border-white/20 bg-white/10 px-3 py-1.5 text-sm font-medium text-white backdrop-blur">
-                {accountLabel}
-              </span>
-            </div>
-          )}
-
-          {/* Navegação desktop */}
-          <nav className="hidden items-center gap-1 md:flex">
-            <NavLink href="/app" label="Início">
-              <HomeIcon />
-            </NavLink>
-            <NavLink href="/app/anuncios" label="Anúncios">
-              <MegaphoneIcon />
-            </NavLink>
-            <NavLink href="/app/atacado" label="Atacado">
-              <BoxesIcon />
-            </NavLink>
-            <NavLink href="/app/produtos" label="Produtos">
-              <TagIcon />
-            </NavLink>
-            <NavLink href="/app/precos" label="Preço">
-              <PriceIcon />
-            </NavLink>
-            <NavLink href="/app/configuracao" label="Configuração">
-              <SettingsIcon />
-            </NavLink>
-            <form action="/api/auth/logout" method="post">
-              <button
-                type="submit"
-                className="ml-2 inline-flex items-center gap-2 rounded-app bg-white/5 px-3 py-2 text-sm font-medium text-white/90 backdrop-blur transition hover:bg-white/15 hover:text-orange-100"
-              >
-                <LogoutIcon />
-                <span>Sair</span>
-              </button>
-            </form>
-          </nav>
-
-          {/* Botão mobile */}
-          <button
-            type="button"
-            onClick={() => setIsMenuOpen((open) => !open)}
-            className="inline-flex items-center justify-center rounded-app p-2 text-white/90 ring-primary-light transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 md:hidden"
-            aria-label="Abrir menu"
-            aria-expanded={isMenuOpen}
-          >
-            {isMenuOpen ? <CloseIcon /> : <MenuIcon />}
-          </button>
-        </div>
-
-        {/* Menu mobile */}
-        {isMenuOpen && (
-          <div className="border-t border-primary-darker/40 bg-primary-darker/95 backdrop-blur md:hidden">
-            {accountLabel && (
-              <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-2">
-                <span className="text-xs font-medium text-white/70">Conta Mercado Livre</span>
-                <p className="truncate rounded-app border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white backdrop-blur">
-                  {accountLabel}
-                </p>
-              </div>
-            )}
-            <nav className="mx-auto flex w-full max-w-6xl flex-col gap-1 px-4 py-3">
-              <MobileNavLink href="/app" onClick={() => setIsMenuOpen(false)}>
-                <HomeIcon />
-                <span>Início</span>
-              </MobileNavLink>
-              <MobileNavLink href="/app/anuncios" onClick={() => setIsMenuOpen(false)}>
-                <MegaphoneIcon />
-                <span>Anúncios</span>
-              </MobileNavLink>
-              <MobileNavLink href="/app/atacado" onClick={() => setIsMenuOpen(false)}>
-                <BoxesIcon />
-                <span>Atacado</span>
-              </MobileNavLink>
-              <MobileNavLink href="/app/produtos" onClick={() => setIsMenuOpen(false)}>
-                <TagIcon />
-                <span>Produtos</span>
-              </MobileNavLink>
-              <MobileNavLink href="/app/precos" onClick={() => setIsMenuOpen(false)}>
-                <PriceIcon />
-                <span>Preço</span>
-              </MobileNavLink>
-              <MobileNavLink href="/app/configuracao" onClick={() => setIsMenuOpen(false)}>
-                <SettingsIcon />
-                <span>Configuração</span>
-              </MobileNavLink>
-              <form action="/api/auth/logout" method="post" className="pt-1">
-                <button
-                  type="submit"
-                  className="flex w-full items-center justify-center gap-2 rounded-app bg-white/10 px-3 py-2 text-sm font-medium text-orange-100 backdrop-blur transition hover:bg-white/20"
-                >
-                  <LogoutIcon />
-                  <span>Sair</span>
-                </button>
-              </form>
-            </nav>
-          </div>
-        )}
-      </header>
-
-      <main
-        className="w-full px-3 py-4 sm:px-4 sm:py-6"
-        style={{ color: "var(--body-text)" }}
-      >
-        <Suspense fallback={<div className="min-h-24 animate-pulse rounded-app bg-stroke/50" />}>
-          {children}
-        </Suspense>
-      </main>
-    </div>
+    <OnboardingProvider accountId={accountId}>
+      <AppShell accountLabel={accountLabel} isMenuOpen={isMenuOpen} setIsMenuOpen={setIsMenuOpen}>
+        {children}
+      </AppShell>
+    </OnboardingProvider>
   );
 }
 
@@ -230,51 +434,6 @@ export default function AppLayout({
     <Suspense fallback={<AppLayoutFallback />}>
       <AppLayoutInner>{children}</AppLayoutInner>
     </Suspense>
-  );
-}
-
-type NavLinkProps = {
-  href: string;
-  label: string;
-  children: React.ReactNode;
-};
-
-function NavLink({ href, label, children }: NavLinkProps) {
-  return (
-    <Link
-      href={href}
-      className="inline-flex items-center gap-2 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white"
-    >
-      <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
-        {children}
-      </span>
-      <span>{label}</span>
-    </Link>
-  );
-}
-
-type MobileNavLinkProps = {
-  href: string;
-  children: React.ReactNode;
-  onClick?: () => void;
-};
-
-function MobileNavLink({ href, children, onClick }: MobileNavLinkProps) {
-  return (
-    <Link
-      href={href}
-      onClick={onClick}
-      className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white"
-    >
-      <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
-        {children}
-      </span>
-      {children && (
-        <span className="text-sm font-medium text-white/95">
-          {/* O texto vem no children (ícone + label) */}
-        </span>
-      )}
-    </Link>
   );
 }
 

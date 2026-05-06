@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState, useRef } from "react";
 import { AppTable } from "@/components/AppTable";
+import { OnboardingGate } from "@/components/OnboardingGate";
+import { useOnboarding } from "@/contexts/onboarding-context";
 import { Product, ProductInput, ProductListingStats, UnregisteredSku } from "@/lib/db/types";
 
 interface ProductFormData {
@@ -36,7 +38,8 @@ const emptyForm: ProductFormData = {
 
 type ViewMode = "products" | "stats";
 
-export default function ProdutosPage() {
+function ProdutosPageContent() {
+  const { reload: reloadOnboarding } = useOnboarding();
   const [viewMode, setViewMode] = useState<ViewMode>("products");
   const [products, setProducts] = useState<Product[]>([]);
   const [stats, setStats] = useState<ProductListingStats[]>([]);
@@ -202,6 +205,7 @@ export default function ProdutosPage() {
 
       closeModal();
       loadProducts();
+      reloadOnboarding();
     } catch {
       setFormError("Erro de conexão");
     } finally {
@@ -218,6 +222,7 @@ export default function ProdutosPage() {
       if (res.ok) {
         setDeleteConfirm(null);
         loadProducts();
+        reloadOnboarding();
       }
     } catch {
       // ignore
@@ -235,6 +240,7 @@ export default function ProdutosPage() {
         setDeleteAllOpen(false);
         setPage(1);
         loadProducts();
+        reloadOnboarding();
       }
     } catch {
       // ignore
@@ -306,6 +312,7 @@ export default function ProdutosPage() {
       if (res.ok) {
         setImportResult({ success: true, imported: data.imported, errors: data.errors });
         loadProducts();
+        reloadOnboarding();
       } else {
         setImportResult({ success: false, errors: [data.error || "Erro ao importar"] });
       }
@@ -1175,5 +1182,13 @@ export default function ProdutosPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ProdutosPage() {
+  return (
+    <OnboardingGate required="sync">
+      <ProdutosPageContent />
+    </OnboardingGate>
   );
 }

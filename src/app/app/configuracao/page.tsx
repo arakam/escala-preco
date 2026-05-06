@@ -3,6 +3,10 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTheme } from "@/components/theme-provider";
+import { useOnboarding } from "@/contexts/onboarding-context";
+
+const IS_NEXT_DEV = process.env.NODE_ENV === "development";
+const STORAGE_KEY_ACCOUNT = "escalapreco_dashboard_account_id";
 
 interface MLAccountRow {
   id: string;
@@ -105,6 +109,7 @@ function formatPercent(value: number): string {
 }
 
 function ConfiguracaoContent() {
+  const { reload: reloadOnboarding } = useOnboarding();
   const [accounts, setAccounts] = useState<MLAccountRow[]>([]);
   const [shippingCosts, setShippingCosts] = useState<ShippingCostRange[]>([]);
   const [reputation, setReputation] = useState<ReputationData | null>(null);
@@ -112,6 +117,7 @@ function ConfiguracaoContent() {
   const [shippingLoading, setShippingLoading] = useState(true);
   const [reputationLoading, setReputationLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"ml" | "frete" | "aparencia">("ml");
+  const [devResetting, setDevResetting] = useState(false);
   const { theme, setTheme } = useTheme();
   const searchParams = useSearchParams();
 
@@ -147,6 +153,36 @@ function ConfiguracaoContent() {
     loadShippingCosts();
     loadReputation();
   }, [loadAccounts, loadShippingCosts, loadReputation]);
+
+  async function handleDevResetData() {
+    if (
+      !window.confirm(
+        "Ambiente de desenvolvimento: isso apaga todos os produtos cadastrados, desconecta o Mercado Livre e remove anúncios sincronizados deste usuário. Continuar?"
+      )
+    ) {
+      return;
+    }
+    setDevResetting(true);
+    try {
+      const res = await fetch("/api/dev/reset-user-data", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert((data as { error?: string }).error || "Não foi possível limpar os dados.");
+        return;
+      }
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(STORAGE_KEY_ACCOUNT);
+      }
+      setReputation(null);
+      reloadOnboarding();
+      setLoading(true);
+      await loadAccounts();
+      loadReputation();
+    } finally {
+      setDevResetting(false);
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     const connected = searchParams.get("connected");
@@ -524,6 +560,27 @@ function ConfiguracaoContent() {
                   </p>
                 </div>
               )}
+            </section>
+          )}
+
+          {IS_NEXT_DEV && (
+            <section className="mb-8 rounded-lg border-2 border-dashed border-rose-300 bg-rose-50/80 p-4 dark:border-rose-800 dark:bg-rose-950/30">
+              <h2 className="mb-2 text-lg font-medium text-rose-900 dark:text-rose-100">
+                Desenvolvimento local
+              </h2>
+              <p className="mb-3 text-sm text-rose-800 dark:text-rose-200/90">
+                Visível apenas com <code className="rounded bg-rose-100 px-1 text-xs dark:bg-rose-900/60">npm run dev</code>.
+                Remove a integração Mercado Livre (tokens e contas), todos os anúncios e jobs sincronizados no banco,
+                rascunhos de atacado, cache de preços e o cadastro de produtos deste usuário.
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleDevResetData()}
+                disabled={devResetting}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {devResetting ? "Limpando…" : "Apagar dados e desconectar Mercado Livre"}
+              </button>
             </section>
           )}
         </>

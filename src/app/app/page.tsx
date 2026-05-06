@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useOnboarding } from "@/contexts/onboarding-context";
+import { isPrecoAtacadoAllowed, navBlockedHref } from "@/lib/onboarding-gating";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
 
@@ -75,6 +77,7 @@ function activityStatusLabel(status: ActivityItem["status"]): string {
 
 function AppHomeContent() {
   const searchParams = useSearchParams();
+  const { status: onboarding, loading: onboardingLoading } = useOnboarding();
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
   const [accountId, setAccountId] = useState<string>("");
   const [summary, setSummary] = useState<{ account: { id: string; ml_user_id: number; ml_nickname: string | null }; cards: SummaryCards } | null>(null);
@@ -84,6 +87,9 @@ function AppHomeContent() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [activityLoading, setActivityLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+
+  const allowPrecoAtacado = isPrecoAtacadoAllowed(onboarding, onboardingLoading);
+  const dashBlockedHref = navBlockedHref(onboarding);
 
   const loadAccounts = useCallback(async () => {
     const res = await fetch("/api/mercadolivre/accounts");
@@ -228,6 +234,94 @@ function AppHomeContent() {
 
   return (
     <div className="space-y-6 sm:space-y-8">
+      {!onboardingLoading && onboarding && onboarding.current_step < 4 && (
+        <section
+          className="rounded-app border border-sky-200 bg-gradient-to-r from-sky-50 to-white p-4 shadow-sm dark:border-sky-900/50 dark:from-sky-950/40 dark:to-slate-900/80"
+          aria-label="Primeiros passos"
+        >
+          <h2 className="text-sm font-semibold text-sky-900 dark:text-sky-100">Primeiros passos no EscalaPreço</h2>
+          <p className="mt-1 text-xs text-sky-800 dark:text-sky-200/90">
+            Siga a ordem abaixo para liberar preço e atacado no menu.
+          </p>
+          <ol className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+            <li className="flex gap-2 rounded-lg bg-white/80 px-3 py-2 dark:bg-slate-800/60">
+              <span
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                  onboarding.ml_connected ? "bg-emerald-500 text-white" : "bg-sky-200 text-sky-900 dark:bg-sky-800 dark:text-sky-100"
+                }`}
+              >
+                {onboarding.ml_connected ? "✓" : "1"}
+              </span>
+              <div>
+                <p className="font-medium text-slate-900 dark:text-slate-50">Conectar o Mercado Livre</p>
+                <Link href="/app/configuracao" className="text-xs font-medium text-primary underline-offset-2 hover:underline">
+                  Abrir Configuração
+                </Link>
+              </div>
+            </li>
+            <li className="flex gap-2 rounded-lg bg-white/80 px-3 py-2 dark:bg-slate-800/60">
+              <span
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                  onboarding.listings_synced ? "bg-emerald-500 text-white" : "bg-sky-200 text-sky-900 dark:bg-sky-800 dark:text-sky-100"
+                }`}
+              >
+                {onboarding.listings_synced ? "✓" : "2"}
+              </span>
+              <div>
+                <p className="font-medium text-slate-900 dark:text-slate-50">Sincronizar anúncios</p>
+                <Link
+                  href={onboarding.ml_connected ? "/app/anuncios" : "/app/configuracao"}
+                  className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  {onboarding.ml_connected ? "Ir a Anúncios" : "Conecte a conta primeiro"}
+                </Link>
+              </div>
+            </li>
+            <li className="flex gap-2 rounded-lg bg-white/80 px-3 py-2 dark:bg-slate-800/60">
+              <span
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                  onboarding.products_imported ? "bg-emerald-500 text-white" : "bg-sky-200 text-sky-900 dark:bg-sky-800 dark:text-sky-100"
+                }`}
+              >
+                {onboarding.products_imported ? "✓" : "3"}
+              </span>
+              <div>
+                <p className="font-medium text-slate-900 dark:text-slate-50">Importar produtos</p>
+                <Link
+                  href={onboarding.listings_synced ? "/app/produtos" : onboarding.ml_connected ? "/app/anuncios" : "/app/configuracao"}
+                  className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  {onboarding.listings_synced ? "Ir a Produtos" : "Sincronize os anúncios antes"}
+                </Link>
+              </div>
+            </li>
+            <li className="flex gap-2 rounded-lg bg-white/80 px-3 py-2 dark:bg-slate-800/60">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-200 text-xs font-bold text-sky-900 dark:bg-sky-800 dark:text-sky-100">
+                4
+              </span>
+              <div>
+                <p className="font-medium text-slate-900 dark:text-slate-50">Ajustar preços e atacado</p>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  {onboarding.products_imported ? (
+                    <>
+                      <Link href="/app/precos" className="font-medium text-primary underline-offset-2 hover:underline">
+                        Preço
+                      </Link>
+                      {" · "}
+                      <Link href="/app/atacado" className="font-medium text-primary underline-offset-2 hover:underline">
+                        Atacado
+                      </Link>
+                    </>
+                  ) : (
+                    "Disponível após importar ao menos um produto."
+                  )}
+                </p>
+              </div>
+            </li>
+          </ol>
+        </section>
+      )}
+
       {/* Cabeçalho do dashboard */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-app bg-white/80 p-4 shadow-sm ring-1 ring-slate-200 backdrop-blur dark:bg-slate-800/80 dark:ring-slate-600">
         <div>
@@ -402,8 +496,19 @@ function AppHomeContent() {
 
         {/* Card de oportunidade de preço */}
         <Link
-          href={`/app/atacado?accountId=${encodeURIComponent(accountId)}&filter=price_high`}
-          className="block rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-amber-50 to-amber-100 p-4 text-amber-900 shadow-sm transition hover:shadow-md"
+          href={
+            allowPrecoAtacado
+              ? `/app/atacado?accountId=${encodeURIComponent(accountId)}&filter=price_high`
+              : dashBlockedHref
+          }
+          title={
+            allowPrecoAtacado
+              ? undefined
+              : "Disponível após sincronizar anúncios e cadastrar produtos (passos 2 e 3)."
+          }
+          className={`block rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-amber-50 to-amber-100 p-4 text-amber-900 shadow-sm transition hover:shadow-md ${
+            allowPrecoAtacado ? "" : "opacity-55"
+          }`}
         >
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -530,8 +635,15 @@ function AppHomeContent() {
           </button>
 
           <Link
-            href="/app/atacado"
-            className="group flex flex-col justify-between rounded-2xl border border-slate-100 bg-white/80 p-4 text-left text-slate-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-slate-300 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-50 dark:hover:ring-slate-600"
+            href={allowPrecoAtacado ? "/app/atacado" : dashBlockedHref}
+            title={
+              allowPrecoAtacado
+                ? undefined
+                : "Disponível após sincronizar anúncios e cadastrar produtos."
+            }
+            className={`group flex flex-col justify-between rounded-2xl border border-slate-100 bg-white/80 p-4 text-left text-slate-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-slate-300 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-50 dark:hover:ring-slate-600 ${
+              allowPrecoAtacado ? "" : "opacity-55"
+            }`}
           >
             <div className="flex items-center justify-between gap-2">
               <div>
@@ -550,8 +662,15 @@ function AppHomeContent() {
           </Link>
 
           <Link
-            href="/app/atacado"
-            className="group flex flex-col justify-between rounded-2xl border border-slate-100 bg-white/80 p-4 text-left text-slate-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-slate-300 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-50 dark:hover:ring-slate-600"
+            href={allowPrecoAtacado ? "/app/atacado" : dashBlockedHref}
+            title={
+              allowPrecoAtacado
+                ? undefined
+                : "Disponível após sincronizar anúncios e cadastrar produtos."
+            }
+            className={`group flex flex-col justify-between rounded-2xl border border-slate-100 bg-white/80 p-4 text-left text-slate-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-slate-300 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-50 dark:hover:ring-slate-600 ${
+              allowPrecoAtacado ? "" : "opacity-55"
+            }`}
           >
             <div className="flex items-center justify-between gap-2">
               <div>
@@ -570,8 +689,15 @@ function AppHomeContent() {
           </Link>
 
           <Link
-            href="/app/atacado"
-            className="group flex flex-col justify-between rounded-2xl border border-emerald-100 bg-emerald-50/90 p-4 text-left text-emerald-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-emerald-300"
+            href={allowPrecoAtacado ? "/app/atacado" : dashBlockedHref}
+            title={
+              allowPrecoAtacado
+                ? undefined
+                : "Disponível após sincronizar anúncios e cadastrar produtos."
+            }
+            className={`group flex flex-col justify-between rounded-2xl border border-emerald-100 bg-emerald-50/90 p-4 text-left text-emerald-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-emerald-300 ${
+              allowPrecoAtacado ? "" : "opacity-55"
+            }`}
           >
             <div className="flex items-center justify-between gap-2">
               <div>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { OnboardingGate } from "@/components/OnboardingGate";
 
 interface ActivityItem {
   at: string;
@@ -178,14 +179,16 @@ function HistoricoContent() {
 
 export default function HistoricoPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
-          <p className="text-fg-muted">Carregando…</p>
-        </div>
-      }
-    >
-      <HistoricoContent />
-    </Suspense>
+    <OnboardingGate required="sync">
+      <Suspense
+        fallback={
+          <div className="rounded-lg border border-stroke bg-card p-6 dark:border-slate-700">
+            <p className="text-fg-muted">Carregando…</p>
+          </div>
+        }
+      >
+        <HistoricoContent />
+      </Suspense>
+    </OnboardingGate>
   );
 }

@@ -4,6 +4,7 @@ import React, { Suspense, useCallback, useEffect, useRef, useState } from "react
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
+import { OnboardingGate } from "@/components/OnboardingGate";
 import { ReceivableModal } from "@/components/ReceivableModal";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 import type { Tier } from "@/lib/atacado";
@@ -1349,8 +1350,10 @@ function AtacadoPageContent() {
 
 export default function AtacadoPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center">Carregando...</div>}>
-      <AtacadoPageContent />
-    </Suspense>
+    <OnboardingGate required="catalog">
+      <Suspense fallback={<div className="p-8 text-center">Carregando...</div>}>
+        <AtacadoPageContent />
+      </Suspense>
+    </OnboardingGate>
   );
 }

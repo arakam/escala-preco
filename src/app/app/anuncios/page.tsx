@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
+import { OnboardingGate } from "@/components/OnboardingGate";
 import { SingleAnuncioImportBar, SyncImportProgress } from "@/components/SyncImportProgress";
+import { useOnboarding } from "@/contexts/onboarding-context";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
 
@@ -43,8 +45,9 @@ interface JobState {
 
 type SortField = "item_id" | "title" | "status" | "price" | "updated_at";
 
-export default function AnunciosPage() {
+function AnunciosPageContent() {
   const searchParams = useSearchParams();
+  const { reload: reloadOnboarding } = useOnboarding();
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
   const [accountId, setAccountId] = useState<string>("");
   const [items, setItems] = useState<ItemRow[]>([]);
@@ -155,11 +158,12 @@ export default function AnunciosPage() {
       if (isTerminal || (j.status === "running" && allProcessed)) {
         setSyncing(false);
         loadItems();
+        reloadOnboarding();
         return true;
       }
     }
     return false;
-  }, [account, job?.id, loadItems]);
+  }, [account, job?.id, loadItems, reloadOnboarding]);
 
   useEffect(() => {
     if (!syncing || !job || job.status === "success" || job.status === "failed" || job.status === "partial") return;
@@ -212,6 +216,7 @@ export default function AnunciosPage() {
       if (res.ok) {
         setSingleMlb("");
         loadItems();
+        reloadOnboarding();
       } else {
         setSingleError(data.error || "Erro ao sincronizar anúncio");
       }
@@ -793,5 +798,13 @@ export default function AnunciosPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AnunciosPage() {
+  return (
+    <OnboardingGate required="ml">
+      <AnunciosPageContent />
+    </OnboardingGate>
   );
 }
