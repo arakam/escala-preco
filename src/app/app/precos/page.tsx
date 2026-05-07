@@ -5,6 +5,11 @@ import { AppTable } from "@/components/AppTable";
 import { OnboardingGate } from "@/components/OnboardingGate";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 import { PRICING_CALCULATE_CLIENT_BATCH_SIZE } from "@/lib/pricing/calculate-limits";
+import {
+  sanitizeMlSellerCampaignNameInput,
+  isValidMlSellerCampaignName,
+  ML_SELLER_CAMPAIGN_NAME_HINT,
+} from "@/lib/mercadolivre/campaign-name";
 
 interface PricingListing {
   id: string;
@@ -103,6 +108,44 @@ function skuDisplayParts(rawSku: string): { primary: string; extraCount: number 
 function meetsMlMinCampaignDiscount(listing: Pick<ListingWithPricing, "current_price" | "new_price">): boolean {
   if (listing.current_price <= 0 || listing.new_price <= 0) return false;
   return listing.new_price <= listing.current_price * 0.95;
+}
+
+/** Resposta por item em POST /api/mercadolivre/seller-campaigns */
+type SellerCampaignItemResult =
+  | { item_id: string; variation_id: number | null; status: "ok"; price: number }
+  | { item_id: string; variation_id: number | null; status: "skipped_no_planned_price" }
+  | { item_id: string; variation_id: number | null; status: "error"; error: string };
+
+function escapeCsvField(value: string | number | null | undefined): string {
+  const s = value == null ? "" : String(value);
+  if (/[",\r\n;]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+/** Itens não incluídos na campanha: separador `;` e BOM UTF-8 para Excel em PT-BR. */
+function buildCampaignIssuesCsv(rows: SellerCampaignItemResult[]): string {
+  const sep = ";";
+  const header = ["item_id", "variation_id", "situacao", "mensagem"];
+  const lines: string[] = [header.map(escapeCsvField).join(sep)];
+  for (const r of rows) {
+    if (r.status === "ok") continue;
+    const vid = r.variation_id == null ? "" : String(r.variation_id);
+    if (r.status === "error") {
+      lines.push([r.item_id, vid, "erro_api", r.error].map(escapeCsvField).join(sep));
+    } else {
+      lines.push(
+        [
+          r.item_id,
+          vid,
+          "sem_preco_salvo",
+          "Sem preço planejado gravado (planned_price) para esta linha",
+        ]
+          .map(escapeCsvField)
+          .join(sep)
+      );
+    }
+  }
+  return `\uFEFF${lines.join("\r\n")}`;
 }
 
 /** Configuração das colunas da tabela de preços (ordem = índice na tabela). Usado para congelar colunas. */
@@ -764,6 +807,8 @@ function PrecosPageContent() {
   const [campaignFinish, setCampaignFinish] = useState("");
   const [campaignLoading, setCampaignLoading] = useState(false);
   const [campaignMessage, setCampaignMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+  /** Itens com erro ou sem preço salvo após criar campanha (para CSV). */
+  const [campaignIssuesForDownload, setCampaignIssuesForDownload] = useState<SellerCampaignItemResult[] | null>(null);
   /** Barra de filtros lateral: expandida ao clicar, recolhe ao aplicar filtros */
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   /** Índices das colunas congeladas (0-based). Ordem dos congelados = ordem na tabela. Persistido em localStorage após hidratação. */
@@ -784,6 +829,7 @@ function PrecosPageContent() {
   const [bulkMarginPercentInput, setBulkMarginPercentInput] = useState("");
   const bulkMarginBusyRef = useRef(false);
   const bulkRestoreOriginalBusyRef = useRef(false);
+  const campaignMessageDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadReputation = useCallback(async () => {
     setReputationLoading(true);
@@ -2096,6 +2142,13 @@ function PrecosPageContent() {
       setCampaignMessage({ type: "error", text: "Informe o nome da campanha." });
       return;
     }
+    if (!isValidMlSellerCampaignName(campaignName)) {
+      setCampaignMessage({
+        type: "error",
+        text: `Nome da campanha inválido para o Mercado Livre. ${ML_SELLER_CAMPAIGN_NAME_HINT}`,
+      });
+      return;
+    }
     if (!campaignStart || !campaignFinish) {
       setCampaignMessage({ type: "error", text: "Informe data de início e término." });
       return;
@@ -2121,6 +2174,11 @@ function PrecosPageContent() {
 
     setCampaignLoading(true);
     setCampaignMessage(null);
+    setCampaignIssuesForDownload(null);
+    if (campaignMessageDismissRef.current) {
+      clearTimeout(campaignMessageDismissRef.current);
+      campaignMessageDismissRef.current = null;
+    }
     try {
       const res = await fetch("/api/mercadolivre/seller-campaigns", {
         method: "POST",
@@ -2134,6 +2192,7 @@ function PrecosPageContent() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        setCampaignIssuesForDownload(null);
         setCampaignMessage({
           type: "error",
           text:
@@ -2144,6 +2203,10 @@ function PrecosPageContent() {
         return;
       }
 
+      const itemsRaw = (data as { items?: SellerCampaignItemResult[] }).items ?? [];
+      const issues = itemsRaw.filter((i) => i.status !== "ok");
+      setCampaignIssuesForDownload(issues.length > 0 ? issues : null);
+
       const summary = (data as { summary?: { applied?: number; skipped_no_planned_price?: number; errors?: number } }).summary || {};
       const applied = summary.applied ?? 0;
       const skipped = summary.skipped_no_planned_price ?? 0;
@@ -2152,14 +2215,24 @@ function PrecosPageContent() {
 
       const excluded = selectedListingsForCampaign.length - validListings.length;
       const excludedText = excluded > 0 ? ` ${excluded} ignorado(s) (desconto < 5%).` : "";
+      const csvHint =
+        issues.length > 0
+          ? ` Baixe o CSV abaixo para ver ${issues.length} linha(s) com erro ou sem preço salvo.`
+          : "";
       setCampaignMessage({
         type: "ok",
-        text: `Campanha criada${campaign?.id ? ` (${campaign.id})` : ""}: ${applied} item(s) incluído(s), ${skipped} sem preço salvo, ${errors} com erro.${excludedText}`,
+        text: `Campanha criada${campaign?.id ? ` (${campaign.id})` : ""}: ${applied} item(s) incluído(s), ${skipped} sem preço salvo, ${errors} com erro.${excludedText}${csvHint}`,
       });
       setSelectedIds(new Set());
       setCampaignOpen(false);
-      setTimeout(() => setCampaignMessage(null), 6000);
+      const dismissMs = issues.length > 0 ? 45000 : 6000;
+      campaignMessageDismissRef.current = setTimeout(() => {
+        campaignMessageDismissRef.current = null;
+        setCampaignMessage(null);
+        setCampaignIssuesForDownload(null);
+      }, dismissMs);
     } catch {
+      setCampaignIssuesForDownload(null);
       setCampaignMessage({
         type: "error",
         text: "Erro de rede ao criar campanha no Mercado Livre.",
@@ -2168,6 +2241,19 @@ function PrecosPageContent() {
       setCampaignLoading(false);
     }
   }, [campaignName, campaignStart, campaignFinish, selectedIds, listings]);
+
+  const handleDownloadCampaignIssuesCsv = useCallback(() => {
+    if (!campaignIssuesForDownload?.length) return;
+    const csv = buildCampaignIssuesCsv(campaignIssuesForDownload);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    a.download = `campanha-ml-nao-incluidos-${stamp}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [campaignIssuesForDownload]);
 
   if (loading && listings.length === 0) {
     return (
@@ -2213,10 +2299,12 @@ function PrecosPageContent() {
                 <input
                   type="text"
                   value={campaignName}
-                  onChange={(e) => setCampaignName(e.target.value)}
+                  onChange={(e) => setCampaignName(sanitizeMlSellerCampaignNameInput(e.target.value))}
                   className="input w-full py-2 text-sm"
-                  placeholder="Ex.: Campanha preços março"
+                  placeholder="Ex.: Campanha precos marco"
+                  autoComplete="off"
                 />
+                <p className="mt-1 text-xs text-fg-muted">{ML_SELLER_CAMPAIGN_NAME_HINT}</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -2715,11 +2803,20 @@ function PrecosPageContent() {
         <div
           className={`mb-4 rounded p-3 text-sm ${
             campaignMessage.type === "ok"
-              ? "bg-blue-50 text-blue-700"
-              : "bg-red-50 text-red-700"
+              ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+              : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200"
           }`}
         >
-          {campaignMessage.text}
+          <p>{campaignMessage.text}</p>
+          {campaignIssuesForDownload && campaignIssuesForDownload.length > 0 && (
+            <button
+              type="button"
+              onClick={handleDownloadCampaignIssuesCsv}
+              className="mt-3 rounded border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-800 shadow-sm hover:bg-blue-50 dark:border-blue-700 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-slate-800"
+            >
+              Baixar CSV — {campaignIssuesForDownload.length} não incluído(s) (erro ou sem preço salvo)
+            </button>
+          )}
         </div>
       )}
 

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { runWithConcurrency } from "@/lib/mercadolivre/client";
+import { isValidMlSellerCampaignName, ML_SELLER_CAMPAIGN_NAME_HINT } from "@/lib/mercadolivre/campaign-name";
 
 type CampaignItemInput = {
   item_id: string;
@@ -64,6 +65,12 @@ export async function POST(req: NextRequest) {
 
   if (!name) {
     return NextResponse.json({ error: "Nome da campanha é obrigatório" }, { status: 400 });
+  }
+  if (!isValidMlSellerCampaignName(name)) {
+    return NextResponse.json(
+      { error: `Nome da campanha inválido para o Mercado Livre. ${ML_SELLER_CAMPAIGN_NAME_HINT}` },
+      { status: 400 }
+    );
   }
   if (!startDateRaw || !finishDateRaw) {
     return NextResponse.json({ error: "Datas de início e fim são obrigatórias" }, { status: 400 });
