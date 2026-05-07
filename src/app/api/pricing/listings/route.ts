@@ -24,6 +24,8 @@ export interface PricingListingRow {
   extra_fee_percent: number | null;
   fixed_expenses: number | null;
   account_id: string;
+  /** Promoções ML ativas (uma linha por promoção); preenchido no refresh do cache */
+  ml_active_promotions?: string | null;
   /** Dados do último cálculo persistidos para consulta e filtros */
   planned_price?: number;
   calculated_price?: number | null;
@@ -164,6 +166,10 @@ export async function GET(req: NextRequest) {
         extra_fee_percent: r.extra_fee_percent != null ? Number(r.extra_fee_percent) : null,
         fixed_expenses: r.fixed_expenses != null ? Number(r.fixed_expenses) : null,
         account_id: r.account_id as string,
+        ml_active_promotions:
+          typeof r.ml_active_promotions === "string" && r.ml_active_promotions.trim()
+            ? r.ml_active_promotions
+            : null,
       };
       const planned = Number(r.planned_price);
       if (!Number.isNaN(planned)) row.planned_price = planned;

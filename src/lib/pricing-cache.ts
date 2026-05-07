@@ -11,6 +11,8 @@
  */
 import { createHash } from "crypto";
 import { createServiceClient } from "@/lib/supabase/service";
+import { fetchSellerPromotionsForItem, runWithConcurrency } from "@/lib/mercadolivre/client";
+import { buildMlActivePromotionsStorageText } from "@/lib/mercadolivre/seller-promotions-item";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { getSalesMap } from "@/lib/mercadolivre/sales";
 
@@ -225,6 +227,8 @@ export interface PricingCacheRow {
   planned_price: number;
   sales_30d: number;
   orders_30d: number;
+  /** Uma linha por promoção ativa (API seller-promotions/items); vazio se não houver. */
+  ml_active_promotions: string;
   sort_title: string;
   cache_updated_at: string;
 }
@@ -361,6 +365,7 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
 
   let salesMap: Record<string, number> = {};
   let ordersMap: Record<string, number> = {};
+  let accessToken: string | null = null;
   if (allItemIds.length > 0) {
     const { data: tokenData } = await supabase
       .from("ml_tokens")
@@ -369,13 +374,14 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
       .single();
     const token = tokenData as { access_token: string; refresh_token: string; expires_at: string } | null;
     if (token) {
-      const accessToken = await getValidAccessToken(
-        accountId,
-        token.access_token,
-        token.refresh_token,
-        token.expires_at,
-        supabase
-      );
+      accessToken =
+        (await getValidAccessToken(
+          accountId,
+          token.access_token,
+          token.refresh_token,
+          token.expires_at,
+          supabase
+        )) ?? null;
       if (accessToken) {
         const to = new Date();
         const from = new Date(to);
@@ -394,6 +400,23 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
       }
     }
   }
+
+  const promoByItemId = new Map<string, string>();
+  if (accessToken && allItemIds.length > 0) {
+    await runWithConcurrency(allItemIds, 4, async (itemId) => {
+      const key = String(itemId).trim().toUpperCase();
+      try {
+        const raw = await fetchSellerPromotionsForItem(key, accessToken!);
+        promoByItemId.set(key, buildMlActivePromotionsStorageText(raw));
+      } catch (e) {
+        console.warn("[pricing-cache] seller-promotions", itemId, e);
+        promoByItemId.set(key, "");
+      }
+    });
+  }
+
+  const mlPromoFor = (itemId: string) =>
+    promoByItemId.get(String(itemId).trim().toUpperCase()) ?? "";
 
   // 5) Montar linhas do cache
   const rows: PricingCacheRow[] = [];
@@ -436,6 +459,7 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
       planned_price: plannedPrice,
       sales_30d: salesMap[raw.item_id as string] ?? 0,
       orders_30d: ordersMap[raw.item_id as string] ?? 0,
+      ml_active_promotions: mlPromoFor(raw.item_id as string),
       sort_title: (title || "").toLowerCase(),
       cache_updated_at: now,
     });
@@ -475,6 +499,7 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
       planned_price: plannedPrice,
       sales_30d: salesMap[itemId] ?? 0,
       orders_30d: ordersMap[itemId] ?? 0,
+      ml_active_promotions: mlPromoFor(itemId),
       sort_title: (title || "").toLowerCase(),
       cache_updated_at: now,
     });
@@ -552,6 +577,7 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
       planned_price: r.planned_price,
       sales_30d: r.sales_30d,
       orders_30d: r.orders_30d,
+      ml_active_promotions: r.ml_active_promotions,
       sort_title: r.sort_title,
       cache_updated_at: r.cache_updated_at,
       ...(saved && {
@@ -631,10 +657,13 @@ export async function refreshPricingCacheByItemId(
 
   let salesMap: Record<string, number> = {};
   let ordersMap: Record<string, number> = {};
+  let accessToken: string | null = null;
   const { data: tokenData } = await supabase.from("ml_tokens").select("access_token, refresh_token, expires_at").eq("account_id", accountId).single();
   const token = tokenData as { access_token: string; refresh_token: string; expires_at: string } | null;
   if (token) {
-    const accessToken = await getValidAccessToken(accountId, token.access_token, token.refresh_token, token.expires_at, supabase);
+    accessToken =
+      (await getValidAccessToken(accountId, token.access_token, token.refresh_token, token.expires_at, supabase)) ??
+      null;
     if (accessToken) {
       const to = new Date();
       const from = new Date(to);
@@ -645,6 +674,12 @@ export async function refreshPricingCacheByItemId(
       salesMap = maps.sales;
       ordersMap = maps.orders;
     }
+  }
+
+  let mlPromoText = "";
+  if (accessToken) {
+    const raw = await fetchSellerPromotionsForItem(itemIdClean, accessToken);
+    mlPromoText = buildMlActivePromotionsStorageText(raw);
   }
 
   const toNum = (v: unknown): number | null => (v != null && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : null);
@@ -684,6 +719,7 @@ export async function refreshPricingCacheByItemId(
       planned_price: plannedPrice,
       sales_30d: salesMap[itemIdClean] ?? 0,
       orders_30d: ordersMap[itemIdClean] ?? 0,
+      ml_active_promotions: mlPromoText,
       sort_title: (title || "").toLowerCase(),
       cache_updated_at: now,
     });
@@ -747,6 +783,7 @@ export async function refreshPricingCacheByItemId(
       planned_price: r.planned_price,
       sales_30d: r.sales_30d,
       orders_30d: r.orders_30d,
+      ml_active_promotions: r.ml_active_promotions,
       sort_title: r.sort_title,
       cache_updated_at: r.cache_updated_at,
       ...(saved && {

@@ -344,6 +344,38 @@ export function getStandardPriceAmount(
 }
 
 /**
+ * GET /seller-promotions/items/{item_id}?app_version=v2 — promoções e campanhas aplicáveis ao anúncio.
+ */
+export async function fetchSellerPromotionsForItem(
+  itemId: string,
+  accessToken: string
+): Promise<unknown | null> {
+  const id = encodeURIComponent(String(itemId).trim());
+  const url = `https://api.mercadolibre.com/seller-promotions/items/${id}?app_version=v2`;
+  const res = await fetchWithRetry(url, accessToken);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const debug = process.env.ML_DEBUG_SELLER_PROMOTIONS === "1";
+    // 400: comum para anúncio fechado/pausado ("Item status is not allowed (closed)").
+    // 403: sem permissão ao recurso para este item.
+    // 5xx: instabilidade do ML em refresh em massa — não poluir o log por padrão.
+    const quietFailure = res.status === 400 || res.status === 403 || res.status >= 500;
+    if (debug || !quietFailure) {
+      console.warn(
+        `[ML client] seller-promotions/items ${itemId}: ${res.status} ${text.slice(0, 200)}`
+      );
+    }
+    return null;
+  }
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * POST em /items/{itemId}/prices/standard/quantity — preços por quantidade (atacado).
  * Documentação: https://developers.mercadolivre.com.br/pt_br/precos-por-quantidade
  */
