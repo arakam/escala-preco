@@ -99,6 +99,12 @@ function skuDisplayParts(rawSku: string): { primary: string; extraCount: number 
   return { primary, extraCount };
 }
 
+/** Mercado Livre exige desconto ≥ 5% na promoção: valor em Promoção deve ser ≤ 95% do preço. */
+function meetsMlMinCampaignDiscount(listing: Pick<ListingWithPricing, "current_price" | "new_price">): boolean {
+  if (listing.current_price <= 0 || listing.new_price <= 0) return false;
+  return listing.new_price <= listing.current_price * 0.95;
+}
+
 /** Configuração das colunas da tabela de preços (ordem = índice na tabela). Usado para congelar colunas. */
 /** Ícone do Mercado Livre para link "Ver no ML" — usa favicon oficial */
 function MLIcon({ className }: { className?: string }) {
@@ -220,7 +226,7 @@ function PriceInput({
 }: {
   value: number;
   onChange: (value: number) => void;
-  onCommit: () => void;
+  onCommit: (committedPrice: number) => void;
   dirty?: boolean;
 }) {
   const [localValue, setLocalValue] = useState(value.toFixed(2).replace(".", ","));
@@ -250,7 +256,7 @@ function PriceInput({
     if (!isNaN(num) && num >= 0) {
       setLocalValue(num.toFixed(2).replace(".", ","));
       onChange(num);
-      onCommit();
+      onCommit(num);
     } else {
       setLocalValue(value.toFixed(2).replace(".", ","));
     }
@@ -634,7 +640,10 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li>Os anúncios são carregados automaticamente ao abrir a página</li>
               <li>Edite &quot;Promoção&quot; ou &quot;Margem&quot; (com custo e tipo de anúncio): em ambos, confirme com Enter ou clique fora para recalcular</li>
               <li>Use &quot;Calcular Todos&quot; para recalcular todos os itens de uma vez</li>
-              <li>Use &quot;Salvar preços alterados&quot; para guardar o novo preço vinculado ao MLB e ao SKU de cada anúncio</li>
+              <li>
+                Ao confirmar a &quot;Promoção&quot; ou a &quot;Margem&quot; (Enter ou ao sair do campo), ou ao usar ações em massa, o
+                preço planejado é gravado automaticamente (MLB + SKU)
+              </li>
             </ol>
           </section>
 
@@ -718,7 +727,6 @@ function PrecosPageContent() {
   const [isMercadoLider, setIsMercadoLider] = useState(false);
   const [reputationLoading, setReputationLoading] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   /** Filtro por % de lucro: "" = todos, "high" = >20%, "medium" = 10-20%, "low" = 0-10%, "negative" = ≤0% */
   const [profitFilter, setProfitFilter] = useState<"" | "high" | "medium" | "low" | "negative">("");
@@ -740,6 +748,10 @@ function PrecosPageContent() {
   const [sortBy, setSortBy] = useState<"" | "orders_desc" | "orders_asc">("");
   /** Mostrar somente itens com vendas nos últimos 30 dias */
   const [onlyWithSales30d, setOnlyWithSales30d] = useState(false);
+  /** Promoção (planejada) igual ao preço atual do anúncio — sem desconto em relação ao ML */
+  const [semPromocao, setSemPromocao] = useState(false);
+  /** Promoção acima de 95% do preço (desconto menor que 5%) — não atendem ao mínimo da promoção ML */
+  const [foraDescontoMin5Ml, setForaDescontoMin5Ml] = useState(false);
   /** Com filtros no cliente: carregar até 2000 itens de uma vez (em vez de 500) */
   const [loadAllResults, setLoadAllResults] = useState(false);
   /** Itens selecionados para criar campanha ML (por id de listing) */
@@ -786,8 +798,8 @@ function PrecosPageContent() {
     }
   }, []);
 
-  /** Com filtro de lucro ou "só com vendas 30d" ativo, busca mais itens e aplica filtros no cliente (paginação no cliente) */
-  const clientSideFiltering = !!(profitFilter || onlyWithSales30d);
+  /** Com filtro de lucro, "só com vendas 30d", "sem promoção" ou "fora do mín. 5% ML" ativo, busca mais itens e aplica filtros no cliente (paginação no cliente) */
+  const clientSideFiltering = !!(profitFilter || onlyWithSales30d || semPromocao || foraDescontoMin5Ml);
   const MAX_CLIENT_SIDE_LOAD = 10000;
   const DEFAULT_CLIENT_SIDE_LOAD = 2000;
   const limitForRequest = clientSideFiltering
@@ -991,7 +1003,7 @@ function PrecosPageContent() {
 
   useEffect(() => {
     setPage(1);
-  }, [profitFilter, onlyWithSales30d]);
+  }, [profitFilter, onlyWithSales30d, semPromocao, foraDescontoMin5Ml]);
 
   /** Dados sempre vêm do cache (listings já inclui orders_30d). Não busca vendas em separado. */
 
@@ -1114,44 +1126,55 @@ function PrecosPageContent() {
     calculatePrices(listings);
   }, [calculatePrices, listings]);
 
-  const handleSavePlannedPrices = useCallback(async () => {
-    const toSave = listings.filter((l) => l.dirty && l.new_price >= 0);
-    if (toSave.length === 0) return;
-    setSaveMessage(null);
-    setSaving(true);
-    try {
-      const res = await fetch("/api/pricing/planned-prices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: toSave.map((l) => ({
-            item_id: l.item_id,
-            variation_id: l.variation_id,
-            sku: l.sku ?? undefined,
-            planned_price: l.new_price,
-          })),
-        }),
-      });
-      const data = res.ok ? await res.json().catch(() => ({})) : {};
-      if (!res.ok) {
-        setSaveMessage({ type: "error", text: (data as { error?: string }).error ?? "Erro ao salvar" });
-        return;
+  const persistPlannedPrices = useCallback(
+    async (
+      items: Array<{ item_id: string; variation_id: number | null; sku?: string; planned_price: number }>,
+      opts?: { quietSuccess?: boolean }
+    ): Promise<{ ok: boolean; saved: number; error?: string }> => {
+      const toSave = items.filter((x) => Number.isFinite(x.planned_price) && x.planned_price >= 0);
+      if (toSave.length === 0) return { ok: true, saved: 0 };
+
+      if (!opts?.quietSuccess) setSaveMessage(null);
+
+      try {
+        const res = await fetch("/api/pricing/planned-prices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: toSave.map((l) => ({
+              item_id: l.item_id,
+              variation_id: l.variation_id,
+              sku: l.sku,
+              planned_price: l.planned_price,
+            })),
+          }),
+        });
+        const data = res.ok ? await res.json().catch(() => ({})) : await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = (data as { error?: string }).error ?? "Erro ao salvar";
+          setSaveMessage({ type: "error", text: err });
+          return { ok: false, saved: 0, error: err };
+        }
+        const saved = (data as { saved?: number }).saved ?? toSave.length;
+        const savedKeys = new Set(toSave.map((l) => `${l.item_id}:${l.variation_id ?? "n"}`));
+        setListings((prev) =>
+          prev.map((item) => {
+            const key = `${item.item_id}:${item.variation_id ?? "n"}`;
+            return savedKeys.has(key) ? { ...item, dirty: false } : item;
+          })
+        );
+        if (!opts?.quietSuccess) {
+          setSaveMessage({ type: "ok", text: `${saved} preço(s) salvos (MLB + SKU).` });
+          setTimeout(() => setSaveMessage(null), 4000);
+        }
+        return { ok: true, saved };
+      } catch {
+        setSaveMessage({ type: "error", text: "Erro ao salvar preços" });
+        return { ok: false, saved: 0, error: "Erro ao salvar preços" };
       }
-      setSaveMessage({ type: "ok", text: `${(data as { saved?: number }).saved ?? toSave.length} preço(s) salvos (MLB + SKU).` });
-      const savedKeys = new Set(toSave.map((l) => `${l.item_id}:${l.variation_id ?? "n"}`));
-      setListings((prev) =>
-        prev.map((item) => {
-          const key = `${item.item_id}:${item.variation_id ?? "n"}`;
-          return savedKeys.has(key) ? { ...item, dirty: false } : item;
-        })
-      );
-      setTimeout(() => setSaveMessage(null), 4000);
-    } catch {
-      setSaveMessage({ type: "error", text: "Erro ao salvar preços" });
-    } finally {
-      setSaving(false);
-    }
-  }, [listings]);
+    },
+    []
+  );
 
   const handlePriceChange = useCallback((id: string, variationId: number | null, value: string) => {
     const numValue = parseFloat(value.replace(",", ".")) || 0;
@@ -1166,8 +1189,9 @@ function PrecosPageContent() {
   }, []);
 
   const handleCalculateSingle = useCallback(
-    async (listing: ListingWithPricing) => {
-      if (!listing.listing_type_id || !listing.category_id || listing.new_price <= 0) return;
+    async (listing: ListingWithPricing, opts?: { price?: number }) => {
+      const price = opts?.price ?? listing.new_price;
+      if (!listing.listing_type_id || !listing.category_id || price <= 0) return;
 
       setListings((prev) =>
         prev.map((item) =>
@@ -1184,7 +1208,7 @@ function PrecosPageContent() {
               {
                 item_id: listing.item_id,
                 variation_id: listing.variation_id,
-                price: listing.new_price,
+                price,
                 listing_type_id: listing.listing_type_id,
                 category_id: listing.category_id,
                 weight_kg: listing.weight_kg,
@@ -1201,18 +1225,31 @@ function PrecosPageContent() {
           const data = await res.json();
           const result = data.results?.[0] as { price: number; fee: number; shipping_cost: number } | undefined;
           if (result) {
+            const listingForCalc = { ...listing, new_price: price };
             setListings((prev) =>
               prev.map((item) =>
                 item.id === listing.id
                   ? {
                       ...item,
-                      calculated: calculateFullPricing(listing, result),
+                      calculated: calculateFullPricing(listingForCalc, result),
                       calculating: false,
                     }
                   : item
               )
             );
+          } else {
+            setListings((prev) =>
+              prev.map((item) =>
+                item.id === listing.id ? { ...item, calculating: false } : item
+              )
+            );
           }
+        } else {
+          setListings((prev) =>
+            prev.map((item) =>
+              item.id === listing.id ? { ...item, calculating: false } : item
+            )
+          );
         }
       } catch {
         setListings((prev) =>
@@ -1223,6 +1260,31 @@ function PrecosPageContent() {
       }
     },
     [isMercadoLider]
+  );
+
+  const handlePriceRowCommit = useCallback(
+    async (listing: ListingWithPricing, committedPrice: number) => {
+      setListings((prev) =>
+        prev.map((item) =>
+          item.id === listing.id && item.variation_id === listing.variation_id
+            ? { ...item, new_price: committedPrice, dirty: true }
+            : item
+        )
+      );
+      await handleCalculateSingle({ ...listing, new_price: committedPrice }, { price: committedPrice });
+      await persistPlannedPrices(
+        [
+          {
+            item_id: listing.item_id,
+            variation_id: listing.variation_id,
+            sku: listing.sku ?? undefined,
+            planned_price: committedPrice,
+          },
+        ],
+        { quietSuccess: true }
+      );
+    },
+    [handleCalculateSingle, persistPlannedPrices]
   );
 
   const handleMarginCommit = useCallback(
@@ -1288,6 +1350,17 @@ function PrecosPageContent() {
               : item
           )
         );
+        await persistPlannedPrices(
+          [
+            {
+              item_id: listing.item_id,
+              variation_id: listing.variation_id,
+              sku: listing.sku ?? undefined,
+              planned_price: p,
+            },
+          ],
+          { quietSuccess: true }
+        );
       } catch {
         setListings((prev) =>
           prev.map((item) =>
@@ -1303,59 +1376,69 @@ function PrecosPageContent() {
         setTimeout(() => setSaveMessage(null), 5000);
       }
     },
-    [isMercadoLider]
+    [isMercadoLider, persistPlannedPrices]
   );
 
   /** Ajusta a promoção para o mínimo aceito na promoção ML (desconto de 5%). Arredonda para baixo para nunca ultrapassar 95%. */
   const handleApplyMinDiscount = useCallback(
     async (listing: ListingWithPricing) => {
       const newPrice = Math.floor(listing.current_price * 0.95 * 100) / 100;
-      setListings((prev) =>
-        prev.map((item) =>
-          item.id === listing.id && item.variation_id === listing.variation_id
-            ? { ...item, new_price: newPrice, dirty: true, calculating: true }
-            : item
-        )
-      );
       try {
-        const res = await fetch("/api/pricing/calculate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: [
-              {
-                item_id: listing.item_id,
-                variation_id: listing.variation_id,
-                price: newPrice,
-                listing_type_id: listing.listing_type_id,
-                category_id: listing.category_id,
-                weight_kg: listing.weight_kg,
-                height_cm: listing.height_cm,
-                width_cm: listing.width_cm,
-                length_cm: listing.length_cm,
-              },
-            ],
-            is_mercado_lider: isMercadoLider,
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const result = data.results?.[0] as { price: number; fee: number; shipping_cost: number } | undefined;
-          if (result) {
-            const listingWithNewPrice = { ...listing, new_price: newPrice };
-            setListings((prev) =>
-              prev.map((item) =>
-                item.id === listing.id && item.variation_id === listing.variation_id
-                  ? {
-                      ...item,
-                      new_price: newPrice,
-                      dirty: true,
-                      calculated: calculateFullPricing(listingWithNewPrice, result),
-                      calculating: false,
-                    }
-                  : item
-              )
-            );
+        setListings((prev) =>
+          prev.map((item) =>
+            item.id === listing.id && item.variation_id === listing.variation_id
+              ? { ...item, new_price: newPrice, dirty: true, calculating: true }
+              : item
+          )
+        );
+        try {
+          const res = await fetch("/api/pricing/calculate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [
+                {
+                  item_id: listing.item_id,
+                  variation_id: listing.variation_id,
+                  price: newPrice,
+                  listing_type_id: listing.listing_type_id,
+                  category_id: listing.category_id,
+                  weight_kg: listing.weight_kg,
+                  height_cm: listing.height_cm,
+                  width_cm: listing.width_cm,
+                  length_cm: listing.length_cm,
+                },
+              ],
+              is_mercado_lider: isMercadoLider,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const result = data.results?.[0] as { price: number; fee: number; shipping_cost: number } | undefined;
+            if (result) {
+              const listingWithNewPrice = { ...listing, new_price: newPrice };
+              setListings((prev) =>
+                prev.map((item) =>
+                  item.id === listing.id && item.variation_id === listing.variation_id
+                    ? {
+                        ...item,
+                        new_price: newPrice,
+                        dirty: true,
+                        calculated: calculateFullPricing(listingWithNewPrice, result),
+                        calculating: false,
+                      }
+                    : item
+                )
+              );
+            } else {
+              setListings((prev) =>
+                prev.map((item) =>
+                  item.id === listing.id && item.variation_id === listing.variation_id
+                    ? { ...item, new_price: newPrice, dirty: true, calculating: false }
+                    : item
+                )
+              );
+            }
           } else {
             setListings((prev) =>
               prev.map((item) =>
@@ -1365,7 +1448,7 @@ function PrecosPageContent() {
               )
             );
           }
-        } else {
+        } catch {
           setListings((prev) =>
             prev.map((item) =>
               item.id === listing.id && item.variation_id === listing.variation_id
@@ -1374,17 +1457,28 @@ function PrecosPageContent() {
             )
           );
         }
-      } catch {
-        setListings((prev) =>
-          prev.map((item) =>
-            item.id === listing.id && item.variation_id === listing.variation_id
-              ? { ...item, new_price: newPrice, dirty: true, calculating: false }
-              : item
-          )
+      } finally {
+        const pres = await persistPlannedPrices(
+          [
+            {
+              item_id: listing.item_id,
+              variation_id: listing.variation_id,
+              sku: listing.sku ?? undefined,
+              planned_price: newPrice,
+            },
+          ],
+          { quietSuccess: true }
         );
+        if (pres.ok) {
+          setSaveMessage({
+            type: "ok",
+            text: "Promoção ajustada ao mínimo de 5% (promo ML) e salva automaticamente.",
+          });
+          setTimeout(() => setSaveMessage(null), 5000);
+        }
       }
     },
-    [isMercadoLider]
+    [isMercadoLider, persistPlannedPrices]
   );
 
   /** Mesma regra do link por linha &quot;Ajustar para 5%&quot;: promoção = 95% do preço (arredondado para baixo), com recálculo em lote. */
@@ -1458,12 +1552,22 @@ function PrecosPageContent() {
         })
       );
 
+      const toPersist = eligible.map((l) => ({
+        item_id: l.item_id,
+        variation_id: l.variation_id,
+        sku: l.sku ?? undefined,
+        planned_price: priceByKey.get(listingSelectionKey(l))!,
+      }));
+      const pres = await persistPlannedPrices(toPersist, { quietSuccess: true });
+
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
       let msg = `Promoção ajustada para o desconto mínimo de 5% (promo ML) em ${eligible.length} anúncio(s).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); ajuste manual ou use Calcular Todos.`;
-      setSaveMessage({ type: errCount > 0 ? "error" : "ok", text: msg });
+      if (pres.ok) msg += " Alterações salvas automaticamente.";
+      else msg += ` Falha ao gravar no servidor${pres.error ? `: ${pres.error}` : ""}.`;
+      setSaveMessage({ type: errCount > 0 || !pres.ok ? "error" : "ok", text: msg });
       setTimeout(() => setSaveMessage(null), 8000);
     } catch {
       setSaveMessage({
@@ -1475,7 +1579,7 @@ function PrecosPageContent() {
       bulkDiscountBusyRef.current = false;
       setCalculating(false);
     }
-  }, [listings, selectedIds, isMercadoLider]);
+  }, [listings, selectedIds, isMercadoLider, persistPlannedPrices]);
 
   /** Promoção = preço do anúncio no ML (coluna Preço), com recálculo em lote. */
   const handleBulkRestoreOriginalPrice = useCallback(async () => {
@@ -1548,12 +1652,22 @@ function PrecosPageContent() {
         })
       );
 
+      const toPersistRestore = eligible.map((l) => ({
+        item_id: l.item_id,
+        variation_id: l.variation_id,
+        sku: l.sku ?? undefined,
+        planned_price: priceByKey.get(listingSelectionKey(l))!,
+      }));
+      const presRestore = await persistPlannedPrices(toPersistRestore, { quietSuccess: true });
+
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
       let msg = `Promoção restaurada para o preço do ML em ${eligible.length} anúncio(s).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem preço ou dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); use Calcular Todos se precisar.`;
-      setSaveMessage({ type: errCount > 0 ? "error" : "ok", text: msg });
+      if (presRestore.ok) msg += " Alterações salvas automaticamente.";
+      else msg += ` Falha ao gravar no servidor${presRestore.error ? `: ${presRestore.error}` : ""}.`;
+      setSaveMessage({ type: errCount > 0 || !presRestore.ok ? "error" : "ok", text: msg });
       setTimeout(() => setSaveMessage(null), 8000);
     } catch {
       setSaveMessage({
@@ -1565,7 +1679,7 @@ function PrecosPageContent() {
       bulkRestoreOriginalBusyRef.current = false;
       setCalculating(false);
     }
-  }, [listings, selectedIds, isMercadoLider]);
+  }, [listings, selectedIds, isMercadoLider, persistPlannedPrices]);
 
   const handleBulkMarginConfirm = useCallback(async () => {
     const targetPct = parseFloat(bulkMarginPercentInput.replace(",", "."));
@@ -1649,6 +1763,19 @@ function PrecosPageContent() {
         })
       );
 
+      const toPersistMargin = eligible
+        .filter((l) => updates.has(listingSelectionKey(l)))
+        .map((l) => {
+          const u = updates.get(listingSelectionKey(l))!;
+          return {
+            item_id: l.item_id,
+            variation_id: l.variation_id,
+            sku: l.sku ?? undefined,
+            planned_price: u.price,
+          };
+        });
+      const presMargin = await persistPlannedPrices(toPersistMargin, { quietSuccess: true });
+
       const skippedNoData = selected.length - eligible.length;
       const ok = updates.size;
       const pctLabel = targetPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
@@ -1657,8 +1784,10 @@ function PrecosPageContent() {
       if (skippedNoData > 0) {
         msg += ` ${skippedNoData} ignorado(s) (sem custo ou tipo de anúncio).`;
       }
+      if (presMargin.ok) msg += " Alterações salvas automaticamente.";
+      else msg += ` Falha ao gravar no servidor${presMargin.error ? `: ${presMargin.error}` : ""}.`;
       setSaveMessage({
-        type: ok === 0 ? "error" : "ok",
+        type: ok === 0 || !presMargin.ok ? "error" : "ok",
         text: msg,
       });
       setTimeout(() => setSaveMessage(null), 9000);
@@ -1677,7 +1806,7 @@ function PrecosPageContent() {
       bulkMarginBusyRef.current = false;
       setCalculating(false);
     }
-  }, [bulkMarginPercentInput, listings, selectedIds, isMercadoLider]);
+  }, [bulkMarginPercentInput, listings, selectedIds, isMercadoLider, persistPlannedPrices]);
 
   const handleCopyToClipboard = useCallback((value: string, cellKey: string) => {
     if (!value) return;
@@ -1776,8 +1905,26 @@ function PrecosPageContent() {
       base = base.filter((listing) => (ordersData[listing.item_id] ?? 0) > 0);
     }
 
+    if (semPromocao) {
+      base = base.filter((listing) => {
+        const promo = Number(listing.new_price);
+        const price = Number(listing.current_price);
+        if (!Number.isFinite(promo) || !Number.isFinite(price)) return false;
+        return Math.round(promo * 100) === Math.round(price * 100);
+      });
+    }
+
+    if (foraDescontoMin5Ml) {
+      base = base.filter(
+        (listing) =>
+          listing.current_price > 0 &&
+          listing.new_price > 0 &&
+          !meetsMlMinCampaignDiscount(listing)
+      );
+    }
+
     return base;
-  }, [listings, profitFilter, skuFilter, getProfitPercent, onlyWithSales30d, ordersData]);
+  }, [listings, profitFilter, skuFilter, getProfitPercent, onlyWithSales30d, ordersData, semPromocao, foraDescontoMin5Ml]);
 
   /** Com filtros que dependem do cliente (lucro ou vendas 30d), paginação no cliente; senão usa total do servidor */
   const totalPages = clientSideFiltering
@@ -1862,7 +2009,7 @@ function PrecosPageContent() {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [bulkActionsOpen]);
 
-  /** Com filtros no cliente (lucro ou vendas 30d), mostra só a fatia da página atual; senão mostra todos da página */
+  /** Com filtros no cliente (lucro, vendas 30d, sem promoção, fora do mínimo 5% ML), mostra só a fatia da página atual; senão mostra todos da página */
   const sortedListings = useMemo(() => {
     if (!clientSideFiltering) return filteredListings;
     const start = (page - 1) * pageSize;
@@ -1870,13 +2017,6 @@ function PrecosPageContent() {
   }, [filteredListings, clientSideFiltering, page, pageSize]);
 
   const selectedCount = useMemo(() => selectedIds.size, [selectedIds]);
-
-  /** Mercado Livre exige desconto ≥ 5% na promoção: valor em Promoção deve ser ≤ 95% do preço. */
-  const isValidForCampaign = useCallback((listing: ListingWithPricing): boolean => {
-    if (listing.current_price <= 0 || listing.new_price <= 0) return false;
-    const minNewPrice = listing.current_price * 0.95;
-    return listing.new_price <= minNewPrice;
-  }, []);
 
   const handleToggleSelectAll = useCallback(() => {
     const allOnPageSelected =
@@ -1911,7 +2051,7 @@ function PrecosPageContent() {
 
   const handleOpenCampaign = useCallback(() => {
     const selectedListings = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
-    const invalidForCampaign = selectedListings.filter((l) => !isValidForCampaign(l));
+    const invalidForCampaign = selectedListings.filter((l) => !meetsMlMinCampaignDiscount(l));
     if (invalidForCampaign.length > 0) {
       const names = invalidForCampaign.map((l) => l.title || l.item_id).slice(0, 5);
       const more = invalidForCampaign.length > 5 ? ` e mais ${invalidForCampaign.length - 5}` : "";
@@ -1936,7 +2076,7 @@ function PrecosPageContent() {
       setCampaignName(`EP ${month}-${year}`);
     }
     setCampaignOpen(true);
-  }, [campaignName, selectedIds, listings, isValidForCampaign]);
+  }, [campaignName, selectedIds, listings]);
 
   const handleCreateCampaign = useCallback(async () => {
     if (!campaignName.trim()) {
@@ -1953,7 +2093,7 @@ function PrecosPageContent() {
     }
 
     const selectedListingsForCampaign = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
-    const validListings = selectedListingsForCampaign.filter((l) => isValidForCampaign(l));
+    const validListings = selectedListingsForCampaign.filter((l) => meetsMlMinCampaignDiscount(l));
     if (validListings.length === 0) {
       setCampaignMessage({
         type: "error",
@@ -2014,7 +2154,7 @@ function PrecosPageContent() {
     } finally {
       setCampaignLoading(false);
     }
-  }, [campaignName, campaignStart, campaignFinish, selectedIds, listings, isValidForCampaign]);
+  }, [campaignName, campaignStart, campaignFinish, selectedIds, listings]);
 
   if (loading && listings.length === 0) {
     return (
@@ -2248,6 +2388,36 @@ function PrecosPageContent() {
                   />
                   <span className="text-xs text-slate-700 dark:text-slate-200">Só com vendas (30d)</span>
                 </label>
+                <label
+                  className="flex cursor-pointer items-center gap-2"
+                  title="Promoção planejada igual ao preço atual no Mercado Livre (sem desconto em relação ao anúncio)"
+                >
+                  <input
+                    type="checkbox"
+                    checked={semPromocao}
+                    onChange={(e) => {
+                      setSemPromocao(e.target.checked);
+                      setPage(1);
+                    }}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
+                  />
+                  <span className="text-xs text-slate-700 dark:text-slate-200">Sem promoção</span>
+                </label>
+                <label
+                  className="flex cursor-pointer items-center gap-2"
+                  title="Promoção acima de 95% do preço do anúncio (desconto menor que 5%) — não serve para campanha de promoção do ML até ajustar"
+                >
+                  <input
+                    type="checkbox"
+                    checked={foraDescontoMin5Ml}
+                    onChange={(e) => {
+                      setForaDescontoMin5Ml(e.target.checked);
+                      setPage(1);
+                    }}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
+                  />
+                  <span className="text-xs text-slate-700 dark:text-slate-200">{`Desconto < 5% (promo ML)`}</span>
+                </label>
                 <div className="flex flex-col gap-1">
                   <span className="text-xs text-slate-500 dark:text-slate-400">Lucratividade</span>
                   <div className="flex flex-wrap gap-1">
@@ -2282,7 +2452,15 @@ function PrecosPageContent() {
                   >
                     Aplicar filtros
                   </button>
-                  {(search || skuFilter || statusFilter || linkFilter !== "all" || onlyWithSales30d || profitFilter || sortBy) && (
+                  {(search ||
+                    skuFilter ||
+                    statusFilter ||
+                    linkFilter !== "all" ||
+                    onlyWithSales30d ||
+                    semPromocao ||
+                    foraDescontoMin5Ml ||
+                    profitFilter ||
+                    sortBy) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -2292,6 +2470,8 @@ function PrecosPageContent() {
                         setStatusFilter("active");
                         setLinkFilter("all");
                         setOnlyWithSales30d(false);
+                        setSemPromocao(false);
+                        setForaDescontoMin5Ml(false);
                         setProfitFilter("");
                         setSortBy("");
                         setPage(1);
@@ -2314,7 +2494,15 @@ function PrecosPageContent() {
               <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
               </svg>
-              {(search || skuFilter || statusFilter || linkFilter !== "all" || onlyWithSales30d || profitFilter || sortBy) && (
+              {(search ||
+                skuFilter ||
+                statusFilter ||
+                linkFilter !== "all" ||
+                onlyWithSales30d ||
+                semPromocao ||
+                foraDescontoMin5Ml ||
+                profitFilter ||
+                sortBy) && (
                 <span className="rounded-full bg-primary h-1.5 w-1.5" title="Filtros ativos" />
               )}
             </button>
@@ -2386,14 +2574,6 @@ function PrecosPageContent() {
             className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
             {calculating ? "Calculando…" : "Calcular Todos"}
-          </button>
-          <button
-            type="button"
-            onClick={handleSavePlannedPrices}
-            disabled={saving || dirtyCount === 0}
-            className="rounded-full border border-emerald-600 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {saving ? "Salvando…" : "Salvar preços alterados"}
           </button>
           <button
             type="button"
@@ -2501,8 +2681,8 @@ function PrecosPageContent() {
 
       {dirtyCount > 0 && (
         <div className="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-700">
-          {dirtyCount} item(s) com preço alterado. Clique em &quot;Calcular Todos&quot; ou
-          pressione Enter no campo de preço para recalcular.
+          {dirtyCount} item(s) com alteração ainda não confirmada no campo (saia do campo com Tab ou clique fora para
+          recalcular e gravar automaticamente).
         </div>
       )}
 
@@ -3083,13 +3263,13 @@ function PrecosPageContent() {
                               String(newValue)
                             )
                           }
-                          onCommit={() => handleCalculateSingle(listing)}
+                          onCommit={(committed) => void handlePriceRowCommit(listing, committed)}
                           dirty={listing.dirty}
                         />
-                        {listing.current_price > 0 && listing.new_price > 0 && !isValidForCampaign(listing) && (
+                        {listing.current_price > 0 && listing.new_price > 0 && !meetsMlMinCampaignDiscount(listing) && (
                           <button
                             type="button"
-                            onClick={() => handleApplyMinDiscount(listing)}
+                            onClick={() => void handleApplyMinDiscount(listing)}
                             disabled={listing.calculating}
                             className="text-xs text-amber-600 underline hover:text-amber-700 disabled:opacity-50 whitespace-nowrap"
                             title="Clique para ajustar ao desconto mínimo de 5% (promoção = 95% do preço)"
