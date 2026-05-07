@@ -26,8 +26,11 @@ async function fetchSalesForItem(
     const url = new URL("https://api.mercadolibre.com/orders/search");
     url.searchParams.set("seller", String(sellerId));
     url.searchParams.set("item", itemId);
-    url.searchParams.set("date_created.from", dateFrom);
-    url.searchParams.set("date_created.to", dateTo);
+    // Usa os mesmos nomes de parâmetro do endpoint de pedidos do ML.
+    url.searchParams.set("order.date_created.from", dateFrom);
+    url.searchParams.set("order.date_created.to", dateTo);
+    // Filtra pagos no servidor para reduzir paginação e evitar ruído.
+    url.searchParams.set("order.status", "paid");
     url.searchParams.set("limit", String(ORDERS_PAGE_LIMIT));
     url.searchParams.set("offset", String(offset));
 
@@ -68,12 +71,16 @@ async function fetchSalesForItem(
       if (orderHasItem) orders += 1;
     }
 
-    if (results.length < ORDERS_PAGE_LIMIT) {
+    const total = Number(data.paging?.total ?? 0);
+    const limit = Number(data.paging?.limit ?? ORDERS_PAGE_LIMIT);
+    const currentOffset = Number(data.paging?.offset ?? offset);
+    if (Number.isFinite(total) && total > 0) {
+      offset = currentOffset + limit;
+      hasMore = offset < total;
+    } else if (results.length < ORDERS_PAGE_LIMIT) {
       hasMore = false;
     } else {
       offset += ORDERS_PAGE_LIMIT;
-      // evita loop infinito se a API continuar retornando páginas cheias (ex.: máx 1000 pedidos)
-      if (offset >= 1000) hasMore = false;
     }
   }
 

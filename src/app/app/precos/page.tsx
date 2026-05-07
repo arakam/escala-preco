@@ -127,10 +127,10 @@ const PRICING_COLUMNS: { label: string; minWidth: number }[] = [
   { label: "SKU", minWidth: 300 },
   { label: "Vendas 30d", minWidth: 88 },
   { label: "Custo", minWidth: 80 },
-  { label: "Preço Atual", minWidth: 90 },
+  { label: "Preço", minWidth: 90 },
   { label: "Competitividade", minWidth: 110 },
   { label: "Margem", minWidth: 76 },
-  { label: "Preço Novo", minWidth: 100 },
+  { label: "Promoção", minWidth: 100 },
   { label: "Vai Receber", minWidth: 95 },
   { label: "Lucro", minWidth: 95 },
   { label: "Taxa ML", minWidth: 72 },
@@ -319,7 +319,7 @@ function MarginInput({
         onFocus={() => setIsFocused(true)}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        title="Margem líquida sobre o preço novo. Ao confirmar, o preço é ajustado pela calculadora (taxas ML, frete, impostos)."
+        title="Margem líquida sobre o preço de promoção. Ao confirmar, a promoção é ajustada pela calculadora (taxas ML, frete, impostos)."
         className={`w-[4.25rem] rounded border px-1.5 py-1 text-right text-sm tabular-nums ${
           dirty ? "border-amber-400 bg-amber-50" : "border-gray-300 dark:border-slate-600"
         }`}
@@ -597,10 +597,10 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li><strong>SKU:</strong> Código do produto vinculado ao anúncio</li>
               <li><strong>Vendas 30d:</strong> Número de pedidos pagos que contêm o item nos últimos 30 dias. Clique no cabeçalho para ordenar.</li>
               <li><strong>Custo:</strong> Preço de custo do produto (cadastrado em Produtos)</li>
-              <li><strong>Preço Atual:</strong> Preço atual do anúncio no Mercado Livre</li>
-              <li><strong>Competitividade:</strong> Indicador da referência de preço do ML (sugestão / faixa), ao lado do preço atual. Use &quot;Atualizar referência&quot; para buscar dados novos sem refazer o cache de anúncios.</li>
-              <li><strong>Margem:</strong> Percentual (líquido − custo) ÷ preço novo. Editável: ao confirmar, o preço novo é recalculado para atingir essa margem com taxas ML, frete e impostos. Sem custo cadastrado fica indisponível.</li>
-              <li><strong>Preço Novo:</strong> Campo editável para simular um novo preço</li>
+              <li><strong>Preço:</strong> Valor atual do anúncio no Mercado Livre</li>
+              <li><strong>Competitividade:</strong> Indicador da referência de preço do ML (sugestão / faixa), ao lado do preço. Use &quot;Atualizar referência&quot; para buscar dados novos sem refazer o cache de anúncios.</li>
+              <li><strong>Margem:</strong> Percentual (líquido − custo) ÷ preço de promoção. Editável: ao confirmar, a promoção é recalculada para atingir essa margem com taxas ML, frete e impostos. Sem custo cadastrado fica indisponível.</li>
+              <li><strong>Promoção:</strong> Preço de promoção planejado (planned_price); campo editável para simular o valor</li>
               <li><strong>Vai Receber:</strong> Valor líquido após descontar taxa ML, frete, imposto, taxa extra e despesas fixas</li>
               <li><strong>Lucro:</strong> Diferença entre o valor recebido e o custo do produto</li>
               <li><strong>Taxa ML:</strong> Taxa de comissão do Mercado Livre calculada sobre o preço</li>
@@ -615,7 +615,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <h3 className="mb-2 font-medium text-fg-strong">Como usar</h3>
             <ol className="list-inside list-decimal space-y-1">
               <li>Os anúncios são carregados automaticamente ao abrir a página</li>
-              <li>Edite &quot;Preço Novo&quot; ou &quot;Margem&quot; (com custo e tipo de anúncio): em ambos, confirme com Enter ou clique fora para recalcular</li>
+              <li>Edite &quot;Promoção&quot; ou &quot;Margem&quot; (com custo e tipo de anúncio): em ambos, confirme com Enter ou clique fora para recalcular</li>
               <li>Use &quot;Calcular Todos&quot; para recalcular todos os itens de uma vez</li>
               <li>Use &quot;Salvar preços alterados&quot; para guardar o novo preço vinculado ao MLB e ao SKU de cada anúncio</li>
             </ol>
@@ -666,7 +666,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li>Anúncios sem tipo de listagem (N/D) precisam ser sincronizados novamente</li>
               <li>Para ter o custo, vincule o anúncio a um produto na página de Produtos</li>
               <li>Imposto, taxa extra e desp. fixas são considerados apenas se cadastrados no produto vinculado</li>
-              <li>Os preços salvos ficam vinculados ao MLB e ao SKU; ao reabrir a página, o &quot;Preço Novo&quot; virá do último valor salvo</li>
+              <li>Os preços salvos ficam vinculados ao MLB e ao SKU; ao reabrir a página, o valor em &quot;Promoção&quot; virá do último preço planejado salvo</li>
               <li>Esta ferramenta não altera os preços no Mercado Livre; ela apenas calcula e guarda o preço planejado</li>
             </ul>
           </section>
@@ -1289,7 +1289,7 @@ function PrecosPageContent() {
     [isMercadoLider]
   );
 
-  /** Ajusta o preço novo para o mínimo aceito na promoção ML (desconto de 5%). Arredonda para baixo para nunca ultrapassar 95%. */
+  /** Ajusta a promoção para o mínimo aceito na promoção ML (desconto de 5%). Arredonda para baixo para nunca ultrapassar 95%. */
   const handleApplyMinDiscount = useCallback(
     async (listing: ListingWithPricing) => {
       const newPrice = Math.floor(listing.current_price * 0.95 * 100) / 100;
@@ -1370,7 +1370,7 @@ function PrecosPageContent() {
     [isMercadoLider]
   );
 
-  /** Mesma regra do link por linha &quot;Ajustar para 5%&quot;: preço novo = 95% do preço atual (arredondado para baixo), com recálculo em lote. */
+  /** Mesma regra do link por linha &quot;Ajustar para 5%&quot;: promoção = 95% do preço (arredondado para baixo), com recálculo em lote. */
   const handleBulkApplyMinDiscount = useCallback(async () => {
     setBulkActionsOpen(false);
     if (bulkDiscountBusyRef.current) return;
@@ -1389,7 +1389,7 @@ function PrecosPageContent() {
     if (eligible.length === 0) {
       setSaveMessage({
         type: "error",
-        text: "Nenhum anúncio selecionado tem preço atual e tipo de listagem para calcular. Sincronize os anúncios se necessário.",
+        text: "Nenhum anúncio selecionado tem preço no ML e tipo de listagem para calcular. Sincronize os anúncios se necessário.",
       });
       setTimeout(() => setSaveMessage(null), 6000);
       return;
@@ -1443,7 +1443,7 @@ function PrecosPageContent() {
 
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
-      let msg = `Preço novo ajustado para o desconto mínimo de 5% (promo ML) em ${eligible.length} anúncio(s).`;
+      let msg = `Promoção ajustada para o desconto mínimo de 5% (promo ML) em ${eligible.length} anúncio(s).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); ajuste manual ou use Calcular Todos.`;
       setSaveMessage({ type: errCount > 0 ? "error" : "ok", text: msg });
@@ -1460,7 +1460,7 @@ function PrecosPageContent() {
     }
   }, [listings, selectedIds, isMercadoLider]);
 
-  /** Preço novo = preço atual do anúncio no ML (coluna Preço Atual), com recálculo em lote. */
+  /** Promoção = preço do anúncio no ML (coluna Preço), com recálculo em lote. */
   const handleBulkRestoreOriginalPrice = useCallback(async () => {
     setBulkActionsOpen(false);
     if (bulkRestoreOriginalBusyRef.current) return;
@@ -1479,7 +1479,7 @@ function PrecosPageContent() {
     if (eligible.length === 0) {
       setSaveMessage({
         type: "error",
-        text: "Nenhum anúncio selecionado tem preço atual no ML e tipo de listagem para calcular. Sincronize os anúncios se necessário.",
+        text: "Nenhum anúncio selecionado tem preço no ML e tipo de listagem para calcular. Sincronize os anúncios se necessário.",
       });
       setTimeout(() => setSaveMessage(null), 6000);
       return;
@@ -1533,7 +1533,7 @@ function PrecosPageContent() {
 
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
-      let msg = `Preço novo restaurado para o preço atual do ML em ${eligible.length} anúncio(s).`;
+      let msg = `Promoção restaurada para o preço do ML em ${eligible.length} anúncio(s).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem preço ou dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); use Calcular Todos se precisar.`;
       setSaveMessage({ type: errCount > 0 ? "error" : "ok", text: msg });
@@ -1854,7 +1854,7 @@ function PrecosPageContent() {
 
   const selectedCount = useMemo(() => selectedIds.size, [selectedIds]);
 
-  /** Mercado Livre exige desconto ≥ 5% na promoção: preço novo deve ser ≤ 95% do preço atual. */
+  /** Mercado Livre exige desconto ≥ 5% na promoção: valor em Promoção deve ser ≤ 95% do preço. */
   const isValidForCampaign = useCallback((listing: ListingWithPricing): boolean => {
     if (listing.current_price <= 0 || listing.new_price <= 0) return false;
     const minNewPrice = listing.current_price * 0.95;
@@ -2069,7 +2069,7 @@ function PrecosPageContent() {
                 </div>
               </div>
               <p className="text-xs text-fg-muted">
-                Use os anúncios selecionados nesta página. O preço de cada item virá do &quot;Preço Novo&quot; salvo (planned_price).
+                Use os anúncios selecionados nesta página. O preço de cada item virá da &quot;Promoção&quot; salva (planned_price).
               </p>
             </div>
             <div className="mt-6 flex justify-end gap-2">
@@ -2103,7 +2103,7 @@ function PrecosPageContent() {
           <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
             <h2 className="mb-2 text-lg font-semibold">Margem nos selecionados</h2>
             <p className="mb-4 text-xs text-fg-muted">
-              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço novo) em todos os anúncios marcados que tenham custo e tipo de listagem. Pode levar um tempo — há vários cálculos por item.
+              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço de promoção) em todos os anúncios marcados que tenham custo e tipo de listagem. Pode levar um tempo — há vários cálculos por item.
             </p>
             <form
               className="space-y-4"
@@ -2416,11 +2416,11 @@ function PrecosPageContent() {
                   onClick={() => void handleBulkApplyMinDiscount()}
                   disabled={calculating}
                   className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
-                  title="Define o preço novo como 95% do preço atual (desconto mínimo de 5% exigido na promoção do ML), para todos os selecionados"
+                  title="Define a promoção como 95% do preço (desconto mínimo de 5% exigido na promoção do ML), para todos os selecionados"
                 >
                   {calculating
                     ? "Aguarde o cálculo em andamento…"
-                    : "Ajustar todos para 5% (preço novo = 95% do atual)"}
+                    : "Ajustar todos para 5% (promoção = 95% do preço)"}
                 </button>
                 <button
                   type="button"
@@ -2428,9 +2428,9 @@ function PrecosPageContent() {
                   onClick={() => void handleBulkRestoreOriginalPrice()}
                   disabled={calculating}
                   className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
-                  title="Define o preço novo igual ao preço atual do Mercado Livre (última sync) em cada selecionado"
+                  title="Define a promoção igual ao preço do Mercado Livre (última sync) em cada selecionado"
                 >
-                  Voltar preço novo ao preço atual (ML)
+                  Voltar promoção ao preço (ML)
                 </button>
                 <button
                   type="button"
@@ -2442,7 +2442,7 @@ function PrecosPageContent() {
                   }}
                   disabled={calculating}
                   className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
-                  title="Informe a margem líquida desejada (%); o preço novo de cada selecionado será recalculado"
+                  title="Informe a margem líquida desejada (%); a promoção de cada selecionado será recalculada"
                 >
                   Definir margem líquida (%)…
                 </button>
@@ -2771,7 +2771,7 @@ function PrecosPageContent() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(7) ? "sticky-col" : ""}`} style={stickyHeaderStyles[7]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(7); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Preço Atual</span>
+                    <span>Preço</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(7); }} title={stickyColumns.has(7) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(7)} className={stickyColumns.has(7) ? "text-primary" : ""} />
                     </button>
@@ -2785,7 +2785,7 @@ function PrecosPageContent() {
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyHeaderStyles[9]} title="(Vai receber − custo) ÷ preço novo. Edite para definir o preço pelo alvo de margem líquida." onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(9); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyHeaderStyles[9]} title="(Vai receber − custo) ÷ preço de promoção. Edite para definir a promoção pelo alvo de margem líquida." onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(9); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Margem</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(9); }} title={stickyColumns.has(9) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
@@ -2795,7 +2795,7 @@ function PrecosPageContent() {
                 </th>
                 <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyHeaderStyles[10]} title="Promoção ML exige desconto ≥ 5%" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
-                    <span>Preço Novo</span>
+                    <span>Promoção</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(10); }} title={stickyColumns.has(10) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
                       <PinIcon pinned={stickyColumns.has(10)} className={stickyColumns.has(10) ? "text-primary" : ""} />
                     </button>
@@ -3062,7 +3062,7 @@ function PrecosPageContent() {
                             onClick={() => handleApplyMinDiscount(listing)}
                             disabled={listing.calculating}
                             className="text-xs text-amber-600 underline hover:text-amber-700 disabled:opacity-50 whitespace-nowrap"
-                            title="Clique para ajustar ao desconto mínimo de 5% (preço = 95% do atual)"
+                            title="Clique para ajustar ao desconto mínimo de 5% (promoção = 95% do preço)"
                           >
                             Ajustar para 5%
                           </button>
