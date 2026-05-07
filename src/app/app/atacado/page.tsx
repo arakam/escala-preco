@@ -90,7 +90,7 @@ const ATACADO_COLUMNS: { minWidth: number }[] = [
   { minWidth: 76 },
   { minWidth: 92 },
   { minWidth: 100 },
-  { minWidth: 220 },
+  { minWidth: 120 },
 ];
 
 function readAtacadoStickyInitial(): Set<number> {
@@ -129,6 +129,33 @@ function PinIcon({ pinned, className }: { pinned: boolean; className?: string })
     >
       <path d={pathD} />
     </svg>
+  );
+}
+
+function AtacadoIconButton({
+  label,
+  onClick,
+  disabled,
+  className,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className={`inline-flex shrink-0 items-center justify-center rounded-md p-1.5 text-fg hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-600/80 ${className ?? ""}`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -461,11 +488,28 @@ function AtacadoPageContent() {
         {stickyTd(
           18,
           "p-2",
-          <>
-            <button type="button" onClick={() => saveRow(r)} disabled={saving} className="mr-1 text-brand-blue hover:underline disabled:opacity-50">Salvar</button>
-            <button type="button" onClick={() => revertRow(r)} className="mr-1 text-fg hover:underline">Reverter</button>
-            <button type="button" onClick={() => setReceivableRowKey(rowKey(r))} title="Ver recebível" className="text-fg hover:underline">Ver recebível</button>
-          </>
+          <div className="flex flex-wrap items-center justify-end gap-0.5">
+            <AtacadoIconButton label="Salvar linha" onClick={() => saveRow(r)} disabled={saving} className="text-primary hover:bg-primary/10 dark:hover:bg-primary/20">
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                <polyline points="17 21 17 13 7 13 7 21" />
+                <polyline points="7 3 7 8 15 8" />
+              </svg>
+            </AtacadoIconButton>
+            <AtacadoIconButton label="Reverter alterações desta linha" onClick={() => revertRow(r)}>
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+              </svg>
+            </AtacadoIconButton>
+            <AtacadoIconButton label="Ver recebível (taxas e valor líquido por cenário)" onClick={() => setReceivableRowKey(rowKey(r))}>
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect width="20" height="12" x="2" y="6" rx="2" />
+                <circle cx="12" cy="12" r="2" />
+                <path d="M6 12h.01M18 12h.01" />
+              </svg>
+            </AtacadoIconButton>
+          </div>
         )}
       </tr>
     );
