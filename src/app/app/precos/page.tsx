@@ -621,7 +621,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li><strong>Vendas 30d:</strong> Número de pedidos pagos que contêm o item nos últimos 30 dias. Clique no cabeçalho para ordenar.</li>
               <li><strong>Custo:</strong> Preço de custo do produto (cadastrado em Produtos)</li>
               <li><strong>Preço:</strong> Valor atual do anúncio no Mercado Livre</li>
-              <li><strong>Competitividade:</strong> Indicador da referência de preço do ML (sugestão / faixa), ao lado do preço. Use &quot;Atualizar referência&quot; para buscar dados novos sem refazer o cache de anúncios.</li>
+              <li><strong>Competitividade:</strong> Indicador da referência de preço do ML (sugestão / faixa), ao lado do preço. No menu <strong>Ações</strong>, use <strong>Atualizar referência</strong> para buscar dados novos sem refazer o cache de anúncios.</li>
               <li><strong>Margem:</strong> Percentual (líquido − custo) ÷ preço de promoção. Editável: ao confirmar, a promoção é recalculada para atingir essa margem com taxas ML, frete e impostos. Sem custo cadastrado fica indisponível.</li>
               <li><strong>Promoção:</strong> Preço de promoção planejado (planned_price); campo editável para simular o valor</li>
               <li><strong>Vai Receber:</strong> Valor líquido após descontar taxa ML, frete, imposto, taxa extra e despesas fixas</li>
@@ -639,7 +639,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <ol className="list-inside list-decimal space-y-1">
               <li>Os anúncios são carregados automaticamente ao abrir a página</li>
               <li>Edite &quot;Promoção&quot; ou &quot;Margem&quot; (com custo e tipo de anúncio): em ambos, confirme com Enter ou clique fora para recalcular</li>
-              <li>Use &quot;Calcular Todos&quot; para recalcular todos os itens de uma vez</li>
+              <li>No menu <strong>Ações</strong>, use <strong>Calcular Todos</strong> para recalcular taxas e valores líquidos de todas as linhas de uma vez</li>
               <li>
                 Ao confirmar a &quot;Promoção&quot; ou a &quot;Margem&quot; (Enter ou ao sair do campo), ou ao usar ações em massa, o
                 preço planejado é gravado automaticamente (MLB + SKU)
@@ -775,6 +775,9 @@ function PrecosPageContent() {
   /** Menu suspenso de ações em massa (linhas selecionadas) */
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const bulkActionsRef = useRef<HTMLDivElement | null>(null);
+  /** Menu Atualizar dados / referência / Calcular todos */
+  const [globalActionsOpen, setGlobalActionsOpen] = useState(false);
+  const globalActionsRef = useRef<HTMLDivElement | null>(null);
   const bulkDiscountBusyRef = useRef(false);
   /** Modal: definir margem líquida (%) nos anúncios selecionados */
   const [bulkMarginModalOpen, setBulkMarginModalOpen] = useState(false);
@@ -2009,6 +2012,16 @@ function PrecosPageContent() {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [bulkActionsOpen]);
 
+  useEffect(() => {
+    if (!globalActionsOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = globalActionsRef.current;
+      if (el && !el.contains(e.target as Node)) setGlobalActionsOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [globalActionsOpen]);
+
   /** Com filtros no cliente (lucro, vendas 30d, sem promoção, fora do mínimo 5% ML), mostra só a fatia da página atual; senão mostra todos da página */
   const sortedListings = useMemo(() => {
     if (!clientSideFiltering) return filteredListings;
@@ -2545,36 +2558,67 @@ function PrecosPageContent() {
               Última atualização: {formatLastUpdated(lastUpdatedAt)}
             </span>
           )}
-          <button
-            type="button"
-            onClick={handleRefreshCache}
-            disabled={cacheRefreshing || loading}
-            className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
-            title="Atualiza anúncios, vínculos MLB-SKU e vendas 30d no cache"
-          >
-            {cacheRefreshing ? "Atualizando…" : "Atualizar dados"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleRefreshPriceReferences()}
-            disabled={
-              refRefreshing ||
-              cacheRefreshing ||
-              (!mlAccountId && listings.length === 0)
-            }
-            className="rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-semibold text-sky-800 shadow-sm hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/40"
-            title="Atualiza só as referências de preço / competitividade no Mercado Livre, sem refazer o cache inteiro de anúncios"
-          >
-            {refRefreshing ? "Atualizando referência…" : "Atualizar referência"}
-          </button>
-          <button
-            type="button"
-            onClick={handleCalculateAll}
-            disabled={calculating || listings.length === 0}
-            className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {calculating ? "Calculando…" : "Calcular Todos"}
-          </button>
+          <div className="relative" ref={globalActionsRef}>
+            <button
+              type="button"
+              onClick={() => setGlobalActionsOpen((o) => !o)}
+              className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
+              title="Atualizar cache, referências de preço ou recalcular taxas"
+              aria-expanded={globalActionsOpen}
+              aria-haspopup="menu"
+            >
+              Ações
+              <svg className="h-3.5 w-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {globalActionsOpen && (
+              <div
+                className="absolute right-0 z-40 mt-1 min-w-[260px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-800"
+                role="menu"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={cacheRefreshing || loading}
+                  onClick={() => {
+                    setGlobalActionsOpen(false);
+                    void handleRefreshCache();
+                  }}
+                  className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                  title="Atualiza anúncios, vínculos MLB-SKU e vendas 30d no cache"
+                >
+                  {cacheRefreshing ? "Atualizando dados…" : "Atualizar dados"}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={refRefreshing || cacheRefreshing || (!mlAccountId && listings.length === 0)}
+                  onClick={() => {
+                    setGlobalActionsOpen(false);
+                    void handleRefreshPriceReferences();
+                  }}
+                  className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                  title="Atualiza só as referências de preço / competitividade no Mercado Livre, sem refazer o cache inteiro de anúncios"
+                >
+                  {refRefreshing ? "Atualizando referência…" : "Atualizar referência"}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={calculating || listings.length === 0}
+                  onClick={() => {
+                    setGlobalActionsOpen(false);
+                    handleCalculateAll();
+                  }}
+                  className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                  title="Recalcula taxas e valores líquidos para todas as linhas (promoção atual)"
+                >
+                  {calculating ? "Calculando…" : "Calcular Todos"}
+                </button>
+              </div>
+            )}
+          </div>
           <button
             type="button"
             onClick={handleOpenCampaign}
@@ -2719,33 +2763,12 @@ function PrecosPageContent() {
       ) : cacheEmpty && !loading ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
           <p className="text-sm text-amber-800">Nenhum dado no cache.</p>
-          <p className="mt-1 text-xs text-amber-700">Clique em &quot;Atualizar dados&quot; para carregar os anúncios a partir do Mercado Livre.</p>
+          <p className="mt-1 text-xs text-amber-700">
+            No menu <strong className="font-semibold">Ações</strong> acima, escolha <strong className="font-semibold">Atualizar dados</strong> para carregar os anúncios a partir do Mercado Livre.
+          </p>
           {refreshError && (
             <p className="mt-2 text-xs font-medium text-red-600">{refreshError}</p>
           )}
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={handleRefreshCache}
-              disabled={cacheRefreshing}
-              className="rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
-            >
-              {cacheRefreshing ? "Atualizando…" : "Atualizar dados"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleRefreshPriceReferences()}
-              disabled={
-                refRefreshing ||
-                cacheRefreshing ||
-                !mlAccountId
-              }
-              className="rounded-full border border-sky-300 bg-white px-4 py-2 text-xs font-semibold text-sky-800 shadow-sm hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-700 dark:bg-slate-800 dark:text-sky-200 dark:hover:bg-sky-950/40"
-              title="Atualiza referências de preço / competitividade no ML (útil mesmo antes de encher o cache)"
-            >
-              {refRefreshing ? "Atualizando referência…" : "Atualizar referência"}
-            </button>
-          </div>
         </div>
       ) : listings.length === 0 ? (
         <p className="text-sm text-slate-500 dark:text-slate-400">Nenhum anúncio encontrado com os filtros selecionados.</p>
