@@ -132,10 +132,20 @@ function skuDisplayParts(rawSku: string): { primary: string; extraCount: number 
   return { primary, extraCount };
 }
 
-/** Mercado Livre exige desconto ≥ 5% na promoção: valor em Promoção deve ser ≤ 95% do preço. */
+const ML_MIN_CAMPAIGN_DISCOUNT_PERCENT = 5;
+const ML_MAX_CAMPAIGN_DISCOUNT_PERCENT = 80;
+
+/** Mercado Livre exige desconto mínimo de 5% na promoção: valor em Promoção deve ser ≤ 95% do preço. */
 function meetsMlMinCampaignDiscount(listing: Pick<ListingWithPricing, "current_price" | "new_price">): boolean {
   if (listing.current_price <= 0 || listing.new_price <= 0) return false;
-  return listing.new_price <= listing.current_price * 0.95;
+  const maxPromoOverCurrent = 1 - ML_MIN_CAMPAIGN_DISCOUNT_PERCENT / 100;
+  return listing.new_price <= listing.current_price * maxPromoOverCurrent;
+}
+
+function promotionPriceForDiscountPercent(currentPrice: number, discountPercent: number): number {
+  const pct = Math.min(ML_MAX_CAMPAIGN_DISCOUNT_PERCENT, Math.max(ML_MIN_CAMPAIGN_DISCOUNT_PERCENT, discountPercent));
+  const factor = 1 - pct / 100;
+  return Math.floor(currentPrice * factor * 100) / 100;
 }
 
 /** Resposta por item em POST /api/mercadolivre/seller-campaigns */
@@ -902,6 +912,8 @@ function PrecosPageContent() {
   const [semPromocao, setSemPromocao] = useState(false);
   /** Promoção acima de 95% do preço (desconto menor que 5%) — não atendem ao mínimo da promoção ML */
   const [foraDescontoMin5Ml, setForaDescontoMin5Ml] = useState(false);
+  /** Sem campanhas/promoções ativas no ML (seller-promotions) no último refresh do cache */
+  const [semPromoMlAtiva, setSemPromoMlAtiva] = useState(false);
   /** Com filtros no cliente: carregar até 2000 itens de uma vez (em vez de 500) */
   const [loadAllResults, setLoadAllResults] = useState(false);
   /** Itens selecionados para criar campanha ML (por id de listing) */
@@ -931,6 +943,8 @@ function PrecosPageContent() {
   const [globalActionsOpen, setGlobalActionsOpen] = useState(false);
   const globalActionsRef = useRef<HTMLDivElement | null>(null);
   const bulkDiscountBusyRef = useRef(false);
+  const [bulkDiscountModalOpen, setBulkDiscountModalOpen] = useState(false);
+  const [bulkDiscountPercentInput, setBulkDiscountPercentInput] = useState(String(ML_MIN_CAMPAIGN_DISCOUNT_PERCENT));
   /** Modal: definir margem líquida (%) nos anúncios selecionados */
   const [bulkMarginModalOpen, setBulkMarginModalOpen] = useState(false);
   const [bulkMarginPercentInput, setBulkMarginPercentInput] = useState("");
@@ -955,7 +969,7 @@ function PrecosPageContent() {
   }, []);
 
   /** Com filtro de lucro, "só com vendas 30d", "sem promoção" ou "fora do mín. 5% ML" ativo, busca mais itens e aplica filtros no cliente (paginação no cliente) */
-  const clientSideFiltering = !!(profitFilter || onlyWithSales30d || semPromocao || foraDescontoMin5Ml);
+  const clientSideFiltering = !!(profitFilter || onlyWithSales30d || semPromocao || foraDescontoMin5Ml || semPromoMlAtiva);
   const MAX_CLIENT_SIDE_LOAD = 10000;
   const DEFAULT_CLIENT_SIDE_LOAD = 2000;
   const limitForRequest = clientSideFiltering
@@ -1159,7 +1173,7 @@ function PrecosPageContent() {
 
   useEffect(() => {
     setPage(1);
-  }, [profitFilter, onlyWithSales30d, semPromocao, foraDescontoMin5Ml]);
+  }, [profitFilter, onlyWithSales30d, semPromocao, foraDescontoMin5Ml, semPromoMlAtiva]);
 
   /** Dados sempre vêm do cache (listings já inclui orders_30d). Não busca vendas em separado. */
 
@@ -1637,10 +1651,22 @@ function PrecosPageContent() {
     [isMercadoLider, persistPlannedPrices]
   );
 
-  /** Mesma regra do link por linha &quot;Ajustar para 5%&quot;: promoção = 95% do preço (arredondado para baixo), com recálculo em lote. */
-  const handleBulkApplyMinDiscount = useCallback(async () => {
-    setBulkActionsOpen(false);
-    if (bulkDiscountBusyRef.current) return;
+  /** Define desconto de promoção (%) nos selecionados, com recálculo em lote. */
+  const handleBulkApplyDiscountPercent = useCallback(async (): Promise<boolean> => {
+    if (bulkDiscountBusyRef.current) return false;
+    const targetDiscountPct = parseFloat(bulkDiscountPercentInput.replace(",", "."));
+    if (
+      Number.isNaN(targetDiscountPct) ||
+      targetDiscountPct < ML_MIN_CAMPAIGN_DISCOUNT_PERCENT ||
+      targetDiscountPct > ML_MAX_CAMPAIGN_DISCOUNT_PERCENT
+    ) {
+      setSaveMessage({
+        type: "error",
+        text: `Informe um desconto entre ${ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}% e ${ML_MAX_CAMPAIGN_DISCOUNT_PERCENT}%.`,
+      });
+      setTimeout(() => setSaveMessage(null), 6000);
+      return false;
+    }
     const selected = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
     if (selected.length === 0) {
       setSaveMessage({
@@ -1648,7 +1674,7 @@ function PrecosPageContent() {
         text: "Selecione pelo menos um anúncio para usar ações em massa.",
       });
       setTimeout(() => setSaveMessage(null), 5000);
-      return;
+      return false;
     }
     const eligible = selected.filter(
       (l) => l.current_price > 0 && l.listing_type_id && l.category_id
@@ -1659,13 +1685,13 @@ function PrecosPageContent() {
         text: "Nenhum anúncio selecionado tem preço no ML e tipo de listagem para calcular. Sincronize os anúncios se necessário.",
       });
       setTimeout(() => setSaveMessage(null), 6000);
-      return;
+      return false;
     }
 
     const keySet = new Set(eligible.map((l) => listingSelectionKey(l)));
     const priceByKey = new Map<string, number>();
     for (const l of eligible) {
-      priceByKey.set(listingSelectionKey(l), Math.floor(l.current_price * 0.95 * 100) / 100);
+      priceByKey.set(listingSelectionKey(l), promotionPriceForDiscountPercent(l.current_price, targetDiscountPct));
     }
 
     bulkDiscountBusyRef.current = true;
@@ -1718,24 +1744,33 @@ function PrecosPageContent() {
 
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
-      let msg = `Promoção ajustada para o desconto mínimo de 5% (promo ML) em ${eligible.length} anúncio(s).`;
+      let msg = `Promoção ajustada para desconto de ${targetDiscountPct}% em ${eligible.length} anúncio(s).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); ajuste manual ou use Calcular Todos.`;
       if (pres.ok) msg += " Alterações salvas automaticamente.";
       else msg += ` Falha ao gravar no servidor${pres.error ? `: ${pres.error}` : ""}.`;
       setSaveMessage({ type: errCount > 0 || !pres.ok ? "error" : "ok", text: msg });
       setTimeout(() => setSaveMessage(null), 8000);
+      return errCount === 0 && pres.ok;
     } catch {
       setSaveMessage({
         type: "error",
         text: "Erro ao recalcular preços após o ajuste em massa.",
       });
       setTimeout(() => setSaveMessage(null), 6000);
+      return false;
     } finally {
       bulkDiscountBusyRef.current = false;
       setCalculating(false);
     }
-  }, [listings, selectedIds, isMercadoLider, persistPlannedPrices]);
+  }, [bulkDiscountPercentInput, listings, selectedIds, isMercadoLider, persistPlannedPrices]);
+
+  const handleBulkDiscountConfirm = useCallback(async () => {
+    const ok = await handleBulkApplyDiscountPercent();
+    if (ok) {
+      setBulkDiscountModalOpen(false);
+    }
+  }, [handleBulkApplyDiscountPercent]);
 
   /** Promoção = preço do anúncio no ML (coluna Preço), com recálculo em lote. */
   const handleBulkRestoreOriginalPrice = useCallback(async () => {
@@ -2079,8 +2114,22 @@ function PrecosPageContent() {
       );
     }
 
+    if (semPromoMlAtiva) {
+      base = base.filter((listing) => splitMlActivePromotionsCell(listing.ml_active_promotions).length === 0);
+    }
+
     return base;
-  }, [listings, profitFilter, skuFilter, getProfitPercent, onlyWithSales30d, ordersData, semPromocao, foraDescontoMin5Ml]);
+  }, [
+    listings,
+    profitFilter,
+    skuFilter,
+    getProfitPercent,
+    onlyWithSales30d,
+    ordersData,
+    semPromocao,
+    foraDescontoMin5Ml,
+    semPromoMlAtiva,
+  ]);
 
   /** Com filtros que dependem do cliente (lucro ou vendas 30d), paginação no cliente; senão usa total do servidor */
   const totalPages = clientSideFiltering
@@ -2459,6 +2508,58 @@ function PrecosPageContent() {
         </div>
       )}
 
+      {bulkDiscountModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => !bulkDiscountBusyRef.current && setBulkDiscountModalOpen(false)}
+          />
+          <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
+            <h2 className="mb-2 text-lg font-semibold">Desconto em massa (selecionados)</h2>
+            <p className="mb-4 text-xs text-fg-muted">
+              Defina o desconto de promoção para os itens selecionados. Mínimo {ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}% (regra ML) e máximo {ML_MAX_CAMPAIGN_DISCOUNT_PERCENT}% para modalidades configuráveis pelo seller (LIGHTNING, DOD, SELLER_CAMPAIGN, DEAL e PRICE_DISCOUNT).
+            </p>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleBulkDiscountConfirm();
+              }}
+            >
+              <div>
+                <label className="mb-1 block text-sm text-fg">Desconto desejado (%)</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={bulkDiscountPercentInput}
+                  onChange={(e) => setBulkDiscountPercentInput(e.target.value)}
+                  className="input w-full py-2 text-sm"
+                  placeholder={`Ex.: ${ML_MIN_CAMPAIGN_DISCOUNT_PERCENT} ou 12,5`}
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBulkDiscountModalOpen(false)}
+                  className="btn btn-secondary px-4 py-2 text-sm"
+                  disabled={bulkDiscountBusyRef.current}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={bulkDiscountBusyRef.current}
+                  className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+                >
+                  Aplicar nos selecionados
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {bulkMarginModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
@@ -2567,6 +2668,10 @@ function PrecosPageContent() {
                     <option value="active">Ativo</option>
                     <option value="paused">Pausado</option>
                     <option value="closed">Fechado</option>
+                    <option value="under_review">Em revisão</option>
+                    <option value="inactive">Inativo</option>
+                    <option value="deleted">Removido</option>
+                    <option value="not_yet_active">Aguardando ativação</option>
                   </select>
                 </div>
                 <div className="flex flex-col gap-1">
@@ -2626,6 +2731,21 @@ function PrecosPageContent() {
                   />
                   <span className="text-xs text-slate-700 dark:text-slate-200">{`Desconto < 5% (promo ML)`}</span>
                 </label>
+                <label
+                  className="flex cursor-pointer items-center gap-2"
+                  title="Exibe apenas anúncios sem campanhas/promoções ativas no Mercado Livre (coluna Promo ML = 0) no último refresh do cache"
+                >
+                  <input
+                    type="checkbox"
+                    checked={semPromoMlAtiva}
+                    onChange={(e) => {
+                      setSemPromoMlAtiva(e.target.checked);
+                      setPage(1);
+                    }}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
+                  />
+                  <span className="text-xs text-slate-700 dark:text-slate-200">Sem Promo ML ativa</span>
+                </label>
                 <div className="flex flex-col gap-1">
                   <span className="text-xs text-slate-500 dark:text-slate-400">Lucratividade</span>
                   <div className="flex flex-wrap gap-1">
@@ -2667,6 +2787,7 @@ function PrecosPageContent() {
                     onlyWithSales30d ||
                     semPromocao ||
                     foraDescontoMin5Ml ||
+                    semPromoMlAtiva ||
                     profitFilter ||
                     sortBy) && (
                     <button
@@ -2680,6 +2801,7 @@ function PrecosPageContent() {
                         setOnlyWithSales30d(false);
                         setSemPromocao(false);
                         setForaDescontoMin5Ml(false);
+                        setSemPromoMlAtiva(false);
                         setProfitFilter("");
                         setSortBy("");
                         setPage(1);
@@ -2709,6 +2831,7 @@ function PrecosPageContent() {
                 onlyWithSales30d ||
                 semPromocao ||
                 foraDescontoMin5Ml ||
+                semPromoMlAtiva ||
                 profitFilter ||
                 sortBy) && (
                 <span className="rounded-full bg-primary h-1.5 w-1.5" title="Filtros ativos" />
@@ -2849,14 +2972,18 @@ function PrecosPageContent() {
                 <button
                   type="button"
                   role="menuitem"
-                  onClick={() => void handleBulkApplyMinDiscount()}
+                  onClick={() => {
+                    setBulkActionsOpen(false);
+                    setBulkDiscountPercentInput(String(ML_MIN_CAMPAIGN_DISCOUNT_PERCENT));
+                    setBulkDiscountModalOpen(true);
+                  }}
                   disabled={calculating}
                   className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
-                  title="Define a promoção como 95% do preço (desconto mínimo de 5% exigido na promoção do ML), para todos os selecionados"
+                  title={`Aplica desconto de promoção em massa (${ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}% a ${ML_MAX_CAMPAIGN_DISCOUNT_PERCENT}%) nos selecionados`}
                 >
                   {calculating
                     ? "Aguarde o cálculo em andamento…"
-                    : "Ajustar todos para 5% (promoção = 95% do preço)"}
+                    : `Definir desconto em massa… (${ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}% a ${ML_MAX_CAMPAIGN_DISCOUNT_PERCENT}%)`}
                 </button>
                 <button
                   type="button"

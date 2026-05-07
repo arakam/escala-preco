@@ -273,10 +273,10 @@ function AnunciosPageContent() {
 
   function renderSortIcon(field: SortField) {
     if (sortField !== field) {
-      return <span className="ml-1 text-xs text-slate-400">↕</span>;
+      return <span className="ml-1 text-xs text-slate-400 dark:text-slate-500">↕</span>;
     }
     return (
-      <span className="ml-1 text-xs text-primary">
+      <span className="ml-1 text-xs font-semibold text-primary dark:text-primary-lighter">
         {sortDirection === "asc" ? "↑" : "↓"}
       </span>
     );
@@ -461,90 +461,142 @@ function AnunciosPageContent() {
           </p>
         ) : (
           <>
+            <div className="pricing-table-with-sticky">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                <span className="font-medium text-slate-800 dark:text-slate-100">{items.length}</span>
+                {" anúncio(s) na página · total "}
+                <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
+              </p>
+              {totalPages > 1 && (
+                <>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Página {page} de {totalPages}</span>
+                  <div className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-1 text-xs ring-1 ring-slate-200 dark:bg-slate-700 dark:ring-slate-600">
+                    <button
+                      type="button"
+                      onClick={() => setPage(1)}
+                      disabled={page === 1}
+                      className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Primeira página"
+                    >
+                      «
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      disabled={page <= 1}
+                      className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Anterior
+                    </button>
+                    <span className="min-w-[2ch] px-1.5 py-1 text-center font-semibold text-slate-800 dark:text-slate-100">
+                      {page}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={page >= totalPages}
+                      className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Próxima
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPage(totalPages)}
+                      disabled={page === totalPages}
+                      className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Última página"
+                    >
+                      »
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
             <AppTable
-              summary={`${total} anúncio(s) — página ${page} de ${totalPages || 1}`}
               maxHeight="70vh"
+              tableClassName="table-fixed w-max min-w-[max(100%,max-content)]"
             >
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Imagem
                   </th>
                   <th
-                    className="cursor-pointer p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    className="cursor-pointer select-none rounded p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-600/50"
                     onClick={() => toggleSort("item_id")}
                   >
                     MLB
                     {renderSortIcon("item_id")}
                   </th>
                   <th
-                    className="cursor-pointer p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    className="cursor-pointer select-none rounded p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-600/50"
                     onClick={() => toggleSort("title")}
                   >
                     Título
                     {renderSortIcon("title")}
                   </th>
                   <th
-                    className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
                     title="MLBU = User Product. Família = agrupamento no modelo MLBU."
                   >
                     Modelo / Família
                   </th>
                   <th
-                    className="cursor-pointer p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    className="cursor-pointer select-none rounded p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-600/50"
                     onClick={() => toggleSort("status")}
                   >
                     Status
                     {renderSortIcon("status")}
                   </th>
                   <th
-                    className="cursor-pointer whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    className="cursor-pointer select-none whitespace-nowrap rounded p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-600/50"
                     onClick={() => toggleSort("price")}
                   >
                     Preço R$
                     {renderSortIcon("price")}
                   </th>
-                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     R$ Atac. 1
                   </th>
-                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Qt. Atac. 1
                   </th>
-                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     R$ Atac. 2
                   </th>
-                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Qt. Atac. 2
                   </th>
-                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     R$ Atac. 3
                   </th>
-                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Qt. Atac. 3
                   </th>
-                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     R$ Atac. 4
                   </th>
-                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Qt. Atac. 4
                   </th>
-                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     R$ Atac. 5
                   </th>
-                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="whitespace-nowrap p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Qt. Atac. 5
                   </th>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Variações
                   </th>
                   <th
-                    className="cursor-pointer p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    className="cursor-pointer select-none rounded p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-600/50"
                     onClick={() => toggleSort("updated_at")}
                   >
                     Atualizado
                     {renderSortIcon("updated_at")}
                   </th>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Link
                   </th>
                 </tr>
@@ -553,17 +605,17 @@ function AnunciosPageContent() {
                 {sortedItems.map((item) => (
                   <tr
                     key={item.item_id}
-                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5"
+                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
                   >
                     <td className="p-2">
                       {item.thumbnail ? (
                         <img
                           src={item.thumbnail.replace(/^http:/, "https:")}
                           alt=""
-                          className="h-12 w-12 rounded-lg border border-slate-100 bg-slate-50 object-contain"
+                          className="h-10 w-10 rounded-lg border border-slate-100 bg-slate-50 object-contain dark:border-slate-600 dark:bg-slate-800/50"
                         />
                       ) : (
-                        <span className="text-xs text-slate-400">—</span>
+                        <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
                       )}
                     </td>
                     <td
@@ -572,10 +624,10 @@ function AnunciosPageContent() {
                       onClick={() => copyMlb(item.item_id)}
                       onKeyDown={(e) => e.key === "Enter" && copyMlb(item.item_id)}
                       title="Clique para copiar"
-                      className="cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100"
+                      className="cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700"
                     >
                       {copiedMlb === item.item_id ? (
-                        <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
+                        <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Copiado!</span>
                       ) : (
                         item.item_id
                       )}
@@ -596,7 +648,7 @@ function AnunciosPageContent() {
                           </span>
                         )}
                         {item.user_product_id && (
-                          <span className="font-mono text-xs text-gray-600" title="Código MLBU">
+                          <span className="font-mono text-xs text-gray-600 dark:text-slate-300" title="Código MLBU">
                             {item.user_product_id}
                           </span>
                         )}
@@ -618,7 +670,7 @@ function AnunciosPageContent() {
                           </button>
                         )}
                         {!item.user_product_id && !item.family_name && (
-                          <span className="text-xs text-slate-400">—</span>
+                          <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
                         )}
                       </div>
                     </td>
@@ -635,7 +687,7 @@ function AnunciosPageContent() {
                         {item.status ?? "—"}
                       </span>
                     </td>
-                    <td className="p-2 font-medium">
+                    <td className="p-2 text-right text-sm font-medium tabular-nums text-slate-800 dark:text-slate-100">
                       {item.price != null ? Number(item.price).toFixed(2) : "—"}
                     </td>
                     {[0, 1, 2, 3, 4].map((i) => {
@@ -647,7 +699,7 @@ function AnunciosPageContent() {
                               type="text"
                               placeholder="0,00"
                               readOnly
-                              className="w-20 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs"
+                              className="w-20 rounded border border-gray-200 bg-slate-50 px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200"
                               value={tier?.amount != null ? Number(tier.amount).toFixed(2) : ""}
                             />
                           </td>
@@ -657,17 +709,23 @@ function AnunciosPageContent() {
                               placeholder={i === 0 ? "1" : ""}
                               min={1}
                               readOnly
-                              className="w-16 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs"
+                              className="w-16 rounded border border-gray-200 bg-slate-50 px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200"
                               value={tier?.min_purchase_unit ?? ""}
                             />
                           </td>
                         </Fragment>
                       );
                     })}
-                    <td className="p-2 text-xs text-slate-700">
-                      {item.has_variations ? "Sim" : "Não"}
+                    <td className="p-2 text-xs text-slate-700 dark:text-slate-200">
+                      {item.has_variations ? (
+                        <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">
+                          Sim
+                        </span>
+                      ) : (
+                        <span className="text-fg-muted dark:text-slate-400">Não</span>
+                      )}
                     </td>
-                    <td className="p-2 text-xs text-slate-500">
+                    <td className="p-2 text-xs text-slate-500 dark:text-slate-400">
                       {item.updated_at ? new Date(item.updated_at).toLocaleString() : "—"}
                     </td>
                     <td className="p-2">
@@ -676,64 +734,27 @@ function AnunciosPageContent() {
                           href={item.permalink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center rounded-full bg-primary/10 px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/15"
+                          className="inline-flex items-center rounded-full bg-primary/10 p-1.5 text-primary hover:bg-primary/15"
+                          title="Ver no Mercado Livre"
                         >
-                          Ver no ML
+                          <img
+                            src="https://www.mercadolivre.com.br/favicon.ico"
+                            alt=""
+                            width={20}
+                            height={20}
+                            className="h-5 w-5"
+                          />
                         </a>
                       ) : (
-                        <span className="text-xs text-slate-400">—</span>
+                        <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
                       )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </AppTable>
+            </div>
 
-            {/* Paginação */}
-            {totalPages > 1 && (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-slate-500">
-                  Mostrando página {page} de {totalPages} · {total} anúncio(s)
-                </p>
-                <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setPage(1)}
-                    disabled={page === 1}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    «
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page <= 1}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Anterior
-                  </button>
-                  <span className="px-2 text-xs font-semibold text-slate-800">
-                    {page}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={page >= totalPages}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Próxima
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPage(totalPages)}
-                    disabled={page === totalPages}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    »
-                  </button>
-                </div>
-              </div>
-            )}
           </>
         )}
       </div>
