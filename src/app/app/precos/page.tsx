@@ -82,6 +82,23 @@ function competitivenessBadge(status: string | undefined): { label: string; clas
   }
 }
 
+function skuDisplayParts(rawSku: string): { primary: string; extraCount: number } {
+  const text = rawSku.trim();
+  if (!text) return { primary: "", extraCount: 0 };
+
+  const plusMatch = text.match(/\(\+(\d+)\s*SKUs?\)/i);
+  const plusCount = plusMatch ? Number(plusMatch[1]) : 0;
+  const withoutPlus = text.replace(/\s*\(\+\d+\s*SKUs?\)\s*/i, "").trim();
+  const parts = withoutPlus
+    .split("·")
+    .map((p) => p.trim())
+    .filter((p) => p && p !== "…");
+
+  const primary = parts[0] ?? withoutPlus;
+  const extraCount = plusCount > 0 ? plusCount : Math.max(0, parts.length - 1);
+  return { primary, extraCount };
+}
+
 /** Configuração das colunas da tabela de preços (ordem = índice na tabela). Usado para congelar colunas. */
 /** Ícone do Mercado Livre para link "Ver no ML" — usa favicon oficial */
 function MLIcon({ className }: { className?: string }) {
@@ -2963,20 +2980,33 @@ function PrecosPageContent() {
                       style={stickyBodyStyles[4]}
                     >
                       {listing.sku ? (
+                        (() => {
+                          const { primary, extraCount } = skuDisplayParts(listing.sku);
+                          if (!primary) return <span className="text-fg-muted">—</span>;
+                          return (
                         <span
                           role="button"
                           tabIndex={0}
-                          onClick={() => handleCopyToClipboard(listing.sku!, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
-                          onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(listing.sku!, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
-                          title="Clique para copiar"
-                          className="cursor-pointer select-none block break-all rounded-md bg-slate-50 px-2 py-1 text-left hover:bg-slate-100"
+                          onClick={() => handleCopyToClipboard(primary, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
+                          onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(primary, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
+                          title={listing.sku}
+                          className="cursor-pointer select-none inline-flex items-center gap-1 rounded-md bg-slate-50 px-2 py-1 text-left hover:bg-slate-100"
                         >
                           {copiedCell === `sku-${listing.id}-${listing.variation_id ?? "n"}` ? (
                             <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
                           ) : (
-                            listing.sku
+                            <>
+                              <span>{primary}</span>
+                              {extraCount > 0 && (
+                                <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-200">
+                                  +{extraCount}
+                                </span>
+                              )}
+                            </>
                           )}
                         </span>
+                          );
+                        })()
                       ) : (
                         <span className="text-fg-muted">—</span>
                       )}
