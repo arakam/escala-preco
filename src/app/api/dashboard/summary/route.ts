@@ -4,11 +4,47 @@ import { NextRequest, NextResponse } from "next/server";
 export interface DashboardSummaryResponse {
   account: { id: string; ml_user_id: number; ml_nickname: string | null };
   cards: {
-    synced_count: number;
-    wholesale_configured_count: number;
-    wholesale_missing_count: number;
-    errors_or_pending_count: number;
+    margin_avg_percent: number | null;
+    margin_revenue_estimated: number;
+    risk_count: number;
+    competitiveness_percent: number;
+    competitiveness: {
+      competitive: number;
+      attention: number;
+      high: number;
+      none: number;
+      total: number;
+    };
+    coverage_percent: number;
+    coverage_count: number;
+    total_listings: number;
   };
+  alerts: {
+    no_cost: number;
+    negative_margin: number;
+    above_market: number;
+    no_wholesale: number;
+    no_sku_link: number;
+  };
+  insights: {
+    top_sales: InsightRow[];
+    top_margin: InsightRow[];
+    top_risk: InsightRow[];
+  };
+}
+
+interface InsightRow {
+  item_id: string;
+  variation_id: number | null;
+  title: string | null;
+  thumbnail: string | null;
+  current_price: number;
+  orders_30d: number;
+  margin_percent: number | null;
+  unit_profit: number | null;
+  is_above_market: boolean;
+  risk_status: "high" | "attention" | "ok";
+  risk_reason: string | null;
 }
 
 /** Tier válido em rascunho: min_qty e price numéricos */
@@ -35,9 +71,23 @@ function hasValidMlWholesaleTiers(tiers: unknown): boolean {
   });
 }
 
+function toNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function toSafeImageUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+  if (trimmed.startsWith("http://")) return `https://${trimmed.slice("http://".length)}`;
+  return trimmed;
+}
+
 /**
  * GET /api/dashboard/summary?accountId=...
- * Retorna resumo para os cards: synced (linhas achatadas), com atacado, sem atacado, erros/pendências.
+ * Retorna visão operacional para os cards principais e alertas.
  */
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -64,15 +114,31 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Conta não encontrada" }, { status: 404 });
   }
 
-  // 1–2) Linhas sincronizadas (mesma regra da grade atacado) e quantas têm atacado:
+  // 1) Linhas sincronizadas (mesma regra da grade atacado) e quantas têm atacado:
   //      rascunho válido em wholesale_drafts OU preço por quantidade vindo do ML (wholesale_prices_json na sync).
-  const [{ data: items }, { data: variationRows }, { data: drafts }] = await Promise.all([
+  const [
+    { data: items },
+    { data: variationRows },
+    { data: drafts },
+    { data: cacheRows },
+    { data: refs },
+  ] = await Promise.all([
     supabase
       .from("ml_items")
       .select("item_id, has_variations, wholesale_prices_json")
       .eq("account_id", accountId),
     supabase.from("ml_variations").select("item_id, variation_id").eq("account_id", accountId),
     supabase.from("wholesale_drafts").select("item_id, variation_id, tiers_json").eq("account_id", accountId),
+    supabase
+      .from("pricing_cache")
+      .select(
+        "item_id, variation_id, title, thumbnail, current_price, cost_price, orders_30d, tax_percent, extra_fee_percent, fixed_expenses, calculated_fee, calculated_shipping_cost, product_id"
+      )
+      .eq("account_id", accountId),
+    supabase
+      .from("price_references")
+      .select("item_id, variation_id, status")
+      .eq("account_id", accountId),
   ]);
 
   const validDraftKeys = new Set<string>();
@@ -118,34 +184,92 @@ export async function GET(request: NextRequest) {
 
   const wholesale_missing_count = Math.max(0, synced_count - wholesale_configured_count);
 
-  // 3) Erros/Pendências: job_logs status error últimos 7 dias + jobs failed/partial últimos 7 dias
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  // 2) Competitividade (status de referência de preço já calculado no sistema)
+  let competitive = 0;
+  let attention = 0;
+  let high = 0;
+  let none = 0;
+  for (const ref of refs ?? []) {
+    switch (ref.status) {
+      case "competitive":
+        competitive++;
+        break;
+      case "attention":
+        attention++;
+        break;
+      case "high":
+        high++;
+        break;
+      default:
+        none++;
+        break;
+    }
+  }
+  const competitivenessTotal = competitive + attention + high;
+  const competitiveness_percent =
+    competitivenessTotal > 0 ? Math.round((competitive / competitivenessTotal) * 100) : 0;
 
-  const { data: jobsForLogs } = await supabase
-    .from("ml_jobs")
-    .select("id")
-    .eq("account_id", accountId)
-    .gte("created_at", sevenDaysAgo);
+  // 3) Saúde de margem, risco e cobertura a partir do cache de precificação
+  const riskThresholdPercent = 5;
+  let revenueEstimated = 0;
+  let profitEstimated = 0;
+  let riskCount = 0;
+  let noCostCount = 0;
+  let negativeMarginCount = 0;
+  let noSkuLinkCount = 0;
+  let coverageCount = 0;
 
-  let logErrors = 0;
-  if (jobsForLogs && jobsForLogs.length > 0) {
-    const jobIds = jobsForLogs.map((j) => j.id);
-    const { count } = await supabase
-      .from("ml_job_logs")
-      .select("id", { count: "exact", head: true })
-      .in("job_id", jobIds)
-      .eq("status", "error");
-    logErrors = count ?? 0;
+  for (const row of cacheRows ?? []) {
+    const currentPrice = toNumber(row.current_price);
+    const costPriceRaw = row.cost_price;
+    const costPrice = costPriceRaw == null ? null : toNumber(costPriceRaw);
+    const qty30d = Math.max(0, toNumber(row.orders_30d));
+    const taxPercent = toNumber(row.tax_percent);
+    const extraFeePercent = toNumber(row.extra_fee_percent);
+    const fixedExpenses = toNumber(row.fixed_expenses);
+    const calculatedFee = toNumber(row.calculated_fee);
+    const calculatedShipping = toNumber(row.calculated_shipping_cost);
+
+    if (!row.product_id) {
+      noSkuLinkCount += 1;
+    }
+    if (row.product_id && costPrice != null && costPrice > 0) {
+      coverageCount += 1;
+    }
+    if (costPrice == null || costPrice <= 0 || currentPrice <= 0) {
+      noCostCount += 1;
+      continue;
+    }
+
+    const taxValue = currentPrice * (taxPercent / 100);
+    const extraFeeValue = currentPrice * (extraFeePercent / 100);
+    const unitProfit =
+      currentPrice -
+      costPrice -
+      calculatedFee -
+      calculatedShipping -
+      taxValue -
+      extraFeeValue -
+      fixedExpenses;
+    const marginPercent = (unitProfit / currentPrice) * 100;
+
+    if (marginPercent < 0) {
+      negativeMarginCount += 1;
+    }
+    if (marginPercent < riskThresholdPercent) {
+      riskCount += 1;
+    }
+
+    if (qty30d > 0) {
+      revenueEstimated += currentPrice * qty30d;
+      profitEstimated += unitProfit * qty30d;
+    }
   }
 
-  const { count: failedJobsCount } = await supabase
-    .from("ml_jobs")
-    .select("id", { count: "exact", head: true })
-    .eq("account_id", accountId)
-    .in("status", ["failed", "partial"])
-    .gte("created_at", sevenDaysAgo);
-
-  const errors_or_pending_count = logErrors + (failedJobsCount ?? 0);
+  const totalListings = (cacheRows ?? []).length;
+  const coverage_percent = totalListings > 0 ? Math.round((coverageCount / totalListings) * 100) : 0;
+  const margin_avg_percent =
+    revenueEstimated > 0 ? Number(((profitEstimated / revenueEstimated) * 100).toFixed(2)) : null;
 
   const body: DashboardSummaryResponse = {
     account: {
@@ -154,11 +278,129 @@ export async function GET(request: NextRequest) {
       ml_nickname: account.ml_nickname ?? null,
     },
     cards: {
-      synced_count,
-      wholesale_configured_count,
-      wholesale_missing_count,
-      errors_or_pending_count,
+      margin_avg_percent,
+      margin_revenue_estimated: Number(revenueEstimated.toFixed(2)),
+      risk_count: riskCount,
+      competitiveness_percent,
+      competitiveness: {
+        competitive,
+        attention,
+        high,
+        none,
+        total: competitivenessTotal,
+      },
+      coverage_percent,
+      coverage_count: coverageCount,
+      total_listings: totalListings,
     },
+    alerts: {
+      no_cost: noCostCount,
+      negative_margin: negativeMarginCount,
+      above_market: high,
+      no_wholesale: wholesale_missing_count,
+      no_sku_link: noSkuLinkCount,
+    },
+    insights: {
+      top_sales: [],
+      top_margin: [],
+      top_risk: [],
+    },
+  };
+
+  const refsByKey = new Map<string, string>();
+  for (const ref of refs ?? []) {
+    const key = `${String(ref.item_id).trim().toUpperCase()}:${ref.variation_id == null ? -1 : Number(ref.variation_id)}`;
+    refsByKey.set(key, String(ref.status ?? "none"));
+  }
+
+  const insightRows: InsightRow[] = [];
+  for (const row of cacheRows ?? []) {
+    const currentPrice = toNumber(row.current_price);
+    const costPriceRaw = row.cost_price;
+    const costPrice = costPriceRaw == null ? null : toNumber(costPriceRaw);
+    const orders30d = Math.max(0, toNumber(row.orders_30d));
+    const taxPercent = toNumber(row.tax_percent);
+    const extraFeePercent = toNumber(row.extra_fee_percent);
+    const fixedExpenses = toNumber(row.fixed_expenses);
+    const calculatedFee = toNumber(row.calculated_fee);
+    const calculatedShipping = toNumber(row.calculated_shipping_cost);
+
+    let unitProfit: number | null = null;
+    let marginPercent: number | null = null;
+    if (costPrice != null && costPrice > 0 && currentPrice > 0) {
+      const taxValue = currentPrice * (taxPercent / 100);
+      const extraFeeValue = currentPrice * (extraFeePercent / 100);
+      const profit =
+        currentPrice -
+        costPrice -
+        calculatedFee -
+        calculatedShipping -
+        taxValue -
+        extraFeeValue -
+        fixedExpenses;
+      unitProfit = Number(profit.toFixed(2));
+      marginPercent = Number(((profit / currentPrice) * 100).toFixed(2));
+    }
+
+    const itemKey = `${String(row.item_id).trim().toUpperCase()}:${row.variation_id == null ? -1 : Number(row.variation_id)}`;
+    const refStatus = refsByKey.get(itemKey) ?? "none";
+    const isAboveMarket = refStatus === "high";
+    let riskStatus: "high" | "attention" | "ok" = "ok";
+    let riskReason: string | null = null;
+    if (marginPercent != null && marginPercent < 0) {
+      riskStatus = "high";
+      riskReason = "Margem negativa";
+    } else if (isAboveMarket) {
+      riskStatus = "high";
+      riskReason = "Preço acima do mercado";
+    } else if (marginPercent == null || marginPercent < 5) {
+      riskStatus = "attention";
+      riskReason = marginPercent == null ? "Sem custo para calcular margem" : "Margem abaixo de 5%";
+    }
+
+    insightRows.push({
+      item_id: String(row.item_id),
+      variation_id: row.variation_id == null ? null : Number(row.variation_id),
+      title: row.title == null ? null : String(row.title),
+      thumbnail: toSafeImageUrl(row.thumbnail),
+      current_price: currentPrice,
+      orders_30d: orders30d,
+      margin_percent: marginPercent,
+      unit_profit: unitProfit,
+      is_above_market: isAboveMarket,
+      risk_status: riskStatus,
+      risk_reason: riskReason,
+    });
+  }
+
+  const topSales = [...insightRows]
+    .sort((a, b) => b.orders_30d - a.orders_30d)
+    .slice(0, 5);
+
+  const topMargin = [...insightRows]
+    .filter((r) => r.margin_percent != null)
+    .sort((a, b) => (b.margin_percent ?? -9999) - (a.margin_percent ?? -9999))
+    .slice(0, 5);
+
+  const topRisk = [...insightRows]
+    .filter((r) => r.risk_status !== "ok")
+    .sort((a, b) => {
+      const aScore =
+        (a.margin_percent != null && a.margin_percent < 0 ? -200 : 0) +
+        (a.is_above_market ? -100 : 0) +
+        (a.margin_percent ?? 100);
+      const bScore =
+        (b.margin_percent != null && b.margin_percent < 0 ? -200 : 0) +
+        (b.is_above_market ? -100 : 0) +
+        (b.margin_percent ?? 100);
+      return aScore - bScore;
+    })
+    .slice(0, 5);
+
+  body.insights = {
+    top_sales: topSales,
+    top_margin: topMargin,
+    top_risk: topRisk,
   };
 
   return NextResponse.json(body, {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useOnboarding } from "@/contexts/onboarding-context";
 import { isPrecoAtacadoAllowed, navBlockedHref } from "@/lib/onboarding-gating";
@@ -17,62 +17,51 @@ interface MLAccount {
 }
 
 interface SummaryCards {
-  synced_count: number;
-  wholesale_configured_count: number;
-  wholesale_missing_count: number;
-  errors_or_pending_count: number;
-}
-
-interface ActivityItem {
-  at: string;
-  type: "sync" | "draft_manual" | "draft_import" | "apply";
-  status: "ok" | "error" | "partial" | "running";
-  item_id?: string;
-  variation_id?: number | null;
-  message: string;
-}
-
-function formatDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    const now = new Date();
-    const sameDay =
-      d.getDate() === now.getDate() &&
-      d.getMonth() === now.getMonth() &&
-      d.getFullYear() === now.getFullYear();
-    if (sameDay) {
-      return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-    }
-    return d.toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function activityTypeLabel(type: ActivityItem["type"]): string {
-  const labels: Record<ActivityItem["type"], string> = {
-    sync: "Sincronização",
-    draft_manual: "Edição manual",
-    draft_import: "Importação CSV",
-    apply: "Aplicação no ML",
+  margin_avg_percent: number | null;
+  margin_revenue_estimated: number;
+  risk_count: number;
+  competitiveness_percent: number;
+  competitiveness: {
+    competitive: number;
+    attention: number;
+    high: number;
+    none: number;
+    total: number;
   };
-  return labels[type] ?? type;
+  coverage_percent: number;
+  coverage_count: number;
+  total_listings: number;
 }
 
-function activityStatusLabel(status: ActivityItem["status"]): string {
-  const labels: Record<ActivityItem["status"], string> = {
-    ok: "Sucesso",
-    error: "Erro",
-    partial: "Parcial",
-    running: "Em andamento",
+interface DashboardSummaryPayload {
+  account: { id: string; ml_user_id: number; ml_nickname: string | null };
+  cards: SummaryCards;
+  alerts: {
+    no_cost: number;
+    negative_margin: number;
+    above_market: number;
+    no_wholesale: number;
+    no_sku_link: number;
   };
-  return labels[status] ?? status;
+  insights: {
+    top_sales: InsightRow[];
+    top_margin: InsightRow[];
+    top_risk: InsightRow[];
+  };
+}
+
+interface InsightRow {
+  item_id: string;
+  variation_id: number | null;
+  title: string | null;
+  thumbnail: string | null;
+  current_price: number;
+  orders_30d: number;
+  margin_percent: number | null;
+  unit_profit: number | null;
+  is_above_market: boolean;
+  risk_status: "high" | "attention" | "ok";
+  risk_reason: string | null;
 }
 
 function AppHomeContent() {
@@ -80,13 +69,11 @@ function AppHomeContent() {
   const { status: onboarding, loading: onboardingLoading } = useOnboarding();
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
   const [accountId, setAccountId] = useState<string>("");
-  const [summary, setSummary] = useState<{ account: { id: string; ml_user_id: number; ml_nickname: string | null }; cards: SummaryCards } | null>(null);
-  const [priceHighCount, setPriceHighCount] = useState<number | null>(null);
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [summary, setSummary] = useState<DashboardSummaryPayload | null>(null);
+  const [insightMetric, setInsightMetric] = useState<"sales" | "margin" | "risk">("sales");
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [activityLoading, setActivityLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  const [refreshingRefs, setRefreshingRefs] = useState(false);
 
   const allowPrecoAtacado = isPrecoAtacadoAllowed(onboarding, onboardingLoading);
   const dashBlockedHref = navBlockedHref(onboarding);
@@ -143,47 +130,10 @@ function AppHomeContent() {
     }
   }, [accountId]);
 
-  const loadPriceRefStatus = useCallback(async () => {
-    if (!accountId) return;
-    try {
-      const res = await fetch(`/api/price-references/status?accountId=${encodeURIComponent(accountId)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setPriceHighCount(data.high ?? 0);
-      } else {
-        setPriceHighCount(null);
-      }
-    } catch {
-      setPriceHighCount(null);
-    }
-  }, [accountId]);
-
-  const loadActivity = useCallback(async () => {
-    if (!accountId) return;
-    setActivityLoading(true);
-    try {
-      const res = await fetch(
-        `/api/dashboard/activity?accountId=${encodeURIComponent(accountId)}&limit=20`
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setActivity(data.items ?? []);
-      } else {
-        setActivity([]);
-      }
-    } catch {
-      setActivity([]);
-    } finally {
-      setActivityLoading(false);
-    }
-  }, [accountId]);
-
   useEffect(() => {
     if (!accountId) return;
     loadSummary();
-    loadActivity();
-    loadPriceRefStatus();
-  }, [accountId, loadSummary, loadActivity, loadPriceRefStatus]);
+  }, [accountId, loadSummary]);
 
   useEffect(() => {
     if (accounts.length > 0 && accountId && !accounts.find((a) => a.id === accountId)) {
@@ -192,20 +142,40 @@ function AppHomeContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts]);
 
-  const startSync = async () => {
+  const refreshReferences = async () => {
     if (!accountId) return;
-    setSyncing(true);
+    setRefreshingRefs(true);
     try {
-      const res = await fetch(`/api/mercadolivre/${accountId}/sync`, { method: "POST" });
-      const data = await res.json();
+      const res = await fetch("/api/price-references/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId, scope: "all" }),
+      });
+      await res.json();
       if (res.ok) {
         loadSummary();
-        loadActivity();
       }
     } finally {
-      setSyncing(false);
+      setRefreshingRefs(false);
     }
   };
+
+  const formatBRL = useCallback((value: number | null | undefined) => {
+    if (value == null || !Number.isFinite(value)) return "—";
+    return value.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }, []);
+
+  const insightRows = useMemo(() => {
+    if (!summary) return [];
+    if (insightMetric === "margin") return summary.insights.top_margin;
+    if (insightMetric === "risk") return summary.insights.top_risk;
+    return summary.insights.top_sales;
+  }, [summary, insightMetric]);
 
   if (loading && accounts.length === 0) {
     return (
@@ -352,252 +322,309 @@ function AppHomeContent() {
         </div>
       </div>
 
-      {/* Bloco 1 — Status Geral (cards) */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Status geral
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Indicadores principais do uso do EscalaPreço nesta conta.
-            </p>
-          </div>
+      {/* Saúde operacional */}
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+            Saúde operacional da precificação
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Visão rápida para decisão: lucro, risco, competitividade e qualidade dos dados.
+          </p>
         </div>
+
         {summaryLoading ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            {[1, 2, 3, 4, 5].map((i) => (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {[1, 2, 3, 4].map((i) => (
               <div
                 key={i}
-                className="rounded-2xl border border-slate-100 bg-white/70 p-4 shadow-sm backdrop-blur-sm animate-pulse dark:border-slate-700 dark:bg-slate-800/60"
+                className="animate-pulse rounded-2xl border border-slate-100 bg-white/70 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800/60"
               >
-                <div className="flex items-center justify-between">
-                  <div className="h-4 w-1/2 rounded bg-slate-200" />
-                  <div className="h-8 w-10 rounded-full bg-slate-100" />
-                </div>
-                <div className="mt-3 h-7 w-1/3 rounded bg-slate-100" />
+                <div className="h-4 w-24 rounded bg-slate-200" />
+                <div className="mt-3 h-8 w-20 rounded bg-slate-100" />
+                <div className="mt-3 h-3 w-40 rounded bg-slate-100" />
               </div>
             ))}
           </div>
         ) : summary ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            {/* Total sincronizado */}
-            <div className="group rounded-2xl border border-slate-100 bg-white/80 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-primary/40 dark:border-slate-700 dark:bg-slate-800/80">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div
+              className={`group rounded-2xl border p-4 shadow-sm transition hover:-translate-y-0.5 ${
+                summary.cards.margin_avg_percent != null && summary.cards.margin_avg_percent >= 15
+                  ? "border-emerald-100 bg-emerald-50/80 dark:border-emerald-900/50 dark:bg-emerald-950/40"
+                  : summary.cards.margin_avg_percent != null && summary.cards.margin_avg_percent >= 8
+                    ? "border-amber-100 bg-amber-50/90 dark:border-amber-900/50 dark:bg-amber-950/40"
+                    : "border-rose-100 bg-rose-50/90 dark:border-rose-900/50 dark:bg-rose-950/40"
+              }`}
+              title="Estimativa baseada nos preços atuais dos anúncios."
+            >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    Anúncios sincronizados
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    Margem Média
                   </p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-50">
-                    {summary.cards.synced_count}
+                  <p className="mt-2 text-3xl font-semibold text-slate-900 dark:text-slate-50">
+                    {summary.cards.margin_avg_percent != null
+                      ? `${summary.cards.margin_avg_percent.toFixed(1).replace(".", ",")}%`
+                      : "—"}
                   </p>
                 </div>
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary group-hover:bg-primary/15">
-                  <SmallIconStack />
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/70 text-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+                  <ProfitIcon />
                 </div>
               </div>
-              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                Linhas sincronizadas (anúncio ou variação), base para o editor de atacado.
+              <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                Baseado nas vendas dos últimos 30 dias.
               </p>
             </div>
 
-            {/* Com atacado */}
-            <div className="group rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-emerald-300/70 dark:border-emerald-900/50 dark:bg-emerald-950/40">
+            <Link
+              href={`/app/precos${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ""}`}
+              className="group rounded-2xl border border-rose-100 bg-rose-50/90 p-4 shadow-sm transition hover:-translate-y-0.5 hover:ring-1 hover:ring-rose-300 dark:border-rose-900/50 dark:bg-rose-950/40"
+            >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                    Com atacado configurado
+                  <p className="text-xs font-medium uppercase tracking-wide text-rose-700 dark:text-rose-300">
+                    Em Risco
                   </p>
-                  <p className="mt-2 text-2xl font-semibold text-emerald-900 dark:text-emerald-100">
-                    {summary.cards.wholesale_configured_count}
-                  </p>
-                </div>
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 group-hover:bg-emerald-200 dark:bg-emerald-900/60 dark:text-emerald-200 dark:group-hover:bg-emerald-800/60">
-                  <WholesaleIcon />
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-emerald-800 dark:text-emerald-200/90">
-                Com preço por quantidade no ML (última sync) ou rascunho válido no EscalaPreço.
-              </p>
-            </div>
-
-            {/* Cobertura atacado */}
-            <div className="group rounded-2xl border border-sky-100 bg-sky-50/80 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-sky-300/70 dark:border-sky-900/50 dark:bg-sky-950/40">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-sky-800 dark:text-sky-300">
-                    Cobertura de atacado
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-sky-900 dark:text-sky-100">
-                    {summary.cards.synced_count > 0
-                      ? Math.round(
-                          (summary.cards.wholesale_configured_count /
-                            summary.cards.synced_count) *
-                            100
-                        )
-                      : 0}
-                    <span className="ml-1 text-base font-medium text-sky-700 dark:text-sky-300">%</span>
+                  <p className="mt-2 text-3xl font-semibold text-rose-900 dark:text-rose-100">
+                    {summary.cards.risk_count}
                   </p>
                 </div>
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-100 text-sky-800 group-hover:bg-sky-200 dark:bg-sky-900/60 dark:text-sky-200 dark:group-hover:bg-sky-800/60">
-                  <GaugeIcon />
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-sky-800 dark:text-sky-200/90">
-                % das linhas sincronizadas com atacado detectado (ML ou rascunho).
-              </p>
-            </div>
-
-            {/* Sem atacado */}
-            <div className="group rounded-2xl border border-amber-100 bg-amber-50/90 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-amber-300/70 dark:border-amber-900/50 dark:bg-amber-950/40">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-amber-800 dark:text-amber-200">
-                    Sem atacado configurado
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-amber-900 dark:text-amber-100">
-                    {summary.cards.wholesale_missing_count}
-                  </p>
-                </div>
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-800 group-hover:bg-amber-200 dark:bg-amber-900/60 dark:text-amber-200 dark:group-hover:bg-amber-800/60">
-                  <AlertIcon />
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-amber-800 dark:text-amber-200/90">
-                Linhas sem tiers no ML (sync) nem rascunho com faixas válidas aqui.
-              </p>
-            </div>
-
-            {/* Erros / pendências */}
-            <div className="group rounded-2xl border border-rose-100 bg-rose-50/90 p-4 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-rose-300/70 dark:border-rose-900/50 dark:bg-rose-950/40">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-rose-800 dark:text-rose-200">
-                    Erros / Pendências (7 dias)
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-rose-900 dark:text-rose-100">
-                    {summary.cards.errors_or_pending_count}
-                  </p>
-                </div>
-                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-100 text-rose-800 group-hover:bg-rose-200 dark:bg-rose-900/60 dark:text-rose-200 dark:group-hover:bg-rose-800/60">
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200">
                   <WarningIcon />
                 </div>
               </div>
               <p className="mt-2 text-xs text-rose-800 dark:text-rose-200/90">
-                Problemas recentes em sincronizações ou aplicações de atacado.
+                Margem abaixo de 5% ou negativa.
               </p>
-            </div>
+            </Link>
+
+            <Link
+              href={
+                allowPrecoAtacado
+                  ? `/app/atacado?accountId=${encodeURIComponent(accountId)}`
+                  : dashBlockedHref
+              }
+              title={
+                allowPrecoAtacado
+                  ? undefined
+                  : "Disponível após sincronizar anúncios e cadastrar produtos."
+              }
+              className={`group rounded-2xl border border-amber-100 bg-amber-50/90 p-4 shadow-sm transition hover:-translate-y-0.5 hover:ring-1 hover:ring-amber-300 dark:border-amber-900/50 dark:bg-amber-950/40 ${
+                allowPrecoAtacado ? "" : "opacity-55"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                    Competitivos
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold text-amber-900 dark:text-amber-100">
+                    {summary.cards.competitiveness_percent}%
+                  </p>
+                </div>
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200">
+                  <GaugeIcon />
+                </div>
+              </div>
+              <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-200/70 dark:bg-slate-700/70">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-amber-400 to-rose-500"
+                  style={{ width: `${Math.max(4, summary.cards.competitiveness_percent)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-amber-900 dark:text-amber-100">
+                Anúncios bem posicionados.
+              </p>
+            </Link>
+
+            <Link
+              href={`/app/produtos${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ""}`}
+              className="group rounded-2xl border border-sky-100 bg-sky-50/90 p-4 shadow-sm transition hover:-translate-y-0.5 hover:ring-1 hover:ring-sky-300 dark:border-sky-900/50 dark:bg-sky-950/40"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-sky-800 dark:text-sky-300">
+                    Cobertura
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold text-sky-900 dark:text-sky-100">
+                    {summary.cards.coverage_percent}%
+                  </p>
+                </div>
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200">
+                  <SmallIconStack />
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-sky-800 dark:text-sky-200/90">
+                Anúncios com custo cadastrado e vínculo SKU.
+              </p>
+            </Link>
           </div>
         ) : (
           <div className="rounded-2xl border border-slate-100 bg-white/80 p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
-            <p className="text-sm text-slate-500 dark:text-slate-400">Não foi possível carregar o resumo.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Não foi possível carregar os indicadores.</p>
           </div>
         )}
-
-        {/* Card de oportunidade de preço */}
-        <Link
-          href={
-            allowPrecoAtacado
-              ? `/app/atacado?accountId=${encodeURIComponent(accountId)}&filter=price_high`
-              : dashBlockedHref
-          }
-          title={
-            allowPrecoAtacado
-              ? undefined
-              : "Disponível após sincronizar anúncios e cadastrar produtos (passos 2 e 3)."
-          }
-          className={`block rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 via-amber-50 to-amber-100 p-4 text-amber-900 shadow-sm transition hover:shadow-md ${
-            allowPrecoAtacado ? "" : "opacity-55"
-          }`}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
-                Oportunidades de ajuste de preço
-              </p>
-              <p className="mt-1 text-sm text-amber-900">
-                Anúncios com preço acima da referência (potencial perda de conversão).
-              </p>
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-semibold">
-                {priceHighCount ?? 0}
-              </span>
-              <span className="text-xs text-amber-800">anúncios</span>
-            </div>
-          </div>
-          <p className="mt-2 text-xs font-medium text-amber-900 underline-offset-2 hover:underline">
-            Clique para ver a lista e priorizar correções.
-          </p>
-        </Link>
       </section>
 
-      {/* Bloco 2 — Últimas alterações */}
+      {/* Alertas da operação */}
       <section className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <ActivityIcon />
-            <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Últimas alterações
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Histórico recente de sincronizações, importações e aplicações de atacado.
-              </p>
-            </div>
-          </div>
-          <Link
-            href={`/app/historico${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ""}`}
-            className="text-xs font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Ver tudo
-          </Link>
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+            Alertas da Operação
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Priorize os pontos com impacto direto em lucro e conversão.
+          </p>
         </div>
-        {activityLoading ? (
-          <div className="rounded-2xl border border-slate-100 bg-white/80 p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
-            <p className="text-sm text-slate-500 dark:text-slate-400">Carregando atividades…</p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <AlertItem
+            href={`/app/produtos${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ""}`}
+            label="Anúncios sem custo"
+            count={summary?.alerts.no_cost ?? 0}
+            tone="amber"
+          />
+          <AlertItem
+            href={`/app/precos${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ""}`}
+            label="Margem negativa"
+            count={summary?.alerts.negative_margin ?? 0}
+            tone="rose"
+          />
+          <AlertItem
+            href={
+              allowPrecoAtacado
+                ? `/app/atacado?accountId=${encodeURIComponent(accountId)}&filter=price_high`
+                : dashBlockedHref
+            }
+            label="Acima do mercado"
+            count={summary?.alerts.above_market ?? 0}
+            tone="amber"
+            disabled={!allowPrecoAtacado}
+          />
+          <AlertItem
+            href={allowPrecoAtacado ? "/app/atacado" : dashBlockedHref}
+            label="Sem atacado"
+            count={summary?.alerts.no_wholesale ?? 0}
+            tone="blue"
+            disabled={!allowPrecoAtacado}
+          />
+          <AlertItem
+            href={`/app/produtos${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ""}`}
+            label="Sem vínculo SKU"
+            count={summary?.alerts.no_sku_link ?? 0}
+            tone="slate"
+          />
+        </div>
+      </section>
+
+      {/* Insights dos anúncios */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+              Insights dos Anúncios
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Ranking visual do que mais vende, mais gera margem e mais exige atenção.
+            </p>
           </div>
-        ) : activity.length === 0 ? (
-          <div className="rounded-2xl border border-slate-100 bg-white/80 p-6 text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-400">
-            Nenhuma atividade recente para esta conta.
+          <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            <MetricTab
+              active={insightMetric === "sales"}
+              onClick={() => setInsightMetric("sales")}
+              label="Top Vendas"
+            />
+            <MetricTab
+              active={insightMetric === "margin"}
+              onClick={() => setInsightMetric("margin")}
+              label="Top Margem"
+            />
+            <MetricTab
+              active={insightMetric === "risk"}
+              onClick={() => setInsightMetric("risk")}
+              label="Top Risco"
+            />
           </div>
-        ) : (
-          <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white/80 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
-            <ul className="divide-y divide-slate-100 dark:divide-slate-700">
-              {activity.slice(0, 10).map((item, idx) => (
+        </div>
+
+        <div className="rounded-2xl border border-slate-100 bg-white/90 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/80 sm:p-4">
+          {insightRows.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+              Sem dados suficientes para gerar o ranking desta métrica.
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {insightRows.map((row, idx) => (
                 <li
-                  key={`${item.at}-${idx}`}
-                  className="flex flex-wrap items-center gap-2 px-4 py-3 text-xs sm:text-sm"
+                  key={`${row.item_id}:${row.variation_id ?? -1}:${idx}`}
+                  className="group flex items-center gap-3 rounded-xl border border-slate-100 p-3 transition hover:-translate-y-0.5 hover:bg-slate-50/70 dark:border-slate-700 dark:hover:bg-slate-700/40"
                 >
-                  <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
-                    <span className="inline-flex h-2 w-2 rounded-full bg-slate-300" />
-                    <span>{formatDate(item.at)}</span>
+                  <div className="w-7 shrink-0 text-center text-sm font-semibold text-slate-500 dark:text-slate-300">
+                    #{idx + 1}
                   </div>
-                  <span className="ml-2 rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                    {activityTypeLabel(item.type)}
-                  </span>
-                  <span
-                    className={`ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                      item.status === "ok"
-                        ? "bg-emerald-50 text-emerald-700"
-                        : item.status === "error"
-                          ? "bg-rose-50 text-rose-700"
-                          : item.status === "partial"
-                            ? "bg-amber-50 text-amber-700"
-                            : "bg-sky-50 text-sky-700"
-                    }`}
-                  >
-                    {activityStatusLabel(item.status)}
-                  </span>
-                  <span className="ml-auto text-slate-700 dark:text-slate-200">{item.message}</span>
+                  <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-700">
+                    {row.thumbnail ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={row.thumbnail} alt={row.title ?? row.item_id} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-500 dark:text-slate-300">
+                        sem foto
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                      {row.title ?? row.item_id}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      {insightMetric === "sales"
+                        ? `${row.orders_30d} vendas · Preço atual ${formatBRL(row.current_price)}`
+                        : insightMetric === "margin"
+                          ? `Lucro unitário estimado ${formatBRL(row.unit_profit)}`
+                          : row.risk_reason ?? "Atenção operacional"}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    {insightMetric === "sales" ? (
+                      <>
+                        <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">{row.orders_30d}</p>
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">vendas 30d</p>
+                      </>
+                    ) : insightMetric === "margin" ? (
+                      <>
+                        <p
+                          className="text-xl font-semibold text-emerald-700 dark:text-emerald-300"
+                          title="Estimativa baseada no preço atual do anúncio."
+                        >
+                          {row.margin_percent != null ? `${row.margin_percent.toFixed(1).replace(".", ",")}%` : "—"}
+                        </p>
+                        <p className="text-[11px] uppercase tracking-wide text-emerald-700/80 dark:text-emerald-300/80">
+                          margem
+                        </p>
+                      </>
+                    ) : (
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          row.risk_status === "high"
+                            ? "bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200"
+                        }`}
+                      >
+                        {row.margin_percent != null
+                          ? `Margem ${row.margin_percent.toFixed(1).replace(".", ",")}%`
+                          : "Sem margem"}
+                      </span>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
-          </div>
-        )}
+          )}
+        </div>
       </section>
 
-      {/* Bloco 3 — Ações rápidas */}
+      {/* Ações rápidas */}
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div>
@@ -605,24 +632,24 @@ function AppHomeContent() {
               Ações rápidas
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Atalhos para manter o catálogo sempre atualizado e competitivo.
+              Atalhos para decisões e execução diária.
             </p>
           </div>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <button
             type="button"
-            onClick={startSync}
-            disabled={syncing || !accountId}
+            onClick={refreshReferences}
+            disabled={refreshingRefs || !accountId}
             className="group flex flex-col justify-between rounded-2xl border border-sky-100 bg-sky-50/90 p-4 text-left text-sky-900 shadow-sm ring-1 ring-transparent backdrop-blur-sm transition hover:-translate-y-0.5 hover:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide">
-                  Sincronizar anúncios
+                  Atualizar referências
                 </p>
                 <p className="mt-1 text-xs text-sky-800">
-                  Busca novos anúncios e atualiza os existentes.
+                  Atualiza anúncios, vendas e base de cálculo.
                 </p>
               </div>
               <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-100 text-sky-700 group-hover:bg-sky-200">
@@ -630,7 +657,7 @@ function AppHomeContent() {
               </div>
             </div>
             <p className="mt-3 text-sm font-semibold">
-              {syncing ? "Sincronizando…" : "Iniciar sincronização"}
+              {refreshingRefs ? "Atualizando..." : "Atualizar referência"}
             </p>
           </button>
 
@@ -648,7 +675,7 @@ function AppHomeContent() {
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide">
-                  Editar preços de atacado
+                  Ajustar atacado
                 </p>
                 <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
                   Ajuste margens, faixas de quantidade e descontos.
@@ -658,7 +685,7 @@ function AppHomeContent() {
                 <PencilIcon />
               </div>
             </div>
-            <p className="mt-3 text-sm font-semibold">Ir para painel de atacado</p>
+            <p className="mt-3 text-sm font-semibold">Abrir painel</p>
           </Link>
 
           <Link
@@ -689,7 +716,7 @@ function AppHomeContent() {
           </Link>
 
           <Link
-            href={allowPrecoAtacado ? "/app/atacado" : dashBlockedHref}
+            href={`/app/precos${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ""}`}
             title={
               allowPrecoAtacado
                 ? undefined
@@ -702,17 +729,17 @@ function AppHomeContent() {
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide">
-                  Aplicar no Mercado Livre
+                  Criar campanha
                 </p>
                 <p className="mt-1 text-xs text-emerald-800">
-                  Envie para o ML as configurações de atacado aprovadas.
+                  Monte campanha de promoção com os anúncios selecionados.
                 </p>
               </div>
               <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 group-hover:bg-emerald-200">
                 <ApplyIcon />
               </div>
             </div>
-            <p className="mt-3 text-sm font-semibold">Aplicar alterações</p>
+            <p className="mt-3 text-sm font-semibold">Abrir calculadora</p>
           </Link>
         </div>
       </section>
@@ -752,17 +779,6 @@ function SmallIconStack() {
   );
 }
 
-function WholesaleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-      <path
-        d="M4 7.5 12 4l8 3.5-8 3.5-8-3.5Zm0 5L12 9l8 3.5-8 3.5-8-3.5Zm0 5L12 14l8 3.5L12 21 4 17.5Z"
-        className="fill-current"
-      />
-    </svg>
-  );
-}
-
 function GaugeIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
@@ -778,20 +794,23 @@ function GaugeIcon() {
   );
 }
 
-function AlertIcon() {
+function ProfitIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
       <path
-        d="M11.1 4.53a1.5 1.5 0 0 1 2.8 0l7 14.5A1.5 1.5 0 0 1 19.5 21h-15a1.5 1.5 0 0 1-1.34-2.14l7-14.33Z"
-        className="fill-current"
+        d="M4 17h16M7 13l3-3 2 2 5-5"
+        className="fill-none stroke-current"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
       <path
-        d="M12 9v5"
-        className="stroke-amber-50"
-        strokeWidth="1.6"
+        d="M15 7h2v2"
+        className="fill-none stroke-current"
+        strokeWidth="1.8"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
-      <circle cx="12" cy="16" r="0.9" className="fill-amber-50" />
     </svg>
   );
 }
@@ -811,17 +830,70 @@ function WarningIcon() {
   );
 }
 
-function ActivityIcon() {
+function AlertItem({
+  href,
+  label,
+  count,
+  tone,
+  disabled,
+}: {
+  href: string;
+  label: string;
+  count: number;
+  tone: "rose" | "amber" | "blue" | "slate";
+  disabled?: boolean;
+}) {
+  const toneClass =
+    tone === "rose"
+      ? "border-rose-100 bg-rose-50 text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200"
+      : tone === "amber"
+        ? "border-amber-100 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
+        : tone === "blue"
+          ? "border-sky-100 bg-sky-50 text-sky-800 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-200"
+          : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200";
+
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-500 dark:text-slate-400" aria-hidden="true">
-      <path
-        d="M4 6.5h3l2.2 8 3.6-13 2.4 9 1.4-4H20"
-        className="fill-none stroke-current"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <Link
+      href={href}
+      className={`group rounded-xl border p-3 shadow-sm transition hover:-translate-y-0.5 ${toneClass} ${
+        disabled ? "pointer-events-none opacity-55" : ""
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <WarningIcon />
+          <p className="text-xs font-medium">{label}</p>
+        </div>
+        <span className="text-base font-semibold">{count}</span>
+      </div>
+      <p className="mt-2 text-[11px] font-medium underline-offset-2 group-hover:underline">
+        Ver lista filtrada
+      </p>
+    </Link>
+  );
+}
+
+function MetricTab({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+        active
+          ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+          : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700/60"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 
