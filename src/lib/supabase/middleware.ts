@@ -74,9 +74,33 @@ export async function updateSession(request: NextRequest) {
       },
     }
   );
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  function clearAuthCookies(to: NextResponse) {
+    const all = request.cookies.getAll();
+    for (const c of all) {
+      // Supabase session cookies (inclui formatos chunked como ".0", ".1")
+      if (c.name.startsWith("sb-")) {
+        to.cookies.delete(c.name);
+      }
+    }
+    // OAuth temporário do Mercado Livre (defensivo para fluxos interrompidos)
+    to.cookies.delete("ml_oauth_state");
+    to.cookies.delete("ml_oauth_code_verifier");
+  }
+
+  let user: unknown = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch (error) {
+    console.error("[middleware] erro ao validar sessão, limpando cookies:", error);
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/login";
+    url.searchParams.set("redirect", request.nextUrl.pathname);
+    url.searchParams.set("reason", "session_reset");
+    const redirect = NextResponse.redirect(url);
+    clearAuthCookies(redirect);
+    return redirect;
+  }
   const isApp = request.nextUrl.pathname.startsWith("/app");
 
   /** Repassa cookies da resposta do Supabase (refresh etc.) sem forçar httpOnly — forçar httpOnly quebra cookies usados pelo client @supabase/ssr. */
