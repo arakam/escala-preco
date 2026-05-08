@@ -2,6 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 import { parseWholesaleCsv } from "@/lib/atacado-import-csv";
 import { NextRequest, NextResponse } from "next/server";
 
+/** Evita 504 em importações grandes. */
+export const maxDuration = 120;
+
+const UPSERT_CHUNK = 200;
+
 type ValidItem = { item_id: string; variation_id: number | null; tiers: { min_qty: number; price: number }[] };
 
 /**
@@ -109,24 +114,45 @@ export async function POST(request: NextRequest) {
 
   console.log("[atacado/import/confirm] Gravando", validItems.length, "itens em wholesale_drafts");
 
-  for (const row of validItems) {
-    const { error } = await supabase.from("wholesale_drafts").upsert(
-      {
-        account_id: accountId,
-        item_id: row.item_id,
-        variation_id: row.variation_id,
-        tiers_json: row.tiers,
-        source: "import",
-        updated_at: now,
-      },
-      { onConflict: "account_id,item_id,variation_id" }
-    );
-    if (error) {
-      console.error("[atacado/import/confirm] Upsert falhou:", row.item_id, error.message, error.code);
-      errors.push(`${row.item_id}${row.variation_id != null ? ` (var ${row.variation_id})` : ""}: ${error.message}`);
+  for (let i = 0; i < validItems.length; i += UPSERT_CHUNK) {
+    const chunk = validItems.slice(i, i + UPSERT_CHUNK);
+    const payload = chunk.map((row) => ({
+      account_id: accountId,
+      item_id: row.item_id,
+      variation_id: row.variation_id,
+      tiers_json: row.tiers,
+      source: "import" as const,
+      updated_at: now,
+    }));
+
+    const { error: chunkError } = await supabase.from("wholesale_drafts").upsert(payload, {
+      onConflict: "account_id,item_id,variation_id",
+    });
+
+    if (!chunkError) {
+      savedCount += chunk.length;
       continue;
     }
-    savedCount++;
+
+    for (const row of chunk) {
+      const { error } = await supabase.from("wholesale_drafts").upsert(
+        {
+          account_id: accountId,
+          item_id: row.item_id,
+          variation_id: row.variation_id,
+          tiers_json: row.tiers,
+          source: "import",
+          updated_at: now,
+        },
+        { onConflict: "account_id,item_id,variation_id" }
+      );
+      if (error) {
+        console.error("[atacado/import/confirm] Upsert falhou:", row.item_id, error.message, error.code);
+        errors.push(`${row.item_id}${row.variation_id != null ? ` (var ${row.variation_id})` : ""}: ${error.message}`);
+        continue;
+      }
+      savedCount++;
+    }
   }
 
   console.log("[atacado/import/confirm] Gravados:", savedCount, "erros:", errors.length);

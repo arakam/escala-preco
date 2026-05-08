@@ -1291,17 +1291,86 @@ function AtacadoPageContent() {
     );
   }
 
+  const atacadoLoaderMessages = [
+    "Carregando anúncios…",
+    "Buscando itens e variações no banco…",
+    "Mesclando rascunhos de atacado…",
+    "Montando a grade de preços…",
+  ] as const;
+  const applyLoaderMessages = [
+    "Enviando preços de atacado ao Mercado Livre…",
+    "Cada anúncio é atualizado na API do ML…",
+    "Aguarde — volumes grandes podem levar alguns minutos…",
+  ] as const;
+
+  const smartLoaderOpen = loadingRows || applyJob != null;
+  const applyDeterminatePercent = (() => {
+    if (loadingRows || !applyJob) return undefined;
+    const { total, processed, status } = applyJob.job;
+    if (total > 0) return Math.min(100, (processed / total) * 100);
+    if (status === "queued" || status === "running") return undefined;
+    return 100;
+  })();
+
   return (
     <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
       <SmartLoaderOverlay
-        open={loadingRows}
-        messages={[
-          "Carregando anúncios…",
-          "Buscando itens e variações no banco…",
-          "Mesclando rascunhos de atacado…",
-          "Montando a grade de preços…",
-        ]}
-      />
+        open={smartLoaderOpen}
+        messages={loadingRows ? [...atacadoLoaderMessages] : applyJob != null ? [...applyLoaderMessages] : [...atacadoLoaderMessages]}
+        determinatePercent={applyDeterminatePercent}
+        footerHint={
+          !loadingRows && applyJob
+            ? `Status: ${applyJob.job.status} · Progresso: ${applyJob.job.processed}/${applyJob.job.total} · OK: ${applyJob.job.ok} · Erros: ${applyJob.job.errors}`
+            : undefined
+        }
+        panelClassName={applyJob != null && !loadingRows ? "max-w-lg max-h-[min(90vh,40rem)] overflow-y-auto" : undefined}
+      >
+        {!loadingRows && applyJob && (
+          <>
+            <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const id = applyJobId ?? applyJob.job.id;
+                  if (id) void fetchApplyJob(id);
+                }}
+                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
+              >
+                Atualizar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setApplyJob(null);
+                  setApplyJobId(null);
+                }}
+                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
+              >
+                Fechar
+              </button>
+            </div>
+            {applyJob.logs.filter((l) => l.status === "error").length > 0 && (
+              <div className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-red-50 p-3 text-left text-sm dark:border-red-900/50 dark:bg-red-950/40">
+                <p className="mb-2 font-medium text-red-800 dark:text-red-200">Erros</p>
+                <ul className="space-y-1">
+                  {applyJob.logs
+                    .filter((l) => l.status === "error")
+                    .slice(0, 20)
+                    .map((log, idx) => (
+                      <li key={idx} className="text-red-700 dark:text-red-300">
+                        {log.item_id ?? ""}
+                        {log.variation_id != null ? ` (var ${log.variation_id})` : ""}: {log.message ?? "—"}
+                      </li>
+                    ))}
+                  {applyJob.logs.filter((l) => l.status === "error").length > 20 && (
+                    <li className="text-red-600 dark:text-red-400">… e mais erros (veja logs no servidor)</li>
+                  )}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </SmartLoaderOverlay>
       <div className="flex w-full min-h-0 gap-4">
         <aside
           className={`flex shrink-0 flex-col self-start rounded-r-lg border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 shadow-sm transition-[width] duration-200 ease-out ${
@@ -1829,56 +1898,6 @@ function AtacadoPageContent() {
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {applyJob && (
-        <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
-          <h2 className="mb-3 text-lg font-semibold">Aplicação de preços no ML</h2>
-          <div className="mb-3 flex flex-wrap items-center gap-4 text-sm">
-            <span className="font-medium">Status: {applyJob.job.status}</span>
-            <span>
-              Progresso: {applyJob.job.processed}/{applyJob.job.total}
-            </span>
-            <span className="text-green-700">OK: {applyJob.job.ok}</span>
-            <span className="text-red-700">Erros: {applyJob.job.errors}</span>
-            <button
-              type="button"
-              onClick={() => {
-                const id = applyJobId ?? applyJob?.job?.id;
-                if (id) fetchApplyJob(id);
-              }}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-100"
-            >
-              Atualizar
-            </button>
-            <button
-              type="button"
-              onClick={() => { setApplyJob(null); setApplyJobId(null); }}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-100"
-            >
-              Fechar
-            </button>
-          </div>
-          {applyJob.logs.filter((l) => l.status === "error").length > 0 && (
-            <div className="max-h-48 overflow-auto rounded border border-red-200 bg-red-50 p-2 text-sm">
-              <p className="mb-2 font-medium text-red-800">Erros:</p>
-              <ul className="space-y-1">
-                {applyJob.logs
-                  .filter((l) => l.status === "error")
-                  .slice(0, 20)
-                  .map((log, idx) => (
-                    <li key={idx} className="text-red-700">
-                      {log.item_id ?? ""}
-                      {log.variation_id != null ? ` (var ${log.variation_id})` : ""}: {log.message ?? "—"}
-                    </li>
-                  ))}
-                {applyJob.logs.filter((l) => l.status === "error").length > 20 && (
-                  <li className="text-red-600">… e mais erros (veja logs no servidor)</li>
-                )}
-              </ul>
-            </div>
-          )}
         </div>
       )}
 

@@ -2,6 +2,13 @@ import { createClient } from "@/lib/supabase/server";
 import { validateDraftRow, normalizeTiers } from "@/lib/atacado";
 import { NextRequest, NextResponse } from "next/server";
 
+/** Evita 504 em salvamentos grandes (ex.: Vercel / proxies com timeout curto). */
+export const maxDuration = 120;
+
+const UPSERT_CHUNK = 200;
+/** Deletes em paralelo moderado: menos round-trips que sequencial, sem estourar o pool. */
+const DELETE_PARALLEL = 25;
+
 /**
  * POST /api/atacado/drafts
  * Body: { accountId, rows: [{ item_id, variation_id|null, tiers:[{min_qty, price}...] }] }
@@ -85,17 +92,57 @@ export async function POST(request: NextRequest) {
   let savedCount = 0;
   const now = new Date().toISOString();
 
-  for (const row of toUpsert) {
-    if (row.tiers.length === 0) {
-      const q = supabase
-        .from("wholesale_drafts")
-        .delete()
-        .eq("account_id", accountId)
-        .eq("item_id", row.item_id);
-      const q2 = row.variation_id != null ? q.eq("variation_id", row.variation_id) : q.is("variation_id", null);
-      const { error } = await q2;
+  const toDelete = toUpsert.filter((r) => r.tiers.length === 0);
+  const withTiers = toUpsert.filter((r) => r.tiers.length > 0);
+
+  for (let i = 0; i < toDelete.length; i += DELETE_PARALLEL) {
+    const batch = toDelete.slice(i, i + DELETE_PARALLEL);
+    const outcomes = await Promise.all(
+      batch.map(async (row) => {
+        const q = supabase
+          .from("wholesale_drafts")
+          .delete()
+          .eq("account_id", accountId)
+          .eq("item_id", row.item_id);
+        const q2 = row.variation_id != null ? q.eq("variation_id", row.variation_id) : q.is("variation_id", null);
+        const { error } = await q2;
+        return { row, error };
+      })
+    );
+    for (const { row, error } of outcomes) {
       if (!error) savedCount++;
-    } else {
+      else {
+        errors.push({
+          item_id: row.item_id,
+          variation_id: row.variation_id,
+          field: "db",
+          message: error.message,
+        });
+      }
+    }
+  }
+
+  for (let i = 0; i < withTiers.length; i += UPSERT_CHUNK) {
+    const chunk = withTiers.slice(i, i + UPSERT_CHUNK);
+    const payload = chunk.map((row) => ({
+      account_id: accountId,
+      item_id: row.item_id,
+      variation_id: row.variation_id,
+      tiers_json: row.tiers,
+      source: "manual" as const,
+      updated_at: now,
+    }));
+
+    const { error: chunkError } = await supabase.from("wholesale_drafts").upsert(payload, {
+      onConflict: "account_id,item_id,variation_id",
+    });
+
+    if (!chunkError) {
+      savedCount += chunk.length;
+      continue;
+    }
+
+    for (const row of chunk) {
       const { error } = await supabase.from("wholesale_drafts").upsert(
         {
           account_id: accountId,
