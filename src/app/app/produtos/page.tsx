@@ -402,7 +402,8 @@ function ProdutosPageContent() {
           Vinculação concluída: {linkResult.items_linked} anúncio(s) e {linkResult.variations_linked} variação(ões) vinculados.
           {linkResult.cache_refresh_ok === false ? (
             <span className="ml-1">
-              O cache da Calculadora de Preços não atualizou automaticamente ({linkResult.cache_refresh_error ?? "erro"}). Atualize em `Preços > Ações > Atualizar dados`.
+              O cache da Calculadora de Preços não atualizou automaticamente ({linkResult.cache_refresh_error ?? "erro"}). Atualize em{" "}
+              <code>Preços &gt; Ações &gt; Atualizar dados</code>.
             </span>
           ) : (
             <span className="ml-1">A Calculadora de Preços já foi atualizada com os novos vínculos.</span>
