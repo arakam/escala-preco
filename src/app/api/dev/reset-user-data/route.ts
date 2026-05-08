@@ -36,5 +36,8 @@ export async function POST() {
     return NextResponse.json({ error: "Erro ao apagar produtos" }, { status: 500 });
   }
 
+  await supabase.from("operational_costs").delete().eq("user_id", user.id);
+  await supabase.from("tax_parameters").delete().eq("user_id", user.id);
+
   return NextResponse.json({ ok: true });
 }

@@ -36,7 +36,35 @@ const emptyForm: ProductFormData = {
   fixed_expenses: "",
 };
 
-type ViewMode = "products" | "stats";
+type ViewMode = "products" | "stats" | "operational" | "taxes";
+
+type FinanceOpRow = {
+  category_key: string;
+  label: string;
+  examples: string;
+  monthly_amount: number;
+};
+
+type FinanceTaxRow = {
+  category_key: string;
+  label: string;
+  examples: string;
+  percent: number;
+};
+
+function parsePtBrMoney(s: string): number {
+  const t = s.trim().replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+  if (t === "") return 0;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function parsePtBrPercent(s: string): number {
+  const t = s.trim().replace(/\s/g, "").replace(",", ".");
+  if (t === "") return 0;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+}
 
 function ProdutosPageContent() {
   const { reload: reloadOnboarding } = useOnboarding();
@@ -67,6 +95,16 @@ function ProdutosPageContent() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ success: boolean; imported?: number; errors?: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [financeLoading, setFinanceLoading] = useState(false);
+  const [financeMessage, setFinanceMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [opRows, setOpRows] = useState<FinanceOpRow[]>([]);
+  const [opInputs, setOpInputs] = useState<Record<string, string>>({});
+  const [opTotalMonthly, setOpTotalMonthly] = useState(0);
+  const [savingOperational, setSavingOperational] = useState(false);
+  const [taxRows, setTaxRows] = useState<FinanceTaxRow[]>([]);
+  const [taxInputs, setTaxInputs] = useState<Record<string, string>>({});
+  const [savingTaxes, setSavingTaxes] = useState(false);
 
   const [linking, setLinking] = useState(false);
   const [linkResult, setLinkResult] = useState<{
@@ -114,16 +152,151 @@ function ProdutosPageContent() {
   }, []);
 
   useEffect(() => {
-    if (viewMode === "products") {
-      loadProducts();
-    } else {
-      loadStats();
-    }
+    if (viewMode === "products") loadProducts();
+    else if (viewMode === "stats") loadStats();
   }, [viewMode, loadProducts, loadStats]);
+
+  const loadOperationalCosts = useCallback(async () => {
+    setFinanceLoading(true);
+    setFinanceMessage(null);
+    try {
+      const res = await fetch("/api/finance/operational-costs");
+      const data = await res.json();
+      if (!res.ok) {
+        setFinanceMessage({ type: "error", text: data.error ?? "Erro ao carregar custos." });
+        setOpRows([]);
+        setOpInputs({});
+        return;
+      }
+      const rows = (data.rows ?? []) as FinanceOpRow[];
+      setOpRows(rows);
+      setOpTotalMonthly(Number(data.total_monthly) || 0);
+      setOpInputs(
+        Object.fromEntries(
+          rows.map((r) => [
+            r.category_key,
+            r.monthly_amount === 0 ? "" : String(r.monthly_amount).replace(".", ","),
+          ])
+        )
+      );
+    } catch {
+      setFinanceMessage({ type: "error", text: "Erro de conexão ao carregar custos." });
+    } finally {
+      setFinanceLoading(false);
+    }
+  }, []);
+
+  const loadTaxParameters = useCallback(async () => {
+    setFinanceLoading(true);
+    setFinanceMessage(null);
+    try {
+      const res = await fetch("/api/finance/tax-parameters");
+      const data = await res.json();
+      if (!res.ok) {
+        setFinanceMessage({ type: "error", text: data.error ?? "Erro ao carregar impostos." });
+        setTaxRows([]);
+        setTaxInputs({});
+        return;
+      }
+      const rows = (data.rows ?? []) as FinanceTaxRow[];
+      setTaxRows(rows);
+      setTaxInputs(
+        Object.fromEntries(
+          rows.map((r) => [
+            r.category_key,
+            r.percent === 0 ? "" : String(r.percent).replace(".", ","),
+          ])
+        )
+      );
+    } catch {
+      setFinanceMessage({ type: "error", text: "Erro de conexão ao carregar impostos." });
+    } finally {
+      setFinanceLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (viewMode === "operational") void loadOperationalCosts();
+    else if (viewMode === "taxes") void loadTaxParameters();
+  }, [viewMode, loadOperationalCosts, loadTaxParameters]);
 
   useEffect(() => {
     loadUnregisteredSkus();
   }, [loadUnregisteredSkus]);
+
+  async function handleSaveOperational() {
+    setSavingOperational(true);
+    setFinanceMessage(null);
+    const rows: { category_key: string; monthly_amount: number }[] = [];
+    for (const r of opRows) {
+      const raw = opInputs[r.category_key] ?? "";
+      const n = parsePtBrMoney(raw);
+      if (Number.isNaN(n)) {
+        setFinanceMessage({
+          type: "error",
+          text: `Valor inválido em «${r.label}». Use números (ex.: 1500 ou 1.500,50).`,
+        });
+        setSavingOperational(false);
+        return;
+      }
+      rows.push({ category_key: r.category_key, monthly_amount: n });
+    }
+    try {
+      const res = await fetch("/api/finance/operational-costs", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFinanceMessage({ type: "error", text: data.error ?? "Erro ao salvar." });
+        return;
+      }
+      setFinanceMessage({ type: "success", text: "Custos operacionais salvos." });
+      await loadOperationalCosts();
+    } catch {
+      setFinanceMessage({ type: "error", text: "Erro de conexão ao salvar." });
+    } finally {
+      setSavingOperational(false);
+    }
+  }
+
+  async function handleSaveTaxes() {
+    setSavingTaxes(true);
+    setFinanceMessage(null);
+    const rows: { category_key: string; percent: number }[] = [];
+    for (const r of taxRows) {
+      const raw = taxInputs[r.category_key] ?? "";
+      const n = parsePtBrPercent(raw);
+      if (Number.isNaN(n) || n < 0 || n > 100) {
+        setFinanceMessage({
+          type: "error",
+          text: `Percentual inválido (0–100) em «${r.label}».`,
+        });
+        setSavingTaxes(false);
+        return;
+      }
+      rows.push({ category_key: r.category_key, percent: n });
+    }
+    try {
+      const res = await fetch("/api/finance/tax-parameters", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFinanceMessage({ type: "error", text: data.error ?? "Erro ao salvar." });
+        return;
+      }
+      setFinanceMessage({ type: "success", text: "Parâmetros de impostos salvos." });
+      await loadTaxParameters();
+    } catch {
+      setFinanceMessage({ type: "error", text: "Erro de conexão ao salvar." });
+    } finally {
+      setSavingTaxes(false);
+    }
+  }
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -360,34 +533,38 @@ function ProdutosPageContent() {
           >
             {linking ? "Vinculando…" : "Vincular SKUs"}
           </button>
-          <button
-            type="button"
-            onClick={() => setImportModalOpen(true)}
-            className="btn btn-secondary px-4 py-2 text-sm"
-          >
-            Importar CSV
-          </button>
-          <button
-            type="button"
-            onClick={handleExport}
-            className="btn btn-secondary px-4 py-2 text-sm"
-          >
-            Exportar CSV
-          </button>
-          <button
-            type="button"
-            onClick={() => setDeleteAllOpen(true)}
-            className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
-          >
-            Excluir todos os produtos
-          </button>
-          <button
-            type="button"
-            onClick={openNewProduct}
-            className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark"
-          >
-            Novo Produto
-          </button>
+          {viewMode === "products" && (
+            <>
+              <button
+                type="button"
+                onClick={() => setImportModalOpen(true)}
+                className="btn btn-secondary px-4 py-2 text-sm"
+              >
+                Importar CSV
+              </button>
+              <button
+                type="button"
+                onClick={handleExport}
+                className="btn btn-secondary px-4 py-2 text-sm"
+              >
+                Exportar CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteAllOpen(true)}
+                className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
+              >
+                Excluir todos os produtos
+              </button>
+              <button
+                type="button"
+                onClick={openNewProduct}
+                className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark"
+              >
+                Novo Produto
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -447,8 +624,31 @@ function ProdutosPageContent() {
         >
           Estatísticas de Anúncios
         </button>
+        <button
+          type="button"
+          onClick={() => setViewMode("operational")}
+          className={`px-4 py-2 text-sm font-medium ${
+            viewMode === "operational"
+              ? "border-b-2 border-brand-blue text-brand-blue"
+              : "text-fg hover:text-fg-strong"
+          }`}
+        >
+          Custos Operacionais
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode("taxes")}
+          className={`px-4 py-2 text-sm font-medium ${
+            viewMode === "taxes"
+              ? "border-b-2 border-brand-blue text-brand-blue"
+              : "text-fg hover:text-fg-strong"
+          }`}
+        >
+          Impostos
+        </button>
       </div>
 
+      {(viewMode === "products" || viewMode === "stats") && (
       <form onSubmit={handleSearchSubmit} className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex flex-1 items-center gap-2 rounded-full bg-slate-50 px-3 py-1.5 ring-1 ring-slate-200">
           <span className="text-xs text-slate-500 dark:text-slate-400">Buscar</span>
@@ -480,8 +680,9 @@ function ProdutosPageContent() {
           </button>
         )}
       </form>
+      )}
 
-      {loading ? (
+      {loading && (viewMode === "products" || viewMode === "stats") ? (
         <p className="text-fg-muted">Carregando…</p>
       ) : viewMode === "products" ? (
         products.length === 0 ? (
@@ -642,11 +843,12 @@ function ProdutosPageContent() {
             )}
           </>
         )
-      ) : stats.length === 0 ? (
+      ) : viewMode === "stats" ? (
+        stats.length === 0 ? (
         <p className="text-fg-muted">
           Nenhum produto com anúncios vinculados. Clique em &quot;Vincular SKUs&quot; para associar automaticamente.
         </p>
-      ) : (
+        ) : (
         <>
           <AppTable
             summary={`${total} produto(s) com anúncios — página ${page} de ${totalPages || 1}`}
@@ -776,7 +978,159 @@ function ProdutosPageContent() {
             </div>
           )}
         </>
-      )}
+        )
+      ) : viewMode === "operational" ? (
+        financeLoading ? (
+          <p className="text-fg-muted">Carregando custos…</p>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Informe o valor <span className="font-medium">mensal estimado</span> de cada custo operacional da empresa.
+              Os dados serão usados nas análises e telas futuras.
+            </p>
+            {financeMessage && (
+              <div
+                className={`rounded-lg px-3 py-2 text-sm ${
+                  financeMessage.type === "success"
+                    ? "bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-200"
+                    : "bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200"
+                }`}
+              >
+                {financeMessage.text}
+              </div>
+            )}
+            <AppTable summary="Custos operacionais (R$ / mês)" maxHeight="min(70vh, 32rem)">
+              <thead className="bg-slate-50 dark:bg-slate-800/80">
+                <tr>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    Categoria
+                  </th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    Exemplos
+                  </th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    Valor mensal (R$)
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {opRows.map((r) => (
+                  <tr
+                    key={r.category_key}
+                    className="border-b border-slate-100 bg-white/50 dark:border-slate-700 dark:bg-slate-800/40"
+                  >
+                    <td className="p-2 text-sm font-medium text-slate-900 dark:text-slate-50">{r.label}</td>
+                    <td className="max-w-md p-2 text-xs text-slate-600 dark:text-slate-400">{r.examples}</td>
+                    <td className="p-2 text-right">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={opInputs[r.category_key] ?? ""}
+                        onChange={(e) =>
+                          setOpInputs((prev) => ({ ...prev, [r.category_key]: e.target.value }))
+                        }
+                        placeholder="0,00"
+                        className="input w-36 py-1.5 text-right text-sm"
+                        aria-label={`Valor mensal ${r.label}`}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </AppTable>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-600">
+              <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                Total mensal (estimado):{" "}
+                <span className="tabular-nums text-brand-blue">
+                  R$ {opTotalMonthly.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="ml-2 text-xs font-normal text-slate-500 dark:text-slate-400">
+                  (atualizado após salvar)
+                </span>
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleSaveOperational()}
+                disabled={savingOperational}
+                className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+              >
+                {savingOperational ? "Salvando…" : "Salvar custos operacionais"}
+              </button>
+            </div>
+          </div>
+        )
+      ) : viewMode === "taxes" ? (
+        financeLoading ? (
+          <p className="text-fg-muted">Carregando impostos…</p>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Cadastre <span className="font-medium">percentuais de referência</span> da sua carga tributária (empresa).
+              Isso complementa o campo <span className="font-medium">Imposto (%)</span> de cada produto na aba Produtos.
+            </p>
+            {financeMessage && (
+              <div
+                className={`rounded-lg px-3 py-2 text-sm ${
+                  financeMessage.type === "success"
+                    ? "bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-200"
+                    : "bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200"
+                }`}
+              >
+                {financeMessage.text}
+              </div>
+            )}
+            <AppTable summary="Impostos e contribuições (%)" maxHeight="min(70vh, 28rem)">
+              <thead className="bg-slate-50 dark:bg-slate-800/80">
+                <tr>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    Categoria
+                  </th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    Exemplos
+                  </th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    % (referência)
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {taxRows.map((r) => (
+                  <tr
+                    key={r.category_key}
+                    className="border-b border-slate-100 bg-white/50 dark:border-slate-700 dark:bg-slate-800/40"
+                  >
+                    <td className="p-2 text-sm font-medium text-slate-900 dark:text-slate-50">{r.label}</td>
+                    <td className="max-w-md p-2 text-xs text-slate-600 dark:text-slate-400">{r.examples}</td>
+                    <td className="p-2 text-right">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={taxInputs[r.category_key] ?? ""}
+                        onChange={(e) =>
+                          setTaxInputs((prev) => ({ ...prev, [r.category_key]: e.target.value }))
+                        }
+                        placeholder="0,00"
+                        className="input w-28 py-1.5 text-right text-sm"
+                        aria-label={`Percentual ${r.label}`}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </AppTable>
+            <div className="flex justify-end border-t border-slate-200 pt-4 dark:border-slate-600">
+              <button
+                type="button"
+                onClick={() => void handleSaveTaxes()}
+                disabled={savingTaxes}
+                className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+              >
+                {savingTaxes ? "Salvando…" : "Salvar impostos"}
+              </button>
+            </div>
+          </div>
+        )
+      ) : null}
 
       {/* Modal: Novo/Editar Produto */}
       {modalOpen && (
