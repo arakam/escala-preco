@@ -69,7 +69,12 @@ function ProdutosPageContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [linking, setLinking] = useState(false);
-  const [linkResult, setLinkResult] = useState<{ items_linked: number; variations_linked: number } | null>(null);
+  const [linkResult, setLinkResult] = useState<{
+    items_linked: number;
+    variations_linked: number;
+    cache_refresh_ok?: boolean;
+    cache_refresh_error?: string | null;
+  } | null>(null);
   const [unregisteredModalOpen, setUnregisteredModalOpen] = useState(false);
 
   const loadProducts = useCallback(async () => {
@@ -265,6 +270,8 @@ function ProdutosPageContent() {
         setLinkResult({
           items_linked: data.items_linked,
           variations_linked: data.variations_linked,
+          cache_refresh_ok: data.cache_refresh?.ok ?? true,
+          cache_refresh_error: data.cache_refresh?.error ?? null,
         });
         if (viewMode === "stats") {
           loadStats();
@@ -385,12 +392,25 @@ function ProdutosPageContent() {
       </div>
 
       {linkResult && (
-        <div className="mb-4 rounded bg-green-50 p-3 text-sm text-green-700">
+        <div
+          className={`mb-4 rounded p-3 text-sm ${
+            linkResult.cache_refresh_ok === false
+              ? "bg-amber-50 text-amber-800"
+              : "bg-green-50 text-green-700"
+          }`}
+        >
           Vinculação concluída: {linkResult.items_linked} anúncio(s) e {linkResult.variations_linked} variação(ões) vinculados.
+          {linkResult.cache_refresh_ok === false ? (
+            <span className="ml-1">
+              O cache da Calculadora de Preços não atualizou automaticamente ({linkResult.cache_refresh_error ?? "erro"}). Atualize em `Preços > Ações > Atualizar dados`.
+            </span>
+          ) : (
+            <span className="ml-1">A Calculadora de Preços já foi atualizada com os novos vínculos.</span>
+          )}
           <button
             type="button"
             onClick={() => setLinkResult(null)}
-            className="ml-2 text-green-900 underline hover:no-underline"
+            className="ml-2 underline hover:no-underline"
           >
             Fechar
           </button>

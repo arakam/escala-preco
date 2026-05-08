@@ -26,6 +26,7 @@ export async function POST() {
   const result = data?.[0] ?? { items_linked: 0, variations_linked: 0 };
 
   const totalLinked = result.items_linked + result.variations_linked;
+  let cacheRefresh: { ok: boolean; count?: number; error?: string } | null = null;
   if (totalLinked > 0) {
     const { data: account } = await supabase
       .from("ml_accounts")
@@ -34,9 +35,15 @@ export async function POST() {
       .single();
     if (account?.id) {
       const { refreshPricingCache } = await import("@/lib/pricing-cache");
-      refreshPricingCache(account.id).catch((err) =>
-        console.error("[products/link] pricing cache refresh:", err)
-      );
+      try {
+        const refreshed = await refreshPricingCache(account.id);
+        cacheRefresh = refreshed.ok
+          ? { ok: true, count: refreshed.count }
+          : { ok: false, error: refreshed.error };
+      } catch (err) {
+        console.error("[products/link] pricing cache refresh:", err);
+        cacheRefresh = { ok: false, error: "Erro ao atualizar cache de preços" };
+      }
     }
   }
 
@@ -45,5 +52,6 @@ export async function POST() {
     items_linked: result.items_linked,
     variations_linked: result.variations_linked,
     total_linked: totalLinked,
+    cache_refresh: cacheRefresh,
   });
 }
