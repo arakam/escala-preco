@@ -3097,6 +3097,14 @@ function PrecosPageContent() {
           <p className="mt-1 text-xs text-amber-700">
             No menu <strong className="font-semibold">Ações</strong> acima, escolha <strong className="font-semibold">Atualizar dados</strong> para carregar os anúncios a partir do Mercado Livre.
           </p>
+          <button
+            type="button"
+            onClick={() => void handleRefreshCache()}
+            disabled={cacheRefreshing}
+            className="mt-3 rounded-full border border-amber-300 bg-white px-4 py-2 text-xs font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {cacheRefreshing ? "Atualizando dados..." : "Atualizar dados"}
+          </button>
           {refreshError && (
             <p className="mt-2 text-xs font-medium text-red-600">{refreshError}</p>
           )}
