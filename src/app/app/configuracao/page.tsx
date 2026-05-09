@@ -78,6 +78,21 @@ interface ReputationData {
   user_product_seller?: boolean;
 }
 
+interface WebhookNotificationRow {
+  id: string;
+  created_at: string;
+  account_id: string;
+  ml_user_id: number;
+  topic: string;
+  resource: string | null;
+  application_id: string | null;
+  attempts: number | null;
+  ml_sent_at: string | null;
+  actions: unknown;
+  notification_id: string | null;
+  raw_payload: Record<string, unknown>;
+}
+
 function getReputationColor(levelId: string | null): { bg: string; text: string; label: string } {
   if (!levelId) return { bg: "bg-gray-100", text: "text-gray-600", label: "Sem reputação" };
   
@@ -116,7 +131,10 @@ function ConfiguracaoContent() {
   const [loading, setLoading] = useState(true);
   const [shippingLoading, setShippingLoading] = useState(true);
   const [reputationLoading, setReputationLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"ml" | "frete" | "aparencia">("ml");
+  const [activeTab, setActiveTab] = useState<"ml" | "notificacoes" | "frete" | "aparencia">("ml");
+  const [webhookNotifications, setWebhookNotifications] = useState<WebhookNotificationRow[]>([]);
+  const [webhookNotificationsLoading, setWebhookNotificationsLoading] = useState(false);
+  const [webhookNotificationsError, setWebhookNotificationsError] = useState<string | null>(null);
   const [devResetting, setDevResetting] = useState(false);
   const { theme, setTheme } = useTheme();
   const searchParams = useSearchParams();
@@ -148,11 +166,34 @@ function ConfiguracaoContent() {
     setReputationLoading(false);
   }, []);
 
+  const loadWebhookNotifications = useCallback(async () => {
+    setWebhookNotificationsLoading(true);
+    setWebhookNotificationsError(null);
+    try {
+      const res = await fetch("/api/mercadolivre/webhook-notifications");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setWebhookNotificationsError((data as { error?: string }).error || "Falha ao carregar notificações.");
+        setWebhookNotifications([]);
+        return;
+      }
+      setWebhookNotifications((data as { notifications?: WebhookNotificationRow[] }).notifications ?? []);
+    } finally {
+      setWebhookNotificationsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadAccounts();
     loadShippingCosts();
     loadReputation();
   }, [loadAccounts, loadShippingCosts, loadReputation]);
+
+  useEffect(() => {
+    if (activeTab === "notificacoes") {
+      void loadWebhookNotifications();
+    }
+  }, [activeTab, loadWebhookNotifications]);
 
   async function handleDevResetData() {
     if (
@@ -239,6 +280,17 @@ function ConfiguracaoContent() {
           }`}
         >
           Integrações Mercado Livre
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("notificacoes")}
+          className={`rounded-t-md px-3 py-2 text-sm font-medium ${
+            activeTab === "notificacoes"
+              ? "border border-b-white border-gray-200 bg-white text-blue-600 dark:border-slate-700 dark:border-b-slate-900 dark:bg-slate-900 dark:text-blue-400"
+              : "text-gray-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400"
+          }`}
+        >
+          Notificações
         </button>
         <button
           type="button"
@@ -584,6 +636,110 @@ function ConfiguracaoContent() {
             </section>
           )}
         </>
+      )}
+
+      {activeTab === "notificacoes" && (
+        <section className="mb-8">
+          <h2 className="mb-3 text-lg font-medium text-fg-strong">Notificações do Mercado Livre</h2>
+          <p className="mb-2 text-gray-600 dark:text-slate-300">
+            Eventos recebidos via webhook nas últimas 24 horas. O Mercado Livre envia um POST para a URL de callback
+            configurada no seu aplicativo; apenas notificações cujo{" "}
+            <code className="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-slate-800">user_id</code> corresponde a
+            uma conta conectada aqui aparecem na lista.
+          </p>
+          <p className="mb-4 text-sm text-gray-500 dark:text-slate-400">
+            Callback em produção:{" "}
+            <code className="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-slate-800">
+              https://app.escalapreco.com.br/wh/api
+            </code>
+            . Documentação:{" "}
+            <a
+              href="https://developers.mercadolivre.com.br/pt_br/produto-receba-notificacoes"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline dark:text-blue-400"
+            >
+              Receba notificações
+            </a>
+            .
+          </p>
+
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void loadWebhookNotifications()}
+              disabled={webhookNotificationsLoading}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-fg-strong hover:bg-gray-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+            >
+              {webhookNotificationsLoading ? "Atualizando…" : "Atualizar lista"}
+            </button>
+          </div>
+
+          {webhookNotificationsError && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/30">
+              <p className="text-sm text-amber-800 dark:text-amber-200">{webhookNotificationsError}</p>
+              <p className="mt-2 text-xs text-amber-700 dark:text-amber-300/90">
+                Se acabou de criar a tabela, execute a migration{" "}
+                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">018_ml_webhook_notifications.sql</code>{" "}
+                no Supabase.
+              </p>
+            </div>
+          )}
+
+          {webhookNotificationsLoading && webhookNotifications.length === 0 && !webhookNotificationsError ? (
+            <p className="text-gray-500 dark:text-slate-400">Carregando…</p>
+          ) : webhookNotifications.length === 0 ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-6 text-center dark:border-slate-700 dark:bg-slate-800/80">
+              <p className="text-sm text-gray-600 dark:text-slate-300">
+                Nenhuma notificação nas últimas 24 horas para suas contas conectadas.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
+              <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-slate-700">
+                <thead className="bg-gray-50 dark:bg-slate-800">
+                  <tr>
+                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Recebido</th>
+                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Tópico</th>
+                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Recurso</th>
+                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Conta ML</th>
+                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Detalhes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
+                  {webhookNotifications.map((n) => {
+                    const acc = accounts.find((a) => a.id === n.account_id);
+                    const accLabel = acc?.ml_nickname || `ID ${n.ml_user_id}`;
+                    return (
+                      <tr key={n.id} className="align-top hover:bg-gray-50 dark:hover:bg-slate-800">
+                        <td className="whitespace-nowrap px-3 py-2 text-gray-700 dark:text-slate-200">
+                          {new Date(n.created_at).toLocaleString("pt-BR", {
+                            timeZone: "America/Sao_Paulo",
+                            dateStyle: "short",
+                            timeStyle: "medium",
+                          })}
+                        </td>
+                        <td className="px-3 py-2 font-medium text-fg-strong">{n.topic}</td>
+                        <td className="max-w-[14rem] truncate px-3 py-2 text-gray-600 dark:text-slate-300" title={n.resource ?? ""}>
+                          {n.resource ?? "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-gray-700 dark:text-slate-200">{accLabel}</td>
+                        <td className="px-3 py-2">
+                          <details className="cursor-pointer text-blue-600 dark:text-blue-400">
+                            <summary className="text-xs font-medium">JSON</summary>
+                            <pre className="mt-2 max-h-48 max-w-xl overflow-auto rounded bg-gray-100 p-2 text-xs dark:bg-slate-950 dark:text-slate-200">
+                              {JSON.stringify(n.raw_payload, null, 2)}
+                            </pre>
+                          </details>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       )}
 
       {activeTab === "frete" && (
