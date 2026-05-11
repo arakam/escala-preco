@@ -1,0 +1,1409 @@
+"use client";
+
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+} from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { AppTable } from "@/components/AppTable";
+import type { FullPricingBreakdown } from "@/lib/pricing/full-net";
+import {
+  ML_PROMOTION_TYPE_CATALOG,
+  labelForMlPromotionType,
+  normalizeMlPromotionTypeCode,
+} from "@/lib/mercadolivre/ml-promotion-types";
+import { OnboardingGate } from "@/components/OnboardingGate";
+import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
+
+const STORAGE_KEY = "escalapreco_dashboard_account_id";
+
+/** Mesmo critério da tela Preços (`linked=1` / `linked=0`) — `ml_items.product_id`. */
+type PromoLinkFilter = "all" | "linked" | "unlinked";
+
+function linkFilterFromSearchParams(searchParams: URLSearchParams): PromoLinkFilter {
+  const v = searchParams.get("linked")?.trim();
+  if (v === "1") return "linked";
+  if (v === "0") return "unlinked";
+  return "all";
+}
+
+/** Filtro tipo de promoção (cache): ativa vs convite/possível — mesma ideia da coluna Tipo. */
+type PromoKindFilter = "" | "ativa" | "possível";
+
+function kindFilterFromSearchParams(searchParams: URLSearchParams): PromoKindFilter {
+  const k = searchParams.get("kind")?.trim();
+  if (k === "ativa" || k === "possível") return k;
+  return "";
+}
+
+/** Faixas de lucratividade (%), alinhadas à tela Preços. */
+type PromoProfitFilter = "" | "high" | "medium" | "low" | "negative";
+
+function profitFilterFromSearchParams(searchParams: URLSearchParams): PromoProfitFilter {
+  const p = searchParams.get("profit")?.trim();
+  if (p === "high" || p === "medium" || p === "low" || p === "negative") return p;
+  return "";
+}
+
+/** Fase da campanha pelas datas (parâmetro `camp` na URL). */
+type PromoCampaignPhase = "" | "in" | "future" | "past" | "nodates";
+
+function campFilterFromSearchParams(searchParams: URLSearchParams): PromoCampaignPhase {
+  const c = searchParams.get("camp")?.trim().toLowerCase() ?? "";
+  if (c === "in" || c === "vigente" || c === "ativa_campanha") return "in";
+  if (c === "future" || c === "futura" || c === "agendada") return "future";
+  if (c === "past" || c === "encerrada" || c === "fim") return "past";
+  if (c === "nodates" || c === "sem_data" || c === "semdata") return "nodates";
+  return "";
+}
+
+/** Filtro por campo `type` do seller-promotions (ex.: DEAL, SMART). */
+function ptypeFilterFromSearchParams(searchParams: URLSearchParams): string {
+  const n = normalizeMlPromotionTypeCode(searchParams.get("ptype"));
+  return n && /^[A-Z][A-Z0-9_]{0,63}$/.test(n) ? n : "";
+}
+
+function PromocoesHelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden />
+      <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute right-4 top-4 text-fg-muted hover:text-fg"
+          aria-label="Fechar"
+        >
+          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        <h2 className="mb-4 text-xl font-semibold">Como funciona a tela Promoções</h2>
+        <div className="space-y-4 text-sm text-fg">
+          <section>
+            <h3 className="mb-2 font-medium text-fg-strong">Objetivo</h3>
+            <p>
+              Lista promoções do Mercado Livre por anúncio (ativas e possíveis/convites), com taxa ML, frete Líder,
+              impostos e lucro estimado a partir do cache gravado no banco.
+            </p>
+          </section>
+          <section>
+            <h3 className="mb-2 font-medium text-fg-strong">Dados e atualização</h3>
+            <ul className="list-inside list-disc space-y-1">
+              <li>
+                A tabela lê <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">promotions_cache_rows</code>.
+                Clique em <strong>Recarregar Promoções</strong> para buscar no Mercado Livre, recalcular e gravar{" "}
+                <strong>todos os anúncios</strong> que entram na lista atual (busca + vínculo), em todas as páginas — pode levar vários minutos em catálogos grandes.
+              </li>
+              <li>
+                <strong>Preço</strong> vem da API de preços (standard); <strong>Preço promoção</strong> vem do seller-promotions / oferta.
+              </li>
+              <li>
+                <strong>Valor bruto</strong> é o <strong>Preço promoção</strong>. <strong>Vai receber</strong> = bruto − taxa ML − frete. <strong>Lucro</strong> = Vai receber − custo − imposto − taxa extra − desp. fixas. Use o cache de preços (vínculo produto) para custo e cadastros; atualize a tela Preços se faltar vínculo.
+              </li>
+            </ul>
+          </section>
+          <section>
+            <h3 className="mb-2 font-medium text-fg-strong">Filtros</h3>
+            <ul className="list-inside list-disc space-y-1">
+              <li>
+                <strong>Vínculo MLB → produto:</strong> igual à tela Preços (vinculado ou não ao cadastro).
+              </li>
+              <li>
+                <strong>Tipo:</strong> promoção <strong>Ativa</strong> no ML ou <strong>Possível</strong> (convite/candidata).
+              </li>
+              <li>
+                <strong>Lucratividade:</strong> faixas sobre o lucro % (com custo cadastrado), como na Calculadora de Preços: &gt;20%, 10–20%,
+                0–10%, prejuízo.
+              </li>
+              <li>
+                <strong>Campanha ML (tipo):</strong> filtra pelo código da campanha no Mercado Livre (<code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">type</code> em seller-promotions), por exemplo DEAL, SMART ou SELLER_CAMPAIGN. Linhas antigas no cache sem esse campo só aparecem após clicar em <strong>Recarregar Promoções</strong>.
+              </li>
+              <li>
+                <strong>Prazo da campanha:</strong> usa início e fim quando o ML enviar datas; filtre por <em>em vigência</em>, <em>futura</em>, <em>encerrada</em> ou <em>sem datas</em>.
+              </li>
+            </ul>
+          </section>
+          <section>
+            <h3 className="mb-2 font-medium text-fg-strong">Colunas principais</h3>
+            <ul className="list-inside list-disc space-y-1">
+              <li>
+                <strong>MLB:</strong> clique para copiar o código do anúncio.
+              </li>
+              <li>
+                <strong>Campanha ML:</strong> nome amigável do tipo de campanha no ML (código <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">type</code> em seller-promotions).
+              </li>
+              <li>
+                <strong>Aviso:</strong> destaca webhooks recentes do ML (candidatos/ofertas públicas).
+              </li>
+              <li>
+                <strong>Taxa ML / Frete:</strong> conforme tabela oficial e Mercado Líder; promoções SMART podem abater subsídio na taxa.
+              </li>
+              <li>
+                <strong>ML:</strong> link para o anúncio no site do Mercado Livre.
+              </li>
+              <li>
+                <strong>Início / Fim:</strong> janela da campanha retornada pela API (horário de São Paulo na tabela).
+              </li>
+            </ul>
+          </section>
+        </div>
+        <div className="mt-6 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark"
+          >
+            Entendi
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface MLAccount {
+  id: string;
+  ml_nickname: string | null;
+  ml_user_id: number;
+}
+
+interface PromoAlert {
+  id: string;
+  created_at: string;
+  item_id: string | null;
+  topic: string;
+  promotion_type: string | null;
+  status_label: string | null;
+  fetch_error: string | null;
+  external_id: string | null;
+  promotion_id: string | null;
+}
+
+/** Uma linha na grade = uma promoção persistida em `promotions_cache_rows`. */
+interface FlatPromoRow {
+  item_id: string;
+  title: string | null;
+  status: string | null;
+  thumbnail: string | null;
+  permalink: string | null;
+  active_price: number | null;
+  promotions_api_failed: boolean;
+  promotionKind: "ativa" | "possível" | "—";
+  promotionLabel: string;
+  /** Código `type` da API seller-promotions (ex.: DEAL). */
+  promotionType: string | null;
+  promo_price: number | null;
+  value_hint: string | null;
+  rowKey: string;
+  listing_type_id: string | null;
+  category_id: string | null;
+  cost_price: number | null;
+  weight_kg: number | null;
+  height_cm: number | null;
+  width_cm: number | null;
+  length_cm: number | null;
+  tax_percent: number | null;
+  extra_fee_percent: number | null;
+  fixed_expenses: number | null;
+  pricing: FullPricingBreakdown | null;
+  profit: number | null;
+  profit_percent: number | null;
+  campaign_start_at: string | null;
+  campaign_finish_at: string | null;
+}
+
+const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+function formatPrice(n: number | null): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return brl.format(n);
+}
+
+function formatCampaignDatePt(iso: string | null | undefined): string {
+  if (iso == null || String(iso).trim() === "") return "—";
+  const t = Date.parse(String(iso));
+  if (!Number.isFinite(t)) return "—";
+  return new Date(t).toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+/** Ícone de alfinete (congelar coluna), alinhado à tela Preços */
+function PinIcon({ pinned, className }: { pinned: boolean; className?: string }) {
+  const pathD = "M16 12V4h1V2H7v2h1v8l-4 4v2h12v-2l-4-4z";
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill={pinned ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d={pathD} />
+    </svg>
+  );
+}
+
+/** Larguras mínimas (colgroup + sticky `left`) — mesma ideia da Calculadora de Preços */
+const PROMOCOES_COLUMNS: { minWidth: number }[] = [
+  { minWidth: 120 },
+  { minWidth: 52 },
+  { minWidth: 100 },
+  { minWidth: 220 },
+  { minWidth: 88 },
+  { minWidth: 90 },
+  { minWidth: 100 },
+  { minWidth: 80 },
+  { minWidth: 88 },
+  { minWidth: 140 },
+  { minWidth: 200 },
+  { minWidth: 95 },
+  { minWidth: 95 },
+  { minWidth: 72 },
+  { minWidth: 72 },
+  { minWidth: 72 },
+  { minWidth: 80 },
+  { minWidth: 88 },
+  { minWidth: 88 },
+  { minWidth: 110 },
+  { minWidth: 110 },
+  { minWidth: 72 },
+];
+
+const PROMOCOES_STICKY_STORAGE_KEY = "escalapreco.promocoes.pinnedColumns.v1";
+
+function readPromocoesStickyInitial(): Set<number> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(PROMOCOES_STICKY_STORAGE_KEY);
+    if (!raw) return new Set([0, 1, 2, 3]);
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return new Set([0, 1, 2, 3]);
+    const n = PROMOCOES_COLUMNS.length;
+    const nums = arr.filter(
+      (x): x is number => typeof x === "number" && Number.isInteger(x) && x >= 0 && x < n
+    );
+    return nums.length > 0 ? new Set(nums) : new Set([0, 1, 2, 3]);
+  } catch {
+    return new Set([0, 1, 2, 3]);
+  }
+}
+
+function PromocoesContent() {
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const [accounts, setAccounts] = useState<MLAccount[]>([]);
+  /** Filtro aplicado: refletido na URL como `q` (título ou MLB). */
+  const qFromUrl = searchParams.get("q")?.trim() ?? "";
+  const linkFromUrl = useMemo(() => linkFilterFromSearchParams(searchParams), [searchParams]);
+  const kindFromUrl = useMemo(() => kindFilterFromSearchParams(searchParams), [searchParams]);
+  const profitFromUrl = useMemo(() => profitFilterFromSearchParams(searchParams), [searchParams]);
+  const ptypeFromUrl = useMemo(() => ptypeFilterFromSearchParams(searchParams), [searchParams]);
+  const campFromUrl = useMemo(() => campFilterFromSearchParams(searchParams), [searchParams]);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [draftSearch, setDraftSearch] = useState(qFromUrl);
+  const [draftLinkFilter, setDraftLinkFilter] = useState<PromoLinkFilter>("all");
+  const [draftKindFilter, setDraftKindFilter] = useState<PromoKindFilter>("");
+  const [draftProfitFilter, setDraftProfitFilter] = useState<PromoProfitFilter>("");
+  const [draftPtypeFilter, setDraftPtypeFilter] = useState("");
+  const [draftCampFilter, setDraftCampFilter] = useState<PromoCampaignPhase>("");
+  const [page, setPage] = useState(1);
+  const [flatRows, setFlatRows] = useState<FlatPromoRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState(12);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<PromoAlert[]>([]);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
+  const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [copiedCell, setCopiedCell] = useState<string | null>(null);
+  const loadPromoGen = useRef(0);
+
+  const [stickyColumns, setStickyColumns] = useState<Set<number>>(() => new Set());
+  const [stickyHydrated, setStickyHydrated] = useState(false);
+  const [contextMenuCol, setContextMenuCol] = useState<number | null>(null);
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  const { stickyHeaderStyles, stickyBodyStyles } = useMemo(() => {
+    const head: (CSSProperties | undefined)[] = Array.from(
+      { length: PROMOCOES_COLUMNS.length },
+      () => undefined
+    );
+    const body: (CSSProperties | undefined)[] = Array.from(
+      { length: PROMOCOES_COLUMNS.length },
+      () => undefined
+    );
+    let left = 0;
+    let order = 0;
+    for (let i = 0; i < PROMOCOES_COLUMNS.length; i++) {
+      if (stickyColumns.has(i)) {
+        const w = PROMOCOES_COLUMNS[i].minWidth;
+        const base = { position: "sticky" as const, left, boxSizing: "border-box" as const };
+        head[i] = { ...base, zIndex: 30 + order };
+        body[i] = { ...base, zIndex: 2 + order };
+        left += w;
+        order++;
+      }
+    }
+    return { stickyHeaderStyles: head, stickyBodyStyles: body };
+  }, [stickyColumns]);
+
+  const toggleStickyColumn = useCallback((colIndex: number) => {
+    setStickyColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(colIndex)) next.delete(colIndex);
+      else next.add(colIndex);
+      return next;
+    });
+    setContextMenuCol(null);
+    setContextMenuPos(null);
+  }, []);
+
+  useEffect(() => {
+    setStickyColumns(readPromocoesStickyInitial());
+    setStickyHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!stickyHydrated) return;
+    try {
+      localStorage.setItem(
+        PROMOCOES_STICKY_STORAGE_KEY,
+        JSON.stringify(Array.from(stickyColumns).sort((a, b) => a - b))
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [stickyColumns, stickyHydrated]);
+
+  useEffect(() => {
+    if (contextMenuCol === null) return;
+    const close = () => {
+      setContextMenuCol(null);
+      setContextMenuPos(null);
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("contextmenu", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+    };
+  }, [contextMenuCol]);
+
+  const accountId = useMemo(() => {
+    if (accounts.length === 0) return "";
+    const fromUrl = searchParams.get("accountId")?.trim();
+    if (fromUrl && accounts.some((a) => a.id === fromUrl)) return fromUrl;
+    if (typeof window !== "undefined") {
+      const s = localStorage.getItem(STORAGE_KEY);
+      if (s && accounts.some((a) => a.id === s)) return s;
+    }
+    return accounts[0].id;
+  }, [accounts, searchParams]);
+
+  const prevFilterKeyRef = useRef<string>("");
+  useEffect(() => {
+    const key = `${qFromUrl}\0${linkFromUrl}\0${kindFromUrl}\0${profitFromUrl}\0${ptypeFromUrl}\0${campFromUrl}`;
+    if (prevFilterKeyRef.current === key) return;
+    prevFilterKeyRef.current = key;
+    setDraftSearch(qFromUrl);
+    setDraftLinkFilter(linkFromUrl);
+    setDraftKindFilter(kindFromUrl);
+    setDraftProfitFilter(profitFromUrl);
+    setDraftPtypeFilter(ptypeFromUrl);
+    setDraftCampFilter(campFromUrl);
+    setPage(1);
+  }, [qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl]);
+
+  const loadAccounts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/mercadolivre/accounts");
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = (data.accounts ?? []) as MLAccount[];
+      setAccounts(list);
+    } finally {
+      setAccountsLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAccounts();
+  }, [loadAccounts]);
+
+  const handleCopyToClipboard = useCallback((value: string, cellKey: string) => {
+    if (!value) return;
+    const done = () => {
+      setCopiedCell(cellKey);
+      setTimeout(() => setCopiedCell(null), 1800);
+    };
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(value).then(done).catch(() => {});
+      return;
+    }
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      done();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const loadData = useCallback(async () => {
+    if (!accountId) return;
+    const gen = ++loadPromoGen.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ page: String(page) });
+      if (qFromUrl) params.set("search", qFromUrl);
+      if (linkFromUrl === "linked") params.set("linked", "1");
+      else if (linkFromUrl === "unlinked") params.set("linked", "0");
+      if (kindFromUrl) params.set("kind", kindFromUrl);
+      if (profitFromUrl) params.set("profit", profitFromUrl);
+      if (ptypeFromUrl) params.set("ptype", ptypeFromUrl);
+      if (campFromUrl) params.set("camp", campFromUrl);
+      const [overviewRes, alertsRes] = await Promise.all([
+        fetch(`/api/mercadolivre/${accountId}/promotions-overview?${params}`),
+        fetch(`/api/mercadolivre/promotion-alerts?accountId=${encodeURIComponent(accountId)}&hours=72`),
+      ]);
+      const overviewData = await overviewRes.json().catch(() => ({}));
+      if (gen !== loadPromoGen.current) return;
+      if (!overviewRes.ok) {
+        setError((overviewData as { error?: string }).error || "Erro ao carregar promoções.");
+        setFlatRows([]);
+        setTotal(0);
+        setSnapshotAt(null);
+        return;
+      }
+      const data = overviewData as {
+        rows?: FlatPromoRow[];
+        total?: number;
+        page_size?: number;
+        snapshot_at?: string | null;
+      };
+      setFlatRows(Array.isArray(data.rows) ? data.rows : []);
+      setTotal(data.total ?? 0);
+      setPageSize(data.page_size ?? 12);
+      setSnapshotAt(data.snapshot_at ?? null);
+
+      const alertsData = await alertsRes.json().catch(() => ({}));
+      if (gen !== loadPromoGen.current) return;
+      if (alertsRes.ok) {
+        setAlerts((alertsData as { alerts?: PromoAlert[] }).alerts ?? []);
+      } else {
+        setAlerts([]);
+      }
+    } catch {
+      if (gen !== loadPromoGen.current) return;
+      setError("Erro de conexão.");
+      setFlatRows([]);
+      setSnapshotAt(null);
+    } finally {
+      if (gen === loadPromoGen.current) setLoading(false);
+    }
+  }, [accountId, page, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl]);
+
+  const refreshFromMl = useCallback(async () => {
+    if (!accountId) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ page: String(page) });
+      if (qFromUrl) params.set("search", qFromUrl);
+      if (linkFromUrl === "linked") params.set("linked", "1");
+      else if (linkFromUrl === "unlinked") params.set("linked", "0");
+      if (kindFromUrl) params.set("kind", kindFromUrl);
+      if (profitFromUrl) params.set("profit", profitFromUrl);
+      if (ptypeFromUrl) params.set("ptype", ptypeFromUrl);
+      if (campFromUrl) params.set("camp", campFromUrl);
+      const res = await fetch(`/api/mercadolivre/${accountId}/promotions-overview?${params}`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((data as { error?: string }).error || "Erro ao atualizar promoções.");
+        return;
+      }
+      await loadData();
+    } catch {
+      setError("Erro de conexão ao atualizar.");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [accountId, page, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, loadData]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const handleFilterSubmit = useCallback(
+    (e: FormEvent) => {
+      e.preventDefault();
+      setPage(1);
+      const q = draftSearch.trim();
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("accountId", accountId);
+      if (q) params.set("q", q);
+      else params.delete("q");
+      if (draftLinkFilter === "linked") params.set("linked", "1");
+      else if (draftLinkFilter === "unlinked") params.set("linked", "0");
+      else params.delete("linked");
+      if (draftKindFilter) params.set("kind", draftKindFilter);
+      else params.delete("kind");
+      if (draftProfitFilter) params.set("profit", draftProfitFilter);
+      else params.delete("profit");
+      if (draftPtypeFilter) params.set("ptype", draftPtypeFilter);
+      else params.delete("ptype");
+      if (draftCampFilter) params.set("camp", draftCampFilter);
+      else params.delete("camp");
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      setFilterPanelOpen(false);
+    },
+    [
+      draftSearch,
+      draftLinkFilter,
+      draftKindFilter,
+      draftProfitFilter,
+      draftPtypeFilter,
+      draftCampFilter,
+      accountId,
+      pathname,
+      router,
+      searchParams,
+    ]
+  );
+
+  const clearFilters = useCallback(() => {
+    setDraftSearch("");
+    setDraftLinkFilter("all");
+    setDraftKindFilter("");
+    setDraftProfitFilter("");
+    setDraftPtypeFilter("");
+    setDraftCampFilter("");
+    setPage(1);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("accountId", accountId);
+    params.delete("q");
+    params.delete("linked");
+    params.delete("kind");
+    params.delete("profit");
+    params.delete("ptype");
+    params.delete("camp");
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    setFilterPanelOpen(false);
+  }, [accountId, pathname, router, searchParams]);
+
+  const filterPanelHasActiveDot = Boolean(
+    qFromUrl || linkFromUrl !== "all" || kindFromUrl || profitFromUrl || ptypeFromUrl || campFromUrl
+  );
+  const showFilterResetButton = Boolean(
+    draftSearch.trim() ||
+      qFromUrl ||
+      draftLinkFilter !== "all" ||
+      linkFromUrl !== "all" ||
+      draftKindFilter ||
+      kindFromUrl ||
+      draftProfitFilter ||
+      profitFromUrl ||
+      draftPtypeFilter ||
+      ptypeFromUrl ||
+      draftCampFilter ||
+      campFromUrl
+  );
+
+  const alertByItem = useMemo(() => {
+    const m = new Map<string, PromoAlert>();
+    for (const a of alerts) {
+      if (!a.item_id) continue;
+      const key = String(a.item_id).trim().toUpperCase();
+      if (!m.has(key)) m.set(key, a);
+    }
+    return m;
+  }, [alerts]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+
+  const loaderMessagesRefresh = [
+    "Sincronizando todos os anúncios desta lista com o Mercado Livre (pode levar vários minutos)…",
+    "Cada anúncio chama a API de preços e seller-promotions…",
+    "Calculando taxas e gravando o cache para todas as páginas…",
+  ] as const;
+
+  const loaderMessagesLoad = [
+    "Carregando cache de promoções…",
+    "Lendo linhas salvas no banco…",
+  ] as const;
+
+  const loaderMessages = refreshing ? [...loaderMessagesRefresh] : [...loaderMessagesLoad];
+
+  const safeFlatRows = Array.isArray(flatRows) ? flatRows : [];
+
+  const cacheEmptyHint =
+    !loading && !error && total > 0 && safeFlatRows.length === 0 && !snapshotAt;
+
+  const promoStickyTh = (
+    colIndex: number,
+    label: ReactNode,
+    opts?: { align?: "left" | "right"; title?: string; thClass?: string }
+  ) => {
+    const align = opts?.align ?? "left";
+    const textAlign = align === "right" ? "text-right" : "text-left";
+    const flexJustify = align === "right" ? "justify-end" : "justify-between";
+    return (
+      <th
+        className={`p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${textAlign} ${stickyColumns.has(colIndex) ? "sticky-col" : ""} ${opts?.thClass ?? ""}`}
+        title={opts?.title}
+        style={stickyHeaderStyles[colIndex]}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setContextMenuCol(colIndex);
+          setContextMenuPos({ x: e.clientX, y: e.clientY });
+        }}
+      >
+        <div className={`flex min-w-0 items-center gap-1 ${flexJustify}`}>
+          <span className="min-w-0">{label}</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleStickyColumn(colIndex);
+            }}
+            title={stickyColumns.has(colIndex) ? "Descongelar coluna" : "Congelar coluna"}
+            className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100 dark:text-slate-400 dark:hover:bg-slate-700/50"
+          >
+            <PinIcon pinned={stickyColumns.has(colIndex)} className={stickyColumns.has(colIndex) ? "text-primary" : ""} />
+          </button>
+        </div>
+      </th>
+    );
+  };
+
+  if (!accountsLoaded) {
+    return (
+      <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
+        <div className="flex flex-col items-center justify-center py-8">
+          <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-primary" />
+          <p className="text-sm text-slate-500">Carregando…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (accounts.length === 0) {
+    return (
+      <div className="rounded-app bg-amber-50 p-4 shadow-sm ring-1 ring-amber-200 dark:bg-amber-950/30 dark:ring-amber-900/50">
+        <p className="text-amber-900 dark:text-amber-200">
+          Conecte sua conta do Mercado Livre em{" "}
+          <a href="/app/configuracao" className="font-medium underline">
+            Configuração
+          </a>
+          .
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
+      <SmartLoaderOverlay open={loading || refreshing} messages={[...loaderMessages]} />
+      <PromocoesHelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <div className="flex w-full min-h-0 gap-4">
+        <aside
+          className={`flex shrink-0 flex-col self-start rounded-r-lg border border-slate-200 bg-white shadow-sm transition-[width] duration-200 ease-out dark:border-slate-600 dark:bg-slate-800 ${
+            filterPanelOpen ? "w-[280px]" : "w-10"
+          }`}
+        >
+          {filterPanelOpen ? (
+            <div className="flex max-h-[min(85vh,48rem)] flex-col gap-3 overflow-y-auto p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtros</span>
+                <button
+                  type="button"
+                  onClick={() => setFilterPanelOpen(false)}
+                  className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                  title="Fechar"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <form onSubmit={handleFilterSubmit} className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Buscar</span>
+                  <input
+                    type="text"
+                    value={draftSearch}
+                    onChange={(e) => setDraftSearch(e.target.value)}
+                    placeholder="Título ou MLB…"
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Vínculo MLB → produto</span>
+                  <select
+                    value={draftLinkFilter}
+                    onChange={(e) => setDraftLinkFilter(e.target.value as PromoLinkFilter)}
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    <option value="all">Todos</option>
+                    <option value="linked">Só vinculados</option>
+                    <option value="unlinked">Só não vinculados</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Tipo</span>
+                  <div className="flex flex-wrap gap-1">
+                    {(
+                      [
+                        { value: "" as const, label: "Todos" },
+                        { value: "ativa" as const, label: "Ativa" },
+                        { value: "possível" as const, label: "Possível" },
+                      ] as const
+                    ).map(({ value, label }) => (
+                      <button
+                        key={value || "tipo-all"}
+                        type="button"
+                        onClick={() => setDraftKindFilter(value)}
+                        className={`rounded px-2 py-1 text-xs font-medium ${
+                          draftKindFilter === value
+                            ? "bg-brand-blue text-white"
+                            : "border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Lucratividade</span>
+                  <div className="flex flex-wrap gap-1">
+                    {(
+                      [
+                        { value: "" as const, label: "Todos" },
+                        { value: "high" as const, label: "> 20%" },
+                        { value: "medium" as const, label: "10–20%" },
+                        { value: "low" as const, label: "0–10%" },
+                        { value: "negative" as const, label: "Prejuízo" },
+                      ] as const
+                    ).map(({ value, label }) => (
+                      <button
+                        key={value || "profit-all"}
+                        type="button"
+                        onClick={() => setDraftProfitFilter(value)}
+                        className={`rounded px-2 py-1 text-xs font-medium ${
+                          draftProfitFilter === value
+                            ? "bg-brand-blue text-white"
+                            : "border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Campanha ML (tipo)</span>
+                  <select
+                    value={draftPtypeFilter}
+                    onChange={(e) => setDraftPtypeFilter(e.target.value)}
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-[11px] font-medium leading-snug text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    <option value="">Todos os tipos</option>
+                    {ML_PROMOTION_TYPE_CATALOG.map((e) => (
+                      <option key={e.code} value={e.code}>
+                        {e.labelPt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Prazo da campanha</span>
+                  <select
+                    value={draftCampFilter}
+                    onChange={(e) => setDraftCampFilter(e.target.value as PromoCampaignPhase)}
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    <option value="">Todas</option>
+                    <option value="in">Em vigência</option>
+                    <option value="future">Futura (ainda não começou)</option>
+                    <option value="past">Encerrada</option>
+                    <option value="nodates">Sem datas no ML</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-2 pt-1">
+                  <button
+                    type="submit"
+                    className="w-full rounded bg-primary py-2 text-xs font-semibold text-white hover:bg-primary-dark"
+                  >
+                    Aplicar filtros
+                  </button>
+                  {showFilterResetButton && (
+                    <button
+                      type="button"
+                      onClick={() => clearFilters()}
+                      className="w-full rounded border border-slate-300 bg-white py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/50"
+                    >
+                      Limpar filtros
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setDraftSearch(qFromUrl);
+                setDraftLinkFilter(linkFromUrl);
+                setDraftKindFilter(kindFromUrl);
+                setDraftProfitFilter(profitFromUrl);
+                setDraftPtypeFilter(ptypeFromUrl);
+                setDraftCampFilter(campFromUrl);
+                setFilterPanelOpen(true);
+              }}
+              className="flex w-full flex-col items-center gap-0.5 py-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50 dark:hover:text-slate-200"
+              title="Abrir filtros"
+            >
+              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                />
+              </svg>
+              {filterPanelHasActiveDot && (
+                <span className="rounded-full bg-primary h-1.5 w-1.5" title="Filtros ativos" />
+              )}
+            </button>
+          )}
+        </aside>
+
+        <main className="min-w-0 flex-1">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 sm:text-xl">Promoções</h1>
+                <button
+                  type="button"
+                  onClick={() => setHelpOpen(true)}
+                  className="rounded-full p-1 text-fg-muted hover:bg-gray-100 hover:text-fg dark:hover:bg-slate-700"
+                  title="Como funciona"
+                  aria-label="Ajuda"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
+                Promoções ativas e convites no Mercado Livre — dados do cache no banco; use{" "}
+                <strong className="font-medium text-fg-strong">?</strong> para detalhes e filtros. Clique com o botão
+                direito no cabeçalho da tabela para congelar colunas (alfinete).
+              </p>
+            </div>
+            <div className="flex w-full min-w-0 flex-col gap-3 sm:w-auto sm:max-w-xl sm:items-end">
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => void refreshFromMl()}
+                  disabled={loading || refreshing}
+                  className="rounded-app border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/15 disabled:opacity-50 dark:border-primary/30 dark:bg-primary/15"
+                >
+                  Recarregar Promoções
+                </button>
+                {accounts.length > 1 && (
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-fg-muted sm:text-right">Conta</span>
+                    <select
+                      value={accountId}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, v);
+                        const params = new URLSearchParams(searchParams.toString());
+                        params.set("accountId", v);
+                        router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+                      }}
+                      className="rounded-app border border-stroke bg-card px-3 py-2 text-fg-strong dark:border-slate-600 dark:bg-slate-900"
+                    >
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.ml_nickname || `Conta ${a.ml_user_id}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+              <p className="text-xs text-fg-muted sm:text-right">
+                {snapshotAt ? (
+                  <>
+                    <span className="font-medium text-fg-strong">Última sincronização com o Mercado Livre: </span>
+                    {new Date(snapshotAt).toLocaleString("pt-BR", {
+                      timeZone: "America/Sao_Paulo",
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })}
+                    <span className="text-fg-muted"> (horário de São Paulo).</span>
+                  </>
+                ) : (
+                  <>
+                    Ainda não há snapshot gravado no banco para esta página e filtros. Clique em{" "}
+                    <strong className="font-medium text-fg-strong">Recarregar Promoções</strong> para buscar no ML, salvar e
+                    preencher o cache de <strong className="font-medium text-fg-strong">toda a lista</strong> (todas as
+                    páginas desta busca e vínculo).
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+
+      {cacheEmptyHint && (
+        <div className="mb-4 rounded-app border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100">
+          Não há linhas salvas no banco para esta página e filtros. Clique em <strong>Recarregar Promoções</strong> para
+          consultar o Mercado Livre, gravar em <code className="rounded bg-sky-100/90 px-1 text-xs dark:bg-sky-900/50">promotions_cache_rows</code> e atualizar a tabela (pode levar
+          um minuto).
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-4 rounded-app border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          {error}
+          <p className="mt-2 text-xs text-amber-800 dark:text-amber-300/90">
+            Se o erro citar tabela inexistente, execute as migrations{" "}
+            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">019_ml_promotion_webhook_alerts.sql</code>,{" "}
+            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">020_promotions_cache.sql</code> e{" "}
+            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">021_promotions_cache_link_filter.sql</code>,{" "}
+            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">022_promotions_cache_promotion_type.sql</code> e{" "}
+            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">023_promotions_cache_campaign_dates.sql</code> e{" "}
+            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">024_promotions_cache_ml_promotion_id.sql</code> no Supabase.
+          </p>
+        </div>
+      )}
+
+      <div className="pricing-table-with-sticky">
+        {contextMenuCol !== null && contextMenuPos && (
+          <div
+            className="fixed z-30 rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-800"
+            style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
+          >
+            <button
+              type="button"
+              onClick={() => toggleStickyColumn(contextMenuCol)}
+              className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+            >
+              {stickyColumns.has(contextMenuCol) ? "Descongelar coluna" : "Congelar coluna"}
+            </button>
+          </div>
+        )}
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            <span className="font-medium text-slate-800 dark:text-slate-100">{safeFlatRows.length}</span>
+            {" linha"}
+            {safeFlatRows.length !== 1 ? "s" : ""}
+            {" nesta página · "}
+            <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
+            {" no filtro"}
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            {totalPages > 1 && (
+              <>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  Página {page} de {totalPages}
+                </span>
+                <div className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-1 text-xs ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-600">
+                  <button
+                    type="button"
+                    onClick={() => setPage(1)}
+                    disabled={page === 1 || loading || refreshing}
+                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                    title="Primeira página"
+                  >
+                    «
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1 || loading || refreshing}
+                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                  >
+                    Anterior
+                  </button>
+                  <span className="min-w-[2ch] px-1.5 py-1 text-center font-semibold text-slate-800 dark:text-slate-100">
+                    {page}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages || loading || refreshing}
+                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                  >
+                    Próxima
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage(totalPages)}
+                    disabled={page === totalPages || loading || refreshing}
+                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                    title="Última página"
+                  >
+                    »
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        <AppTable maxHeight="70vh" tableClassName="table-fixed w-max min-w-[max(100%,max-content)]">
+          <colgroup>
+            {PROMOCOES_COLUMNS.map((c, i) => (
+              <col key={i} style={{ width: c.minWidth }} />
+            ))}
+          </colgroup>
+          <thead className="bg-slate-50">
+            <tr>
+              {promoStickyTh(0, "Aviso")}
+              {promoStickyTh(1, "Foto")}
+              {promoStickyTh(2, "MLB")}
+              {promoStickyTh(3, "Anúncio", { thClass: "min-w-[12rem]" })}
+              {promoStickyTh(4, "Status")}
+              {promoStickyTh(5, "Preço", { align: "right" })}
+              {promoStickyTh(6, "Preço promoção", { align: "right" })}
+              {promoStickyTh(7, "Custo", { align: "right" })}
+              {promoStickyTh(8, "Tipo")}
+              {promoStickyTh(9, "Campanha ML", {
+                title: "Tipo de campanha no ML (campo type em seller-promotions)",
+                thClass: "max-w-[14rem]",
+              })}
+              {promoStickyTh(10, "Promoção", { thClass: "min-w-[12rem]" })}
+              {promoStickyTh(11, "Vai receber", {
+                align: "right",
+                title: "Preço promoção (bruto) − taxa ML − frete",
+              })}
+              {promoStickyTh(12, "Lucro R$", { align: "right" })}
+              {promoStickyTh(13, "Lucro %", { align: "right" })}
+              {promoStickyTh(14, "Taxa ML", { align: "right" })}
+              {promoStickyTh(15, "Frete", { align: "right" })}
+              {promoStickyTh(16, "Imposto", { align: "right" })}
+              {promoStickyTh(17, "Taxa extra", { align: "right" })}
+              {promoStickyTh(18, "Desp. fixas", { align: "right" })}
+              {promoStickyTh(19, "Início campanha", {
+                title: "Início da campanha (seller-promotions), horário de São Paulo",
+                thClass: "whitespace-nowrap",
+              })}
+              {promoStickyTh(20, "Fim campanha", {
+                title: "Fim da campanha (seller-promotions), horário de São Paulo",
+                thClass: "whitespace-nowrap",
+              })}
+              {promoStickyTh(21, "ML")}
+            </tr>
+          </thead>
+        <tbody>
+            {safeFlatRows.map((r) => {
+              const calc = r.pricing;
+              const profit = r.profit;
+              const profitPercent =
+                typeof r.profit_percent === "number" && Number.isFinite(r.profit_percent)
+                  ? r.profit_percent
+                  : null;
+              const alert = alertByItem.get(String(r.item_id).trim().toUpperCase());
+              const tipoBadge =
+                r.promotionKind === "ativa"
+                  ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-100"
+                  : r.promotionKind === "possível"
+                    ? "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-100"
+                    : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300";
+              const tipoLabel =
+                r.promotionKind === "ativa" ? "Ativa" : r.promotionKind === "possível" ? "Possível" : "—";
+              const cell = (col: number, cls: string) => ({
+                className: `${cls}${stickyColumns.has(col) ? " sticky-col" : ""}`,
+                style: stickyBodyStyles[col],
+              });
+              return (
+                <tr
+                  key={r.rowKey ?? r.item_id}
+                  className={
+                    alert
+                      ? "border-b border-slate-100 bg-amber-50/90 hover:bg-primary/5 dark:border-slate-700 dark:bg-amber-950/25 dark:hover:bg-primary/10"
+                      : "border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
+                  }
+                >
+                  <td {...cell(0, "align-top p-2")}>
+                    {alert ? (
+                      <span
+                        className="inline-flex max-w-[11rem] flex-col gap-0.5 rounded-app border border-amber-300 bg-amber-100/90 px-2 py-1 text-xs font-medium text-amber-950 dark:border-amber-800 dark:bg-amber-900/40 dark:text-amber-100"
+                        title={`${alert.topic}${alert.fetch_error ? ` · ${alert.fetch_error}` : ""}`}
+                      >
+                        <span>Novo do ML</span>
+                        <span className="font-normal text-amber-900/90 dark:text-amber-200/90">
+                          {new Date(alert.created_at).toLocaleString("pt-BR", {
+                            timeZone: "America/Sao_Paulo",
+                            dateStyle: "short",
+                            timeStyle: "short",
+                          })}
+                        </span>
+                        {alert.promotion_type && (
+                          <span className="font-normal opacity-90">{alert.promotion_type}</span>
+                        )}
+                        {alert.fetch_error && (
+                          <span className="text-[10px] text-red-700 dark:text-red-300">Erro ao resolver recurso</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-fg-muted">—</span>
+                    )}
+                  </td>
+                  <td {...cell(1, "p-2")}>
+                    {r.thumbnail ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- URLs dinâmicas do CDN do ML
+                      <img
+                        src={r.thumbnail.replace(/^http:/, "https:")}
+                        alt=""
+                        className="h-10 w-10 rounded-lg border border-slate-100 bg-slate-50 object-contain"
+                      />
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td {...cell(2, "p-2")}>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={() =>
+                        handleCopyToClipboard(String(r.item_id), `mlb-${r.rowKey ?? String(r.item_id)}`)
+                      }
+                      onKeyDown={(e) =>
+                        e.key === "Enter" &&
+                        handleCopyToClipboard(String(r.item_id), `mlb-${r.rowKey ?? String(r.item_id)}`)
+                      }
+                      title="Clique para copiar"
+                      className="cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100"
+                    >
+                      {copiedCell === `mlb-${r.rowKey ?? String(r.item_id)}` ? (
+                        <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
+                      ) : (
+                        r.item_id
+                      )}
+                    </span>
+                  </td>
+                  <td {...cell(3, "max-w-[14rem] p-2")} title={r.title ?? ""}>
+                    <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
+                      {r.title || "—"}
+                    </span>
+                    {r.promotions_api_failed && (r.rowKey ?? "").includes("||empty") && (
+                      <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                        Não foi possível ler seller-promotions para este anúncio.
+                      </p>
+                    )}
+                  </td>
+                  <td {...cell(4, "whitespace-nowrap p-2 text-fg")}>{r.status ?? "—"}</td>
+                  <td {...cell(5, "whitespace-nowrap p-2 text-right tabular-nums font-semibold text-fg-strong")}>
+                    {formatPrice(r.active_price)}
+                  </td>
+                  <td {...cell(6, "whitespace-nowrap p-2 text-right tabular-nums font-medium text-fg-strong")}>
+                    {formatPrice(r.promo_price)}
+                  </td>
+                  <td
+                    {...cell(7, "whitespace-nowrap p-2 text-right tabular-nums text-sm text-fg")}
+                    title="Custo no cache de preços (tela Preços / produto vinculado)"
+                  >
+                    {formatPrice(r.cost_price)}
+                  </td>
+                  <td {...cell(8, "p-2")}>
+                    <span
+                      className={`inline-flex rounded-app px-2 py-0.5 text-xs font-medium ${tipoBadge}`}
+                    >
+                      {tipoLabel}
+                    </span>
+                  </td>
+                  <td {...cell(9, "max-w-[14rem] p-2 text-xs text-fg")} title={r.promotionType ?? undefined}>
+                    <span className="line-clamp-2">{labelForMlPromotionType(r.promotionType)}</span>
+                  </td>
+                  <td {...cell(10, "max-w-[24rem] p-2 text-xs leading-snug text-fg")}>
+                    <div className="font-medium text-fg-strong">{r.promotionLabel}</div>
+                    {r.value_hint ? (
+                      <div className="mt-0.5 text-[11px] text-fg-muted">{r.value_hint}</div>
+                    ) : null}
+                  </td>
+                  <td {...cell(11, "whitespace-nowrap p-2 text-right text-sm font-semibold text-green-700 dark:text-green-400")}>
+                    {calc ? formatPrice(calc.vai_receber) : "—"}
+                  </td>
+                  <td {...cell(12, "whitespace-nowrap p-2 text-right text-sm tabular-nums")}>
+                    {profit != null ? (
+                      <span className={profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                        {formatPrice(profit)}
+                      </span>
+                    ) : (
+                      <span className="text-fg-muted">—</span>
+                    )}
+                  </td>
+                  <td {...cell(13, "whitespace-nowrap p-2 text-right text-sm tabular-nums")}>
+                    {profitPercent != null ? (
+                      <span
+                        className={
+                          profitPercent >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                        }
+                      >
+                        {profitPercent >= 0 ? "+" : ""}
+                        {profitPercent.toFixed(1).replace(".", ",")}%
+                      </span>
+                    ) : (
+                      <span className="text-fg-muted">—</span>
+                    )}
+                  </td>
+                  <td {...cell(14, "whitespace-nowrap p-2 text-right text-sm text-amber-700 dark:text-amber-300")}>
+                    {calc ? formatPrice(calc.fee) : "—"}
+                  </td>
+                  <td {...cell(15, "whitespace-nowrap p-2 text-right text-sm")}>
+                    {calc ? (
+                      calc.shipping_cost > 0 ? (
+                        <span className="text-red-600 dark:text-red-400">{formatPrice(calc.shipping_cost)}</span>
+                      ) : (
+                        <span className="text-fg-muted">—</span>
+                      )
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td {...cell(16, "whitespace-nowrap p-2 text-right text-sm")}>
+                    {calc ? (
+                      calc.tax_amount > 0 ? (
+                        <span className="text-orange-600 dark:text-orange-400" title={r.tax_percent ? `${r.tax_percent}%` : undefined}>
+                          {formatPrice(calc.tax_amount)}
+                        </span>
+                      ) : (
+                        <span className="text-fg-muted">—</span>
+                      )
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td {...cell(17, "whitespace-nowrap p-2 text-right text-sm")}>
+                    {calc ? (
+                      calc.extra_fee_amount > 0 ? (
+                        <span
+                          className="text-purple-600 dark:text-purple-400"
+                          title={r.extra_fee_percent ? `${r.extra_fee_percent}%` : undefined}
+                        >
+                          {formatPrice(calc.extra_fee_amount)}
+                        </span>
+                      ) : (
+                        <span className="text-fg-muted">—</span>
+                      )
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td {...cell(18, "whitespace-nowrap p-2 text-right text-sm")}>
+                    {calc ? (
+                      calc.fixed_expenses_amount > 0 ? (
+                        <span className="text-indigo-600 dark:text-indigo-400">{formatPrice(calc.fixed_expenses_amount)}</span>
+                      ) : (
+                        <span className="text-fg-muted">—</span>
+                      )
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td {...cell(19, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_start_at ?? undefined}>
+                    {formatCampaignDatePt(r.campaign_start_at)}
+                  </td>
+                  <td {...cell(20, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_finish_at ?? undefined}>
+                    {formatCampaignDatePt(r.campaign_finish_at)}
+                  </td>
+                  <td {...cell(21, "p-2")}>
+                    {r.permalink ? (
+                      <a
+                        href={r.permalink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                      >
+                        <img
+                          src="https://www.mercadolivre.com.br/favicon.ico"
+                          alt=""
+                          width={18}
+                          height={18}
+                          className="opacity-90"
+                        />
+                        Ver
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+        </tbody>
+      </AppTable>
+      </div>
+
+      {total === 0 && !loading && !error && (
+        <p className="mt-4 text-center text-sm text-fg-muted">Nenhum anúncio nesta página.</p>
+      )}
+
+      {safeFlatRows.length > 0 && !loading && (
+        <p className="mt-3 text-center text-xs text-fg-muted">
+          {safeFlatRows.length} linha{safeFlatRows.length !== 1 ? "s" : ""} nesta página (uma por promoção; anúncios sem
+          promoção aparecem uma vez).
+        </p>
+      )}
+
+        </main>
+      </div>
+    </div>
+  );
+}
+
+export default function PromocoesPage() {
+  return (
+    <OnboardingGate required="catalog">
+      <Suspense
+        fallback={
+          <div className="rounded-app border border-stroke bg-card p-8 dark:border-slate-700">
+            <p className="text-fg-muted">Carregando…</p>
+          </div>
+        }
+      >
+        <PromocoesContent />
+      </Suspense>
+    </OnboardingGate>
+  );
+}

@@ -1,4 +1,8 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  isPromotionPublicWebhookTopic,
+  resolveAndStorePromotionWebhookAlert,
+} from "@/lib/mercadolivre/promotion-webhook-alerts";
 import { NextRequest, NextResponse } from "next/server";
 
 /**
@@ -97,6 +101,12 @@ export async function POST(request: NextRequest) {
   if (insErr) {
     console.error("[ML webhook] insert:", insErr);
     return NextResponse.json({ error: "Erro ao gravar" }, { status: 500 });
+  }
+
+  if (resource && isPromotionPublicWebhookTopic(topic)) {
+    await Promise.all(
+      accounts.map((acc) => resolveAndStorePromotionWebhookAlert(supabase, acc, topic, resource))
+    ).catch((e) => console.error("[ML webhook] promotion alerts:", e));
   }
 
   return NextResponse.json({ ok: true, stored: rows.length });

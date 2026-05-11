@@ -346,6 +346,29 @@ export function getStandardPriceAmount(
 /**
  * GET /seller-promotions/items/{item_id}?app_version=v2 — promoções e campanhas aplicáveis ao anúncio.
  */
+/**
+ * GET em caminho absoluto da API ML (ex.: /seller-promotions/candidates/CANDIDATE-...).
+ * Usado no webhook para resolver item_id a partir do `resource` da notificação.
+ */
+export async function fetchMlResourcePath(
+  resourcePath: string,
+  accessToken: string
+): Promise<{ ok: true; data: unknown } | { ok: false; status: number; body: string }> {
+  const path = resourcePath.startsWith("/") ? resourcePath : `/${resourcePath}`;
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `https://api.mercadolibre.com${path}${sep}app_version=v2`;
+  const res = await fetchWithRetry(url, accessToken);
+  const text = await res.text().catch(() => "");
+  if (!res.ok) {
+    return { ok: false, status: res.status, body: text.slice(0, 500) };
+  }
+  try {
+    return { ok: true, data: text ? JSON.parse(text) : null };
+  } catch {
+    return { ok: false, status: res.status, body: text.slice(0, 500) };
+  }
+}
+
 export async function fetchSellerPromotionsForItem(
   itemId: string,
   accessToken: string

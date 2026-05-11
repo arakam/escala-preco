@@ -95,6 +95,40 @@ export async function PUT(
     return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
   }
 
+  /** Recalcula `pricing_cache` para cada MLB vinculado — Promoções/Preços usam peso/dimensões do cache, não leem `products` em tempo real. */
+  try {
+    const [{ data: linkedItems }, { data: linkedVars }] = await Promise.all([
+      supabase.from("ml_items").select("account_id, item_id").eq("product_id", id),
+      supabase.from("ml_variations").select("account_id, item_id").eq("product_id", id),
+    ]);
+    const seen = new Map<string, { account_id: string; item_id: string }>();
+    for (const r of [...(linkedItems ?? []), ...(linkedVars ?? [])]) {
+      const aid = r.account_id != null ? String(r.account_id) : "";
+      const iid = r.item_id != null ? String(r.item_id).trim().toUpperCase() : "";
+      if (!aid || !iid) continue;
+      const key = `${aid}:${iid}`;
+      if (!seen.has(key)) seen.set(key, { account_id: aid, item_id: iid });
+    }
+    if (seen.size > 0) {
+      const { refreshPricingCacheByItemId } = await import("@/lib/pricing-cache");
+      const pairs = Array.from(seen.values());
+      for (const { account_id, item_id } of pairs) {
+        await refreshPricingCacheByItemId(account_id, item_id);
+      }
+      const itemIdsList = Array.from(new Set(pairs.map((v) => v.item_id)));
+      const { error: promoDelErr } = await supabase
+        .from("promotions_cache_rows")
+        .delete()
+        .eq("user_id", user.id)
+        .in("item_id", itemIdsList);
+      if (promoDelErr) {
+        console.error("[products/[id] PUT] limpar snapshot promoções:", promoDelErr);
+      }
+    }
+  } catch (e) {
+    console.error("[products/[id] PUT] refresh pricing_cache após atualizar produto:", e);
+  }
+
   return NextResponse.json({ product });
 }
 

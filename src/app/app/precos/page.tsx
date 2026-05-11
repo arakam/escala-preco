@@ -5,6 +5,7 @@ import { AppTable } from "@/components/AppTable";
 import { OnboardingGate } from "@/components/OnboardingGate";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 import { PRICING_CALCULATE_CLIENT_BATCH_SIZE } from "@/lib/pricing/calculate-limits";
+import { calculateFullPricing as computeFullPricingBreakdown, type FullPricingBreakdown } from "@/lib/pricing/full-net";
 import {
   sanitizeMlSellerCampaignNameInput,
   isValidMlSellerCampaignName,
@@ -37,15 +38,7 @@ interface PricingListing {
   ml_active_promotions?: string | null;
 }
 
-interface CalculatedPricing {
-  price: number;
-  fee: number;
-  shipping_cost: number;
-  tax_amount: number;
-  extra_fee_amount: number;
-  fixed_expenses_amount: number;
-  net_amount: number;
-}
+type CalculatedPricing = FullPricingBreakdown;
 
 interface ListingWithPricing extends PricingListing {
   new_price: number;
@@ -543,7 +536,7 @@ async function fetchCalculatedPricingAtPrice(
     const data = await res.json();
     const result = data.results?.[0] as { price: number; fee: number; shipping_cost: number } | undefined;
     if (!result) return null;
-    return calculateFullPricing(listing, result);
+    return computeFullPricingBreakdown(listing.tax_percent, listing.extra_fee_percent, listing.fixed_expenses, result);
   } catch {
     return null;
   }
@@ -621,26 +614,6 @@ async function solvePriceForTargetNetMarginPercent(
   }
 
   return best;
-}
-
-function calculateFullPricing(
-  listing: { tax_percent: number | null; extra_fee_percent: number | null; fixed_expenses: number | null },
-  result: { price: number; fee: number; shipping_cost: number }
-): CalculatedPricing {
-  const taxAmount = listing.tax_percent ? (result.price * listing.tax_percent / 100) : 0;
-  const extraFeeAmount = listing.extra_fee_percent ? (result.price * listing.extra_fee_percent / 100) : 0;
-  const fixedExpensesAmount = listing.fixed_expenses != null && listing.fixed_expenses > 0 ? listing.fixed_expenses : 0;
-  const netAmount = result.price - result.fee - result.shipping_cost - taxAmount - extraFeeAmount - fixedExpensesAmount;
-  
-  return {
-    price: result.price,
-    fee: result.fee,
-    shipping_cost: result.shipping_cost,
-    tax_amount: Math.round(taxAmount * 100) / 100,
-    extra_fee_amount: Math.round(extraFeeAmount * 100) / 100,
-    fixed_expenses_amount: Math.round(fixedExpensesAmount * 100) / 100,
-    net_amount: Math.round(netAmount * 100) / 100,
-  };
 }
 
 const MAX_PRICING_CALCULATE_BATCH = PRICING_CALCULATE_CLIENT_BATCH_SIZE;
@@ -782,10 +755,10 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               <li><strong>Custo:</strong> Preço de custo do produto (cadastrado em Produtos)</li>
               <li><strong>Preço:</strong> Valor atual do anúncio no Mercado Livre</li>
               <li><strong>Competitividade:</strong> Indicador da referência de preço do ML (sugestão / faixa), ao lado do preço. No menu <strong>Ações</strong>, use <strong>Atualizar referência</strong> para buscar dados novos sem refazer o cache de anúncios.</li>
-              <li><strong>Margem:</strong> Percentual (líquido − custo) ÷ preço de promoção. Editável: ao confirmar, a promoção é recalculada para atingir essa margem com taxas ML, frete e impostos. Sem custo cadastrado fica indisponível.</li>
-              <li><strong>Promoção:</strong> Preço de promoção planejado (planned_price); campo editável para simular o valor</li>
-              <li><strong>Vai Receber:</strong> Valor líquido após descontar taxa ML, frete, imposto, taxa extra e despesas fixas</li>
-              <li><strong>Lucro:</strong> Diferença entre o valor recebido e o custo do produto</li>
+              <li><strong>Margem:</strong> Percentual (lucro líquido) ÷ preço da coluna Promoção — o mesmo lucro da coluna Lucro. Editável: ao confirmar, recalcula a promoção. Sem custo cadastrado fica indisponível.</li>
+              <li><strong>Promoção:</strong> Valor bruto de referência (planned_price); campo editável — usado como base para taxa ML, frete, impostos e Vai receber</li>
+              <li><strong>Vai Receber:</strong> valor bruto (Promoção) − taxa ML − frete</li>
+              <li><strong>Lucro:</strong> Vai receber − custo − imposto − taxa extra − desp. fixas</li>
               <li><strong>Taxa ML:</strong> Taxa de comissão do Mercado Livre calculada sobre o preço</li>
               <li><strong>Frete:</strong> Custo de frete (apenas para contas Mercado Líder)</li>
               <li><strong>Imposto:</strong> Valor do imposto calculado sobre o preço (% cadastrado no produto)</li>
@@ -833,7 +806,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <h3 className="mb-2 font-medium text-fg-strong">Imposto, Taxa Extra e Desp. Fixas</h3>
             <p className="mb-2">
               Imposto e taxa extra (percentuais) e despesas fixas (valor em R$) são cadastrados na página de Produtos.
-              Imposto e taxa extra são calculados sobre o preço de venda; despesas fixas são um valor fixo em R$ descontado do líquido.
+              Imposto e taxa extra são calculados sobre o valor bruto (coluna Promoção); no <strong>Lucro</strong>, custo, imposto, taxa extra e desp. fixas são descontados após o <strong>Vai receber</strong>.
             </p>
             <p className="text-fg">
               Exemplo: Produto com 10% de imposto, 5% de taxa extra e R$ 2,00 de desp. fixas vendido a R$ 100,00:
@@ -1039,7 +1012,7 @@ function PrecosPageContent() {
             apiItem.calculated_fee != null &&
             apiItem.calculated_shipping_cost != null
           ) {
-            calculated = calculateFullPricing(item, {
+            calculated = computeFullPricingBreakdown(item.tax_percent, item.extra_fee_percent, item.fixed_expenses, {
               price: apiItem.calculated_price,
               fee: apiItem.calculated_fee,
               shipping_cost: apiItem.calculated_shipping_cost,
@@ -1204,7 +1177,12 @@ function PrecosPageContent() {
             if (result) {
               return {
                 ...listing,
-                calculated: calculateFullPricing(listing, result),
+                calculated: computeFullPricingBreakdown(
+                  listing.tax_percent,
+                  listing.extra_fee_percent,
+                  listing.fixed_expenses,
+                  result
+                ),
               };
             }
             return listing;
@@ -1277,7 +1255,12 @@ function PrecosPageContent() {
             if (result) {
               return {
                 ...listing,
-                calculated: calculateFullPricing(listing, result),
+                calculated: computeFullPricingBreakdown(
+                  listing.tax_percent,
+                  listing.extra_fee_percent,
+                  listing.fixed_expenses,
+                  result
+                ),
               };
             }
             return listing;
@@ -1401,7 +1384,12 @@ function PrecosPageContent() {
                 item.id === listing.id
                   ? {
                       ...item,
-                      calculated: calculateFullPricing(listingForCalc, result),
+                      calculated: computeFullPricingBreakdown(
+                        listingForCalc.tax_percent,
+                        listingForCalc.extra_fee_percent,
+                        listingForCalc.fixed_expenses,
+                        result
+                      ),
                       calculating: false,
                     }
                   : item
@@ -1594,7 +1582,12 @@ function PrecosPageContent() {
                         ...item,
                         new_price: newPrice,
                         dirty: true,
-                        calculated: calculateFullPricing(listingWithNewPrice, result),
+                        calculated: computeFullPricingBreakdown(
+                          listingWithNewPrice.tax_percent,
+                          listingWithNewPrice.extra_fee_percent,
+                          listingWithNewPrice.fixed_expenses,
+                          result
+                        ),
                         calculating: false,
                       }
                     : item
@@ -1727,7 +1720,12 @@ function PrecosPageContent() {
           if (result) {
             return {
               ...listing,
-              calculated: calculateFullPricing(listing, result),
+              calculated: computeFullPricingBreakdown(
+                listing.tax_percent,
+                listing.extra_fee_percent,
+                listing.fixed_expenses,
+                result
+              ),
             };
           }
           return listing;
@@ -1836,7 +1834,12 @@ function PrecosPageContent() {
           if (result) {
             return {
               ...listing,
-              calculated: calculateFullPricing(listing, result),
+              calculated: computeFullPricingBreakdown(
+                listing.tax_percent,
+                listing.extra_fee_percent,
+                listing.fixed_expenses,
+                result
+              ),
             };
           }
           return listing;
@@ -3352,7 +3355,7 @@ function PrecosPageContent() {
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyHeaderStyles[10]} title="(Vai receber − custo) ÷ preço de promoção. Edite para definir a promoção pelo alvo de margem líquida." onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyHeaderStyles[10]} title="(Lucro) ÷ preço Promoção, com Lucro = Vai receber − custo − imposto − taxa extra − desp. fixas" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(10); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Margem</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(10); }} title={stickyColumns.has(10) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
@@ -3368,7 +3371,7 @@ function PrecosPageContent() {
                     </button>
                   </div>
                 </th>
-                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyHeaderStyles[12]} onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(12); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                <th className={`p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyHeaderStyles[12]} title="Valor bruto (Promoção) − taxa ML − frete" onContextMenu={(e) => { e.preventDefault(); setContextMenuCol(12); setContextMenuPos({ x: e.clientX, y: e.clientY }); }}>
                   <div className="flex items-center justify-end gap-1">
                     <span>Vai Receber</span>
                     <button type="button" onClick={(e) => { e.stopPropagation(); toggleStickyColumn(12); }} title={stickyColumns.has(12) ? "Descongelar coluna" : "Congelar coluna"} className="shrink-0 rounded p-0.5 text-slate-500 dark:text-slate-400 opacity-70 hover:bg-slate-200 hover:opacity-100">
@@ -3657,7 +3660,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
                         <span className="text-green-700">
-                          R$ {formatBRL(listing.calculated.net_amount)}
+                          R$ {formatBRL(listing.calculated.vai_receber)}
                         </span>
                       ) : (
                         <span className="text-fg-muted">—</span>

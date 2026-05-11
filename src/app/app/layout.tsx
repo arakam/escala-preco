@@ -175,6 +175,25 @@ function AppShell({
                 <span>Preço</span>
               </Link>
             )}
+            {allowPrecoAtacado ? (
+              <Link href="/app/promocoes" className={gatedActive}>
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                  <PromoIcon />
+                </span>
+                <span>Promoções</span>
+              </Link>
+            ) : (
+              <Link
+                href={precoAtacadoBlocked}
+                className={gatedBlocked}
+                title="Disponível após sincronizar anúncios e importar produtos."
+              >
+                <span className="inline-flex h-4 w-4 items-center justify-center text-white/50">
+                  <PromoIcon />
+                </span>
+                <span>Promoções</span>
+              </Link>
+            )}
             <Link href="/app/configuracao" className={gatedActive}>
               <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
                 <SettingsIcon />
@@ -322,6 +341,30 @@ function AppShell({
                     <PriceIcon />
                   </span>
                   <span>Preço</span>
+                </Link>
+              )}
+              {allowPrecoAtacado ? (
+                <Link
+                  href="/app/promocoes"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white"
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-white/80">
+                    <PromoIcon />
+                  </span>
+                  <span>Promoções</span>
+                </Link>
+              ) : (
+                <Link
+                  href={precoAtacadoBlocked}
+                  onClick={() => setIsMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-app px-3 py-2 text-sm font-medium text-white/45 transition hover:bg-white/5 hover:text-white/65"
+                  title="Disponível após sincronizar anúncios e importar produtos."
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-white/50">
+                    <PromoIcon />
+                  </span>
+                  <span>Promoções</span>
                 </Link>
               )}
               <Link
@@ -487,6 +530,17 @@ function PriceIcon() {
     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
       <path
         d="M12 3a1 1 0 0 1 1 1v1.07A4.5 4.5 0 0 1 16.5 9H15a2.5 2.5 0 0 0-5 0c0 1.1.72 1.79 2.24 2.21l1.52.43C16 12.4 18 14.06 18 17a5 5 0 0 1-4 4.9V22a1 1 0 0 1-2 0v-.99A4.5 4.5 0 0 1 7.5 17H9a2.5 2.5 0 0 0 5 0c0-1.16-.74-1.9-2.38-2.34l-1.44-.4C8 13.7 6 11.98 6 9a5 5 0 0 1 4-4.9V4a1 1 0 0 1 1-1z"
+        className="fill-white/90"
+      />
+    </svg>
+  );
+}
+
+function PromoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      <path
+        d="M7 4h10l-1 5H8L7 4zm0 7h10l-2.2 9H9.2L7 11zm2.5 2.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm5 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"
         className="fill-white/90"
       />
     </svg>
