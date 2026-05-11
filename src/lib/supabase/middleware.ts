@@ -1,7 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 type CookieOption = { name: string; value: string; options?: Record<string, unknown> };
+
+/** Edge Middleware tem limite curto de execução; timeouts longos (20s × várias tentativas) geram 502 no proxy. */
+const MIDDLEWARE_SUPABASE_FETCH_TIMEOUT_MS = 10000;
+const MIDDLEWARE_SUPABASE_FETCH_MAX_RETRIES = 0;
 
 const SUPABASE_FETCH_TIMEOUT_MS = 20000;
 const SUPABASE_FETCH_MAX_RETRIES = 2;
@@ -31,17 +36,23 @@ function isRetryableError(error: unknown) {
   return !!code && RETRYABLE_NETWORK_CODES.has(code);
 }
 
-async function resilientFetch(input: RequestInfo | URL, init?: RequestInit) {
+async function resilientFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  opts?: { timeoutMs: number; maxRetries: number }
+) {
+  const timeoutMs = opts?.timeoutMs ?? SUPABASE_FETCH_TIMEOUT_MS;
+  const maxRetries = opts?.maxRetries ?? SUPABASE_FETCH_MAX_RETRIES;
   let lastError: unknown = null;
 
-  for (let attempt = 0; attempt <= SUPABASE_FETCH_MAX_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), SUPABASE_FETCH_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       return await fetch(input, { ...init, signal: controller.signal });
     } catch (error) {
       lastError = error;
-      if (attempt === SUPABASE_FETCH_MAX_RETRIES || !isRetryableError(error)) {
+      if (attempt === maxRetries || !isRetryableError(error)) {
         throw error;
       }
       await delay(300 * (attempt + 1));
@@ -53,7 +64,38 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit) {
   throw lastError;
 }
 
+function clearAuthCookies(request: NextRequest, to: NextResponse) {
+  for (const c of request.cookies.getAll()) {
+    if (c.name.startsWith("sb-")) {
+      to.cookies.delete(c.name);
+    }
+  }
+  to.cookies.delete("ml_oauth_state");
+  to.cookies.delete("ml_oauth_code_verifier");
+}
+
+const middlewareSupabaseFetch: typeof fetch = (input, init) =>
+  resilientFetch(input, init, {
+    timeoutMs: MIDDLEWARE_SUPABASE_FETCH_TIMEOUT_MS,
+    maxRetries: MIDDLEWARE_SUPABASE_FETCH_MAX_RETRIES,
+  });
+
 export async function updateSession(request: NextRequest) {
+  try {
+    return await runUpdateSession(request);
+  } catch (error) {
+    console.error("[middleware] falha inesperada, redirecionando e limpando sessão:", error);
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/login";
+    url.searchParams.set("redirect", request.nextUrl.pathname);
+    url.searchParams.set("reason", "session_error");
+    const redirect = NextResponse.redirect(url);
+    clearAuthCookies(request, redirect);
+    return redirect;
+  }
+}
+
+async function runUpdateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -70,27 +112,20 @@ export async function updateSession(request: NextRequest) {
         },
       },
       global: {
-        fetch: resilientFetch,
+        fetch: middlewareSupabaseFetch,
       },
     }
   );
-  function clearAuthCookies(to: NextResponse) {
-    const all = request.cookies.getAll();
-    for (const c of all) {
-      // Supabase session cookies (inclui formatos chunked como ".0", ".1")
-      if (c.name.startsWith("sb-")) {
-        to.cookies.delete(c.name);
-      }
-    }
-    // OAuth temporário do Mercado Livre (defensivo para fluxos interrompidos)
-    to.cookies.delete("ml_oauth_state");
-    to.cookies.delete("ml_oauth_code_verifier");
-  }
 
-  let user: unknown = null;
+  let user: User | null = null;
   try {
-    const { data } = await supabase.auth.getUser();
-    user = data.user;
+    const { data, error: authError } = await supabase.auth.getUser();
+    if (authError) {
+      console.warn("[middleware] getUser:", authError.message);
+      clearAuthCookies(request, supabaseResponse);
+    } else {
+      user = data.user;
+    }
   } catch (error) {
     console.error("[middleware] erro ao validar sessão, limpando cookies:", error);
     const url = request.nextUrl.clone();
@@ -98,7 +133,7 @@ export async function updateSession(request: NextRequest) {
     url.searchParams.set("redirect", request.nextUrl.pathname);
     url.searchParams.set("reason", "session_reset");
     const redirect = NextResponse.redirect(url);
-    clearAuthCookies(redirect);
+    clearAuthCookies(request, redirect);
     return redirect;
   }
   const isApp = request.nextUrl.pathname.startsWith("/app");
