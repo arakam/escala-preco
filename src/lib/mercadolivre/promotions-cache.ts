@@ -588,22 +588,67 @@ export async function readPromotionsCache(
 
     const pageItemIds = await fetchMlItemIdsPage(supabase, accountId, norm, linkKey, cachePage);
 
-    const searchRes = await buildFilteredSelect()
-      .eq("cache_search", norm)
-      .order("row_key", { ascending: true })
-      .limit(8000);
+    /**
+     * Sem filtro por tipo no SQL, `.limit(8000)` cortava linhas válidas: o filtro `ptype` era só em memória
+     * sobre um subconjunto arbitrário (ordem `row_key`). Com `ptype`, buscamos no banco pelo tipo e
+     * complementamos linhas sem coluna preenchida cuja inferência pelo rótulo bate com `ptype`.
+     */
+    let fromSearch: Record<string, unknown>[] = [];
+    if (ptype) {
+      const typedRes = await buildFilteredSelect()
+        .eq("cache_search", norm)
+        .eq("promotion_type", ptype)
+        .order("row_key", { ascending: true })
+        .limit(100_000);
+      if (typedRes.error) {
+        console.error("[promotions-cache] read filtered (ptype)", typedRes.error);
+        return { rows: [], total: 0, snapshot_at: null };
+      }
+      fromSearch.push(...((typedRes.data ?? []) as Record<string, unknown>[]));
 
-    if (searchRes.error) {
-      console.error("[promotions-cache] read filtered", searchRes.error);
-      return { rows: [], total: 0, snapshot_at: null };
+      const nullRes = await buildFilteredSelect()
+        .eq("cache_search", norm)
+        .is("promotion_type", null)
+        .order("row_key", { ascending: true })
+        .limit(25_000);
+      if (!nullRes.error && nullRes.data?.length) {
+        for (const row of nullRes.data as Record<string, unknown>[]) {
+          if (resolvedPromotionTypeFromCacheRow(row) === ptype) fromSearch.push(row);
+        }
+      }
+
+      const emptyRes = await buildFilteredSelect()
+        .eq("cache_search", norm)
+        .eq("promotion_type", "")
+        .order("row_key", { ascending: true })
+        .limit(5_000);
+      if (!emptyRes.error && emptyRes.data?.length) {
+        for (const row of emptyRes.data as Record<string, unknown>[]) {
+          if (resolvedPromotionTypeFromCacheRow(row) === ptype) fromSearch.push(row);
+        }
+      }
+
+      fromSearch = dedupePromotionCacheRowsByRowKey(fromSearch);
+    } else {
+      const wideLimit = campPhase ? 50_000 : 8_000;
+      const searchRes = await buildFilteredSelect()
+        .eq("cache_search", norm)
+        .order("row_key", { ascending: true })
+        .limit(wideLimit);
+      if (searchRes.error) {
+        console.error("[promotions-cache] read filtered", searchRes.error);
+        return { rows: [], total: 0, snapshot_at: null };
+      }
+      fromSearch = (searchRes.data ?? []) as Record<string, unknown>[];
     }
 
     let fromPage: Record<string, unknown>[] = [];
     if (pageItemIds.length > 0) {
+      const pageLimit = ptype || campPhase ? 12_000 : 4_000;
       const pageRes = await buildFilteredSelect()
         .in("item_id", pageItemIds)
         .order("row_key", { ascending: true })
-        .limit(4000);
+        .limit(pageLimit);
       if (pageRes.error) {
         console.error("[promotions-cache] read filtered (itens da página)", pageRes.error);
       } else {
@@ -611,7 +656,6 @@ export async function readPromotionsCache(
       }
     }
 
-    const fromSearch = (searchRes.data ?? []) as Record<string, unknown>[];
     const merged = [...fromSearch, ...fromPage];
     let deduped = dedupePromotionCacheRowsByRowKey(merged);
     if (ptype) {
