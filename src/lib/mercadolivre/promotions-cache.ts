@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import {
   fetchSellerPromotionsForItem,
@@ -21,6 +21,72 @@ import {
 
 export const PROMOTIONS_OVERVIEW_PAGE_SIZE = 12;
 const ML_ENRICH_CONCURRENCY = 3;
+
+function formatPostgrestError(prefix: string, err: PostgrestError | null | undefined): string {
+  if (!err) return prefix;
+  const bits = [err.message, err.code ? `código ${err.code}` : "", err.details, err.hint].filter(Boolean);
+  return bits.length ? `${prefix}: ${bits.join(" — ")}` : prefix;
+}
+
+/** Mensagem amigável quando o Postgres indica DDL desatualizado em produção. */
+function appendPromotionsSchemaHint(msg: string): string {
+  const m = msg.toLowerCase();
+  if (
+    m.includes("does not exist") ||
+    m.includes("não existe") ||
+    m.includes("relation") ||
+    m.includes("42p01") ||
+    (m.includes("column") && (m.includes("not exist") || m.includes("does not")))
+  ) {
+    return `${msg} Se o erro citar tabela ou coluna inexistente, execute no Supabase as migrations 019_ml_promotion_webhook_alerts.sql, 020_promotions_cache.sql, 021_promotions_cache_link_filter.sql, 022_promotions_cache_promotion_type.sql, 023_promotions_cache_campaign_dates.sql e 024_promotions_cache_ml_promotion_id.sql.`;
+  }
+  return msg;
+}
+
+/** Remove linhas de anúncios que saíram do recorte atual (search + vínculo), após regravar todas as páginas. */
+async function pruneStalePromotionsCacheRows(
+  supabase: SupabaseClient,
+  accountId: string,
+  userId: string,
+  norm: string,
+  linkKey: PromotionsLinkFilter,
+  keptItemIds: Set<string>
+) {
+  const { data, error } = await supabase
+    .from("promotions_cache_rows")
+    .select("item_id")
+    .eq("account_id", accountId)
+    .eq("user_id", userId)
+    .eq("cache_search", norm)
+    .eq("cache_link_filter", linkKey);
+  if (error) {
+    console.error("[promotions-cache] prune list", error);
+    throw new Error(appendPromotionsSchemaHint(formatPostgrestError("Erro ao listar cache de promoções para limpeza", error)));
+  }
+  const stale = new Set<string>();
+  for (const row of data ?? []) {
+    const id = String((row as { item_id?: string }).item_id ?? "").trim();
+    if (!id || keptItemIds.has(id)) continue;
+    stale.add(id);
+  }
+  const staleArr = Array.from(stale);
+  const chunkSize = 80;
+  for (let i = 0; i < staleArr.length; i += chunkSize) {
+    const chunk = staleArr.slice(i, i + chunkSize);
+    const { error: delErr } = await supabase
+      .from("promotions_cache_rows")
+      .delete()
+      .eq("account_id", accountId)
+      .eq("user_id", userId)
+      .eq("cache_search", norm)
+      .eq("cache_link_filter", linkKey)
+      .in("item_id", chunk);
+    if (delErr) {
+      console.error("[promotions-cache] prune delete", delErr);
+      throw new Error(appendPromotionsSchemaHint(formatPostgrestError("Erro ao remover cache de promoções obsoleto", delErr)));
+    }
+  }
+}
 
 /** Igual à tela Preços: `ml_items.product_id` (vínculo SKU → produto). */
 export type PromotionsLinkFilter = "all" | "linked" | "unlinked";
@@ -810,7 +876,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
   isMercadoLider: boolean;
   snapshotAt: string;
   deleteItemIdsBeforeInsert: boolean;
-}): Promise<{ apiRows: PromoOverviewFlatApiRow[]; total: number }> {
+}): Promise<{ apiRows: PromoOverviewFlatApiRow[]; total: number; itemIds: string[] }> {
   const {
     supabase,
     adminSupabase,
@@ -849,7 +915,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
   const { data: items, error: itemsErr, count } = await query;
   if (itemsErr) {
     console.error("[promotions-cache] refresh items", itemsErr);
-    throw new Error("Erro ao listar anúncios");
+    throw new Error(appendPromotionsSchemaHint(formatPostgrestError("Erro ao listar anúncios", itemsErr)));
   }
 
   const rows = (items ?? []) as MlItemRow[];
@@ -996,10 +1062,12 @@ async function writePromotionsCacheForMlItemPage(ctx: {
       .delete()
       .eq("account_id", accountId)
       .eq("user_id", userId)
+      .eq("cache_search", norm)
+      .eq("cache_link_filter", linkKey)
       .in("item_id", itemIds);
     if (delErr) {
       console.error("[promotions-cache] delete por item_id (sync ML)", delErr);
-      throw new Error("Erro ao limpar cache de promoções");
+      throw new Error(appendPromotionsSchemaHint(formatPostgrestError("Erro ao limpar cache de promoções", delErr)));
     }
   }
 
@@ -1056,12 +1124,12 @@ async function writePromotionsCacheForMlItemPage(ctx: {
       const { error: insErr } = await supabase.from("promotions_cache_rows").insert(slice);
       if (insErr) {
         console.error("[promotions-cache] insert", insErr);
-        throw new Error("Erro ao gravar cache de promoções");
+        throw new Error(appendPromotionsSchemaHint(formatPostgrestError("Erro ao gravar cache de promoções", insErr)));
       }
     }
   }
 
-  return { apiRows, total };
+  return { apiRows, total, itemIds };
 }
 
 /**
@@ -1132,24 +1200,13 @@ export async function refreshPromotionsCache(params: {
   const totalCount = await countMlItemsForPromotionsPage(supabase, accountId, norm, linkKey);
 
   if (refreshScope === "all") {
-    const { error: wipeErr } = await supabase
-      .from("promotions_cache_rows")
-      .delete()
-      .eq("account_id", accountId)
-      .eq("user_id", userId)
-      .eq("cache_search", norm)
-      .eq("cache_link_filter", linkKey);
-
-    if (wipeErr) {
-      console.error("[promotions-cache] wipe snapshot (search+link)", wipeErr);
-      throw new Error("Erro ao limpar cache de promoções");
-    }
-
+    /** Sem wipe global antes do loop: evita cache vazio + data “nova” se o refresh falhar no meio. Limpeza ao final em `pruneStalePromotionsCacheRows`. */
     const snapshotAt = new Date().toISOString();
     const pages = totalCount <= 0 ? 0 : Math.ceil(totalCount / PROMOTIONS_OVERVIEW_PAGE_SIZE);
 
+    const keptItemIds = new Set<string>();
     for (let p = 1; p <= pages; p++) {
-      await writePromotionsCacheForMlItemPage({
+      const { itemIds } = await writePromotionsCacheForMlItemPage({
         supabase,
         adminSupabase,
         accountId,
@@ -1161,9 +1218,12 @@ export async function refreshPromotionsCache(params: {
         accessToken,
         isMercadoLider,
         snapshotAt,
-        deleteItemIdsBeforeInsert: false,
+        deleteItemIdsBeforeInsert: true,
       });
+      for (const id of itemIds) keptItemIds.add(id);
     }
+
+    await pruneStalePromotionsCacheRows(supabase, accountId, userId, norm, linkKey, keptItemIds);
 
     const readBack = await readPromotionsCache(supabase, accountId, userId, cachePage, norm, linkKey);
     return {
