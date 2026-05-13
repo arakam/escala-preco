@@ -36,7 +36,7 @@ const emptyForm: ProductFormData = {
   fixed_expenses: "",
 };
 
-type ViewMode = "products" | "stats" | "operational" | "taxes";
+type ViewMode = "products" | "stats" | "unregistered" | "operational" | "taxes" | "howitworks";
 
 type FinanceOpRow = {
   category_key: string;
@@ -116,7 +116,7 @@ function ProdutosPageContent() {
     cache_refresh_ok?: boolean;
     cache_refresh_error?: string | null;
   } | null>(null);
-  const [unregisteredModalOpen, setUnregisteredModalOpen] = useState(false);
+  const [unregisteredLoading, setUnregisteredLoading] = useState(false);
 
   const loadProducts = useCallback(async () => {
     setLoading(true);
@@ -147,10 +147,15 @@ function ProdutosPageContent() {
   }, [page, pageSize, search]);
 
   const loadUnregisteredSkus = useCallback(async () => {
-    const res = await fetch("/api/products/unregistered-skus?limit=50");
-    if (res.ok) {
-      const data = await res.json();
-      setUnregisteredSkus(data.skus ?? []);
+    setUnregisteredLoading(true);
+    try {
+      const res = await fetch("/api/products/unregistered-skus?limit=200");
+      if (res.ok) {
+        const data = await res.json();
+        setUnregisteredSkus(data.skus ?? []);
+      }
+    } finally {
+      setUnregisteredLoading(false);
     }
   }, []);
 
@@ -221,11 +226,8 @@ function ProdutosPageContent() {
   useEffect(() => {
     if (viewMode === "operational") void loadOperationalCosts();
     else if (viewMode === "taxes") void loadTaxParameters();
-  }, [viewMode, loadOperationalCosts, loadTaxParameters]);
-
-  useEffect(() => {
-    loadUnregisteredSkus();
-  }, [loadUnregisteredSkus]);
+    else if (viewMode === "unregistered") void loadUnregisteredSkus();
+  }, [viewMode, loadOperationalCosts, loadTaxParameters, loadUnregisteredSkus]);
 
   const appliedListFilters = useMemo(() => {
     if (!search.trim()) return [];
@@ -253,7 +255,8 @@ function ProdutosPageContent() {
   const refreshListView = useCallback(() => {
     if (viewMode === "products") void loadProducts();
     else if (viewMode === "stats") void loadStats();
-  }, [viewMode, loadProducts, loadStats]);
+    else if (viewMode === "unregistered") void loadUnregisteredSkus();
+  }, [viewMode, loadProducts, loadStats, loadUnregisteredSkus]);
 
   async function handleSaveOperational() {
     setSavingOperational(true);
@@ -415,6 +418,7 @@ function ProdutosPageContent() {
 
       closeModal();
       loadProducts();
+      void loadUnregisteredSkus();
       reloadOnboarding();
     } catch {
       setFormError("Erro de conexão");
@@ -498,7 +502,6 @@ function ProdutosPageContent() {
       title: title ?? "",
     });
     setFormError(null);
-    setUnregisteredModalOpen(false);
     setModalOpen(true);
   }
 
@@ -524,6 +527,7 @@ function ProdutosPageContent() {
       if (res.ok) {
         setImportResult({ success: true, imported: data.imported, errors: data.errors });
         loadProducts();
+        void loadUnregisteredSkus();
         reloadOnboarding();
       } else {
         setImportResult({ success: false, errors: [data.error || "Erro ao importar"] });
@@ -573,6 +577,20 @@ function ProdutosPageContent() {
             </button>
             <button
               type="button"
+              onClick={() => {
+                setViewMode("unregistered");
+                setPage(1);
+              }}
+              className={
+                viewMode === "unregistered"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-500 hover:text-slate-800"
+              }
+            >
+              Não Cadastrados
+            </button>
+            <button
+              type="button"
               onClick={() => setViewMode("operational")}
               className={
                 viewMode === "operational"
@@ -593,26 +611,38 @@ function ProdutosPageContent() {
             >
               Impostos
             </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("howitworks")}
+              className={
+                viewMode === "howitworks"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-500 hover:text-slate-800"
+              }
+            >
+              Como Funciona?
+            </button>
           </div>
         </div>
 
         <div className="border-b border-slate-100 px-3 py-3">
-          <p className="mb-2 text-[11px] text-slate-500">
-            {viewMode === "products" && "Cadastre produtos com SKU, custos e dimensões usados na calculadora de preços."}
-            {viewMode === "stats" && "Anúncios e vendas vinculados a cada SKU cadastrado."}
-            {viewMode === "operational" && "Valores mensais estimados de custos operacionais da empresa."}
-            {viewMode === "taxes" && "Percentuais de referência da carga tributária; complementam o imposto por produto."}
-          </p>
+          {(viewMode === "stats" ||
+            viewMode === "unregistered" ||
+            viewMode === "operational" ||
+            viewMode === "taxes" ||
+            viewMode === "howitworks") && (
+            <p className="mb-2 text-[11px] text-slate-500">
+              {viewMode === "stats" && "Anúncios e vendas vinculados a cada SKU cadastrado."}
+              {viewMode === "unregistered" &&
+                "SKUs presentes nos anúncios (seller_custom_field) que ainda não têm produto cadastrado na base."}
+              {viewMode === "operational" && "Valores mensais estimados de custos operacionais da empresa."}
+              {viewMode === "taxes" && "Percentuais de referência da carga tributária; complementam o imposto por produto."}
+              {viewMode === "howitworks" &&
+                "Visão geral das abas desta página e de como produtos, anúncios e parâmetros alimentam a calculadora de preços."}
+            </p>
+          )}
+          {viewMode !== "howitworks" && (
           <div className="flex flex-wrap items-center gap-3">
-            {unregisteredSkus.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setUnregisteredModalOpen(true)}
-                className="inline-flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100"
-              >
-                {unregisteredSkus.length} SKU(s) não cadastrado(s)
-              </button>
-            )}
             <button
               type="button"
               onClick={() => void handleLinkSkus()}
@@ -639,6 +669,7 @@ function ProdutosPageContent() {
               </>
             )}
           </div>
+          )}
         </div>
 
         {(viewMode === "products" || viewMode === "stats") && (
@@ -747,7 +778,51 @@ function ProdutosPageContent() {
           </div>
         )}
 
-      {loading && (viewMode === "products" || viewMode === "stats") ? (
+      {viewMode === "unregistered" ? (
+        unregisteredLoading ? (
+          <p className="p-3 text-sm text-slate-500">Carregando…</p>
+        ) : unregisteredSkus.length === 0 ? (
+          <p className="px-3 pb-3 text-sm text-slate-500">
+            Todos os SKUs dos anúncios já estão cadastrados como produtos.
+          </p>
+        ) : (
+          <div className="space-y-4 px-3 pb-3">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Estes SKUs foram encontrados no campo &quot;seller_custom_field&quot; dos seus anúncios, mas não possuem um
+              produto cadastrado. Clique em &quot;Cadastrar&quot; para abrir o formulário com o SKU preenchido.
+            </p>
+            <div className="space-y-2">
+              {unregisteredSkus.map((item) => (
+                <div
+                  key={item.sku}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-600 dark:bg-slate-800/40"
+                >
+                  <div className="min-w-0 flex-1">
+                    <span className="font-mono text-sm font-semibold text-slate-800 dark:text-slate-100">{item.sku}</span>
+                    {item.sample_title && (
+                      <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400" title={item.sample_title}>
+                        {item.sample_title}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+                      {item.listing_count} anúncio(s)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => openNewProductFromSku(item.sku, item.sample_title)}
+                      className="rounded bg-[#0d6efd] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#0b5ed7]"
+                    >
+                      Cadastrar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      ) : loading && (viewMode === "products" || viewMode === "stats") ? (
         <p className="p-3 text-sm text-slate-500">Carregando…</p>
       ) : viewMode === "products" ? (
         products.length === 0 ? (
@@ -1207,6 +1282,49 @@ function ProdutosPageContent() {
             </div>
           </div>
         )
+      ) : viewMode === "howitworks" ? (
+        <div className="space-y-5 px-3 pb-6 pt-1 text-sm text-slate-700 dark:text-slate-300">
+          <section className="rounded border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-600 dark:bg-slate-800/30">
+            <h3 className="mb-2 text-[13px] font-semibold text-slate-900 dark:text-slate-100">Fluxo recomendado</h3>
+            <ol className="list-inside list-decimal space-y-1.5 text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
+              <li>Cadastre produtos com o mesmo SKU usado no campo personalizado dos anúncios no Mercado Livre.</li>
+              <li>Use <strong className="font-medium text-slate-800 dark:text-slate-200">Vincular SKUs</strong> para associar anúncios e variações aos produtos automaticamente.</li>
+              <li>Revise <strong className="font-medium text-slate-800 dark:text-slate-200">Não Cadastrados</strong> para criar produtos que ainda faltam.</li>
+              <li>Ajuste custos operacionais e impostos de referência quando fizer sentido para a sua operação.</li>
+            </ol>
+          </section>
+          <section>
+            <h3 className="mb-2 text-[13px] font-semibold text-slate-900 dark:text-slate-100">Produtos</h3>
+            <p className="mb-2 text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
+              Base de SKUs com custo, imposto por item, taxas extras, despesas fixas e dimensões. Inclua ou edite manualmente,
+              importe CSV (menu <strong className="font-medium text-slate-800 dark:text-slate-200">Importar CSV</strong>) ou exporte
+              para conferência. Esses dados entram nos cálculos de preço e margem.
+            </p>
+          </section>
+          <section>
+            <h3 className="mb-2 text-[13px] font-semibold text-slate-900 dark:text-slate-100">Estatísticas</h3>
+            <p className="text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
+              Após vincular, mostra por SKU quantos anúncios e variações existem, preços, estoque e vendas agregados dos itens ligados ao produto.
+            </p>
+          </section>
+          <section>
+            <h3 className="mb-2 text-[13px] font-semibold text-slate-900 dark:text-slate-100">Não Cadastrados</h3>
+            <p className="text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
+              Lista SKUs encontrados em <strong className="font-medium text-slate-800 dark:text-slate-200">seller_custom_field</strong> dos
+              anúncios que ainda não têm produto na base. Use <strong className="font-medium text-slate-800 dark:text-slate-200">Cadastrar</strong> para abrir o formulário já com o SKU.
+            </p>
+          </section>
+          <section>
+            <h3 className="mb-2 text-[13px] font-semibold text-slate-900 dark:text-slate-100">Custos operacionais e Impostos</h3>
+            <p className="text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
+              Custos operacionais são valores mensais estimados da empresa. Impostos são percentuais de referência da carga tributária;
+              complementam o campo <strong className="font-medium text-slate-800 dark:text-slate-200">Imposto (%)</strong> de cada produto na aba Produtos.
+            </p>
+          </section>
+          <p className="text-[12px] text-slate-500 dark:text-slate-500">
+            Depois de vincular, se a calculadora de preços não atualizar sozinha, use <strong className="font-medium text-slate-700 dark:text-slate-400">Preços → Ações → Atualizar dados</strong>.
+          </p>
+        </div>
       ) : null}
 
       </div>
@@ -1615,83 +1733,6 @@ function ProdutosPageContent() {
         </div>
       )}
 
-      {/* Modal: SKUs não cadastrados */}
-      {unregisteredModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setUnregisteredModalOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="SKUs não cadastrados"
-        >
-          <div
-            className="w-full max-w-2xl rounded-lg border border-stroke bg-card shadow-xl dark:border-slate-600"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-stroke p-4 dark:border-slate-600">
-              <h2 className="text-lg font-semibold text-fg-strong">
-                SKUs encontrados em anúncios sem produto cadastrado
-              </h2>
-              <button
-                type="button"
-                onClick={() => setUnregisteredModalOpen(false)}
-                className="rounded p-1 text-fg-muted hover:bg-gray-100 hover:text-fg dark:hover:bg-slate-700"
-                aria-label="Fechar"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="max-h-[60vh] overflow-y-auto p-4">
-              <p className="mb-4 text-sm text-fg">
-                Estes SKUs foram encontrados no campo &quot;seller_custom_field&quot; dos seus anúncios,
-                mas não possuem um produto cadastrado. Clique em um SKU para criar o produto.
-              </p>
-              {unregisteredSkus.length === 0 ? (
-                <p className="text-fg-muted">Todos os SKUs já estão cadastrados!</p>
-              ) : (
-                <div className="space-y-2">
-                  {unregisteredSkus.map((item) => (
-                    <div
-                      key={item.sku}
-                      className="flex items-center justify-between rounded border border-stroke p-3 hover:bg-gray-50 dark:border-slate-600 dark:hover:bg-slate-700/50"
-                    >
-                      <div className="flex-1">
-                        <span className="font-mono text-sm font-medium">{item.sku}</span>
-                        {item.sample_title && (
-                          <p className="mt-1 truncate text-xs text-fg-muted" title={item.sample_title}>
-                            {item.sample_title}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700">
-                          {item.listing_count} anúncio(s)
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => openNewProductFromSku(item.sku, item.sample_title)}
-                          className="rounded bg-brand-blue px-3 py-1 text-xs font-medium text-white hover:bg-brand-blue-dark"
-                        >
-                          Cadastrar
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end border-t border-stroke p-4 dark:border-slate-600">
-              <button
-                type="button"
-                onClick={() => setUnregisteredModalOpen(false)}
-                className="btn btn-secondary px-4 py-2 text-sm"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

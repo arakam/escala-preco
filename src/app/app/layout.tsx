@@ -8,11 +8,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   AdmintyIconBoxes,
   AdmintyIconCurrency,
-  AdmintyIconHistory,
   AdmintyIconHome,
   AdmintyIconMegaphone,
   AdmintyIconMenu,
-  AdmintyIconPlug,
   AdmintyIconPromo,
   AdmintyIconSettings,
   AdmintyIconTag,
@@ -38,14 +36,14 @@ interface MLAccount {
 function AppLayoutFallback() {
   return (
     <div className={`min-h-screen bg-[#ecf0f5] antialiased ${admintyUiFont.className}`}>
-      <aside className="fixed left-0 top-0 hidden h-full w-72 flex-col border-r border-black/10 shadow-xl md:flex" style={{ backgroundColor: "var(--adminty-sidebar, #404e67)" }}>
-        <div className="flex min-h-[5.75rem] items-center border-b border-white/10 px-3 py-3">
+      <aside className="fixed left-0 top-0 hidden h-full w-64 flex-col border-r border-black/10 shadow-xl md:flex" style={{ backgroundColor: "var(--adminty-sidebar, #404e67)" }}>
+        <div className="flex min-h-[5rem] items-center border-b border-white/10 px-3 py-2.5">
           <Image
             src="/logo.png"
             alt="Escala Preço"
             width={360}
             height={100}
-            className="h-auto w-[13.75rem] max-w-full object-contain object-left brightness-0 invert"
+            className="h-auto w-[10.5rem] max-w-full object-contain object-left brightness-0 invert"
           />
         </div>
         <div className="space-y-2 p-4">
@@ -54,7 +52,7 @@ function AppLayoutFallback() {
           <div className="h-8 animate-pulse rounded bg-white/10" />
         </div>
       </aside>
-      <div className="min-h-screen md:pl-72">
+      <div className="min-h-screen md:pl-64">
         <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200/90 bg-white px-4 shadow-sm">
           <div>
             <div className="mb-1 h-2 w-20 animate-pulse rounded bg-slate-200" />
@@ -83,8 +81,6 @@ function appPageTitle(pathname: string | null) {
   if (pathname.startsWith("/app/produtos")) return "Produtos";
   if (pathname.startsWith("/app/precos")) return "Preço";
   if (pathname.startsWith("/app/promocoes")) return "Promoções";
-  if (pathname.startsWith("/app/mercadolivre")) return "Mercado Livre";
-  if (pathname.startsWith("/app/historico")) return "Histórico";
   if (pathname.startsWith("/app/configuracao")) return "Configuração";
   return "Painel";
 }
@@ -169,14 +165,14 @@ function AdmintyDashboardShell({
       )}
 
       <aside
-        className={`fixed left-0 top-0 z-40 flex h-full w-72 flex-col border-r border-black/10 shadow-xl transition-[transform,width] duration-200 ease-out md:translate-x-0 ${
-          sidebarCollapsed ? "md:w-16" : "md:w-72"
+        className={`fixed left-0 top-0 z-40 flex h-full w-64 flex-col border-r border-black/10 shadow-xl transition-[transform,width] duration-200 ease-out md:translate-x-0 ${
+          sidebarCollapsed ? "md:w-16" : "md:w-64"
         } ${isMenuOpen ? "translate-x-0" : "-translate-x-full"}`}
         style={{ backgroundColor: "var(--adminty-sidebar, #404e67)" }}
       >
         <div
-          className={`flex min-h-[5.75rem] shrink-0 items-center border-b border-white/10 px-3 py-3 sm:min-h-[6rem] ${
-            sidebarCollapsed ? "md:min-h-[4.75rem] md:justify-center md:px-2 md:py-2.5" : "gap-2"
+          className={`flex min-h-[5rem] shrink-0 items-center border-b border-white/10 px-3 py-2.5 sm:min-h-[5.25rem] ${
+            sidebarCollapsed ? "md:min-h-[4.25rem] md:justify-center md:px-2 md:py-2" : "gap-2"
           }`}
         >
           <Link
@@ -189,13 +185,13 @@ function AdmintyDashboardShell({
               alt="Escala Preço"
               width={360}
               height={100}
-              className="h-auto w-[13.75rem] max-w-full object-contain object-left brightness-0 invert"
+              className="h-auto w-[10.5rem] max-w-full object-contain object-left brightness-0 invert"
             />
           </Link>
           <button
             type="button"
             onClick={toggleSidebarCollapsed}
-            className={`hidden rounded border border-white/15 bg-white/5 p-2.5 text-white shadow-sm transition hover:bg-white/15 md:inline-flex ${
+            className={`hidden rounded border border-white/15 bg-white/5 p-2 text-white shadow-sm transition hover:bg-white/15 md:inline-flex ${
               sidebarCollapsed ? "md:mx-auto" : "shrink-0"
             }`}
             aria-expanded={!sidebarCollapsed}
@@ -352,24 +348,6 @@ function AdmintyDashboardShell({
             <AdmintyIconSettings />
             <span className={labelClass}>Configuração</span>
           </Link>
-          <Link
-            href="/app/mercadolivre"
-            onClick={() => setIsMenuOpen(false)}
-            className={sidebarLink(navItemActive(pathname, "/app/mercadolivre"), false)}
-            title={sidebarCollapsed ? "Mercado Livre" : undefined}
-          >
-            <AdmintyIconPlug />
-            <span className={labelClass}>Mercado Livre</span>
-          </Link>
-          <Link
-            href="/app/historico"
-            onClick={() => setIsMenuOpen(false)}
-            className={sidebarLink(navItemActive(pathname, "/app/historico"), false)}
-            title={sidebarCollapsed ? "Histórico" : undefined}
-          >
-            <AdmintyIconHistory />
-            <span className={labelClass}>Histórico</span>
-          </Link>
         </nav>
 
         <div className={`shrink-0 border-t border-white/10 p-3 ${sidebarCollapsed ? "md:px-2 md:py-2" : ""}`}>
@@ -387,7 +365,7 @@ function AdmintyDashboardShell({
         </div>
       </aside>
 
-      <div className={`flex min-h-screen flex-1 flex-col transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "md:pl-16" : "md:pl-72"}`}>
+      <div className={`flex min-h-screen flex-1 flex-col transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "md:pl-16" : "md:pl-64"}`}>
         <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-slate-200/90 bg-white px-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="flex min-w-0 items-center gap-3">
             <button
