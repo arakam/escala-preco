@@ -4,8 +4,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 type CookieOption = { name: string; value: string; options?: Record<string, unknown> };
 
-/** Edge Middleware tem limite curto de execução; timeouts longos (20s × várias tentativas) geram 502 no proxy. */
-const MIDDLEWARE_SUPABASE_FETCH_TIMEOUT_MS = 10000;
+/** Edge Middleware tem limite curto de execução; fetch lento com cookie inválido costuma virar 502 no proxy antes de responder. */
+const MIDDLEWARE_SUPABASE_FETCH_TIMEOUT_MS = 5000;
 const MIDDLEWARE_SUPABASE_FETCH_MAX_RETRIES = 0;
 
 const SUPABASE_FETCH_TIMEOUT_MS = 20000;
@@ -64,14 +64,37 @@ async function resilientFetch(
   throw lastError;
 }
 
-function clearAuthCookies(request: NextRequest, to: NextResponse) {
+/** Mesmos atributos que o browser usa para `sb-*` / OAuth; sem `path: '/'` o delete costuma não remover o cookie. */
+const CLEAR_AUTH_COOKIE = {
+  path: "/" as const,
+  maxAge: 0,
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: process.env.NODE_ENV === "production",
+};
+
+function collectSbCookieNames(request: NextRequest, fromResponse?: NextResponse) {
+  const names = new Set<string>();
   for (const c of request.cookies.getAll()) {
-    if (c.name.startsWith("sb-")) {
-      to.cookies.delete(c.name);
+    if (c.name.startsWith("sb-")) names.add(c.name);
+  }
+  if (fromResponse) {
+    for (const c of fromResponse.cookies.getAll()) {
+      if (c.name.startsWith("sb-")) names.add(c.name);
     }
   }
-  to.cookies.delete("ml_oauth_state");
-  to.cookies.delete("ml_oauth_code_verifier");
+  return names;
+}
+
+function clearAuthCookies(request: NextRequest, to: NextResponse, fromResponse?: NextResponse) {
+  for (const name of Array.from(collectSbCookieNames(request, fromResponse))) {
+    to.cookies.set(name, "", CLEAR_AUTH_COOKIE);
+  }
+  for (const name of ["ml_oauth_state", "ml_oauth_code_verifier"] as const) {
+    if (request.cookies.has(name)) {
+      to.cookies.set(name, "", CLEAR_AUTH_COOKIE);
+    }
+  }
 }
 
 const middlewareSupabaseFetch: typeof fetch = (input, init) =>
@@ -133,7 +156,7 @@ async function runUpdateSession(request: NextRequest) {
     url.searchParams.set("redirect", request.nextUrl.pathname);
     url.searchParams.set("reason", "session_reset");
     const redirect = NextResponse.redirect(url);
-    clearAuthCookies(request, redirect);
+    clearAuthCookies(request, redirect, supabaseResponse);
     return redirect;
   }
   const isApp = request.nextUrl.pathname.startsWith("/app");
@@ -150,7 +173,7 @@ async function runUpdateSession(request: NextRequest) {
     url.pathname = "/auth/login";
     url.searchParams.set("redirect", request.nextUrl.pathname);
     const redirect = NextResponse.redirect(url);
-    forwardCookies(redirect);
+    clearAuthCookies(request, redirect, supabaseResponse);
     return redirect;
   }
   if (user && (request.nextUrl.pathname === "/auth/login" || request.nextUrl.pathname === "/auth/register")) {
