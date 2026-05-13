@@ -64,7 +64,7 @@ function LoginForm() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-canvas p-4">
       <div className="w-full max-w-sm rounded-lg border border-stroke bg-card p-6 shadow-sm dark:border-slate-600">
-        <div className="mb-8 flex justify-center">
+        <div className="mb-3 flex justify-center sm:mb-4">
           <Image
             src="/logo.png"
             alt="Escala Preço"
@@ -74,7 +74,6 @@ function LoginForm() {
             priority
           />
         </div>
-        <h1 className="mb-4 text-xl font-semibold text-fg-strong">Entrar</h1>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
             <label htmlFor="email" className="label">
