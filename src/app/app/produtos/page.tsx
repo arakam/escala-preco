@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { AppTable } from "@/components/AppTable";
 import { OnboardingGate } from "@/components/OnboardingGate";
 import { useOnboarding } from "@/contexts/onboarding-context";
@@ -74,10 +74,13 @@ function ProdutosPageContent() {
   const [unregisteredSkus, setUnregisteredSkus] = useState<UnregisteredSku[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(50);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
+  const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
+  const optionsMenuRef = useRef<HTMLDivElement>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -224,6 +227,34 @@ function ProdutosPageContent() {
     loadUnregisteredSkus();
   }, [loadUnregisteredSkus]);
 
+  const appliedListFilters = useMemo(() => {
+    if (!search.trim()) return [];
+    return [`Busca: ${search.trim()}`];
+  }, [search]);
+
+  useEffect(() => {
+    if (!optionsMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (optionsMenuRef.current && !optionsMenuRef.current.contains(e.target as Node)) {
+        setOptionsMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [optionsMenuOpen]);
+
+  const clearListFilters = useCallback(() => {
+    setSearch("");
+    setSearchInput("");
+    setPage(1);
+    setFiltersModalOpen(false);
+  }, []);
+
+  const refreshListView = useCallback(() => {
+    if (viewMode === "products") void loadProducts();
+    else if (viewMode === "stats") void loadStats();
+  }, [viewMode, loadProducts, loadStats]);
+
   async function handleSaveOperational() {
     setSavingOperational(true);
     setFinanceMessage(null);
@@ -302,6 +333,7 @@ function ProdutosPageContent() {
     e.preventDefault();
     setSearch(searchInput.trim());
     setPage(1);
+    setFiltersModalOpen(false);
   }
 
   function openNewProduct() {
@@ -507,232 +539,315 @@ function ProdutosPageContent() {
   const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 sm:text-xl">Cadastro de Produtos</h1>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
-            Organize seus produtos, custos e parâmetros usados nas demais telas.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {unregisteredSkus.length > 0 && (
+    <div className="adminty-produtos-page space-y-5">
+      <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+        <div className="border-b border-slate-200 bg-white px-3 pt-3">
+          <div className="flex flex-wrap items-end gap-1">
             <button
               type="button"
-              onClick={() => setUnregisteredModalOpen(true)}
-              className="rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100"
+              onClick={() => {
+                setViewMode("products");
+                setPage(1);
+              }}
+              className={
+                viewMode === "products"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-500 hover:text-slate-800"
+              }
             >
-              {unregisteredSkus.length} SKU(s) não cadastrado(s)
+              Produtos
             </button>
-          )}
-          <button
-            type="button"
-            onClick={handleLinkSkus}
-            disabled={linking}
-            className="rounded border border-green-300 bg-green-50 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
-          >
-            {linking ? "Vinculando…" : "Vincular SKUs"}
-          </button>
-          {viewMode === "products" && (
-            <>
-              <button
-                type="button"
-                onClick={() => setImportModalOpen(true)}
-                className="btn btn-secondary px-4 py-2 text-sm"
-              >
-                Importar CSV
-              </button>
-              <button
-                type="button"
-                onClick={handleExport}
-                className="btn btn-secondary px-4 py-2 text-sm"
-              >
-                Exportar CSV
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeleteAllOpen(true)}
-                className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
-              >
-                Excluir todos os produtos
-              </button>
-              <button
-                type="button"
-                onClick={openNewProduct}
-                className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark"
-              >
-                Novo Produto
-              </button>
-            </>
-          )}
+            <button
+              type="button"
+              onClick={() => {
+                setViewMode("stats");
+                setPage(1);
+              }}
+              className={
+                viewMode === "stats"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-500 hover:text-slate-800"
+              }
+            >
+              Estatísticas
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("operational")}
+              className={
+                viewMode === "operational"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-500 hover:text-slate-800"
+              }
+            >
+              Custos operacionais
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("taxes")}
+              className={
+                viewMode === "taxes"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-500 hover:text-slate-800"
+              }
+            >
+              Impostos
+            </button>
+          </div>
         </div>
-      </div>
 
-      {linkResult && (
-        <div
-          className={`mb-4 rounded p-3 text-sm ${
-            linkResult.cache_refresh_ok === false
-              ? "bg-amber-50 text-amber-800"
-              : "bg-green-50 text-green-700"
-          }`}
-        >
-          Vinculação concluída: {linkResult.items_linked} anúncio(s) e {linkResult.variations_linked} variação(ões) vinculados.
-          {linkResult.cache_refresh_ok === false ? (
-            <span className="ml-1">
-              O cache da Calculadora de Preços não atualizou automaticamente ({linkResult.cache_refresh_error ?? "erro"}). Atualize em{" "}
-              <code>Preços &gt; Ações &gt; Atualizar dados</code>.
-            </span>
-          ) : (
-            <span className="ml-1">A Calculadora de Preços já foi atualizada com os novos vínculos.</span>
-          )}
-          <button
-            type="button"
-            onClick={() => setLinkResult(null)}
-            className="ml-2 underline hover:no-underline"
-          >
-            Fechar
-          </button>
+        <div className="border-b border-slate-100 px-3 py-3">
+          <p className="mb-2 text-[11px] text-slate-500">
+            {viewMode === "products" && "Cadastre produtos com SKU, custos e dimensões usados na calculadora de preços."}
+            {viewMode === "stats" && "Anúncios e vendas vinculados a cada SKU cadastrado."}
+            {viewMode === "operational" && "Valores mensais estimados de custos operacionais da empresa."}
+            {viewMode === "taxes" && "Percentuais de referência da carga tributária; complementam o imposto por produto."}
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            {unregisteredSkus.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setUnregisteredModalOpen(true)}
+                className="inline-flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100"
+              >
+                {unregisteredSkus.length} SKU(s) não cadastrado(s)
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void handleLinkSkus()}
+              disabled={linking}
+              className="btn btn-success btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {linking ? "Vinculando…" : "Vincular SKUs"}
+            </button>
+            {viewMode === "products" && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setImportModalOpen(true)}
+                  className="btn btn-secondary btn-sm"
+                >
+                  Importar CSV
+                </button>
+                <button type="button" onClick={() => setDeleteAllOpen(true)} className="btn btn-danger btn-sm">
+                  Excluir todos
+                </button>
+                <button type="button" onClick={openNewProduct} className="btn btn-primary btn-sm">
+                  Novo produto
+                </button>
+              </>
+            )}
+          </div>
         </div>
-      )}
 
-      <div className="mb-4 mt-2 flex gap-2 border-b border-slate-200 dark:border-slate-600">
-        <button
-          type="button"
-          onClick={() => {
-            setViewMode("products");
-            setPage(1);
-          }}
-          className={`px-4 py-2 text-sm font-medium ${
-            viewMode === "products"
-              ? "border-b-2 border-brand-blue text-brand-blue"
-              : "text-fg hover:text-fg-strong"
-          }`}
-        >
-          Produtos
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setViewMode("stats");
-            setPage(1);
-          }}
-          className={`px-4 py-2 text-sm font-medium ${
-            viewMode === "stats"
-              ? "border-b-2 border-brand-blue text-brand-blue"
-              : "text-fg hover:text-fg-strong"
-          }`}
-        >
-          Estatísticas de Anúncios
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode("operational")}
-          className={`px-4 py-2 text-sm font-medium ${
-            viewMode === "operational"
-              ? "border-b-2 border-brand-blue text-brand-blue"
-              : "text-fg hover:text-fg-strong"
-          }`}
-        >
-          Custos Operacionais
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode("taxes")}
-          className={`px-4 py-2 text-sm font-medium ${
-            viewMode === "taxes"
-              ? "border-b-2 border-brand-blue text-brand-blue"
-              : "text-fg hover:text-fg-strong"
-          }`}
-        >
-          Impostos
-        </button>
-      </div>
-
-      {(viewMode === "products" || viewMode === "stats") && (
-      <form onSubmit={handleSearchSubmit} className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="flex flex-1 items-center gap-2 rounded-full bg-slate-50 px-3 py-1.5 ring-1 ring-slate-200">
-          <span className="text-xs text-slate-500 dark:text-slate-400">Buscar</span>
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="SKU ou título…"
-            className="h-7 flex-1 border-0 bg-transparent text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none"
-          />
-        </div>
-        <button
-          type="submit"
-          className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/15"
-        >
-          Aplicar filtros
-        </button>
-        {search && (
-          <button
-            type="button"
-            onClick={() => {
-              setSearch("");
-              setSearchInput("");
-              setPage(1);
-            }}
-            className="text-xs font-medium text-slate-500 dark:text-slate-400 underline-offset-4 hover:text-slate-800 dark:text-slate-100 hover:underline"
-          >
-            Limpar
-          </button>
+        {(viewMode === "products" || viewMode === "stats") && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px] text-slate-600">
+              <span className="font-semibold text-slate-700">Filtros:</span>
+              {appliedListFilters.length > 0 ? (
+                appliedListFilters.map((label, idx) => (
+                  <span
+                    key={`${idx}-${label}`}
+                    className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                  >
+                    {label}
+                  </span>
+                ))
+              ) : (
+                <span className="text-slate-500">Nenhum filtro aplicado</span>
+              )}
+              {appliedListFilters.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => clearListFilters()}
+                  className="text-[11px] font-semibold text-[#0d6efd] hover:underline"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+            <div className="btn-dropdown relative flex items-center gap-1" ref={optionsMenuRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchInput(search);
+                  setFiltersModalOpen(true);
+                }}
+                className="btn btn-icon btn-sm btn-outline-secondary"
+                title="Abrir filtros"
+                aria-label="Abrir filtros"
+              >
+                <FilterIcon />
+              </button>
+              <button
+                type="button"
+                onClick={() => setOptionsMenuOpen((o) => !o)}
+                className="btn btn-icon btn-sm btn-outline-secondary"
+                title="Opções"
+                aria-label="Opções"
+                aria-expanded={optionsMenuOpen}
+              >
+                <KebabMenuIcon />
+              </button>
+              {optionsMenuOpen && (
+                <div className="btn-dropdown-menu right-0 top-9 z-20 w-52">
+                  {viewMode === "products" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleExport();
+                        setOptionsMenuOpen(false);
+                      }}
+                      className="btn-dropdown-item"
+                    >
+                      Exportar CSV
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      refreshListView();
+                      setOptionsMenuOpen(false);
+                    }}
+                    className="btn-dropdown-item"
+                  >
+                    Atualizar tabela
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         )}
-      </form>
-      )}
+
+        {linkResult && (
+          <div
+            className={`mx-3 mt-3 rounded p-3 text-sm ${
+              linkResult.cache_refresh_ok === false
+                ? "bg-amber-50 text-amber-800"
+                : "bg-green-50 text-green-700"
+            }`}
+          >
+            Vinculação concluída: {linkResult.items_linked} anúncio(s) e {linkResult.variations_linked} variação(ões) vinculados.
+            {linkResult.cache_refresh_ok === false ? (
+              <span className="ml-1">
+                O cache da Calculadora de Preços não atualizou automaticamente ({linkResult.cache_refresh_error ?? "erro"}). Atualize em{" "}
+                <code>Preços &gt; Ações &gt; Atualizar dados</code>.
+              </span>
+            ) : (
+              <span className="ml-1">A Calculadora de Preços já foi atualizada com os novos vínculos.</span>
+            )}
+            <button
+              type="button"
+              onClick={() => setLinkResult(null)}
+              className="ml-2 underline hover:no-underline"
+            >
+              Fechar
+            </button>
+          </div>
+        )}
 
       {loading && (viewMode === "products" || viewMode === "stats") ? (
-        <p className="text-fg-muted">Carregando…</p>
+        <p className="p-3 text-sm text-slate-500">Carregando…</p>
       ) : viewMode === "products" ? (
         products.length === 0 ? (
-          <p className="text-fg-muted">
-            Nenhum produto cadastrado. Clique em &quot;Novo Produto&quot; ou importe via CSV.
+          <p className="px-3 pb-3 text-sm text-slate-500">
+            Nenhum produto cadastrado. Use &quot;Novo produto&quot; ou importe via CSV.
           </p>
         ) : (
-          <>
+          <div className="adminty-table-card">
+            <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                <span className="font-medium text-slate-800 dark:text-slate-100">{products.length}</span>
+                {" produto(s) na página · total "}
+                <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  Linhas
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                    className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 shadow-sm focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                    aria-label="Linhas por página"
+                  >
+                    {[10, 20, 25, 50, 100, 250, 500, 750, 1000].map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {totalPages > 1 && (
+                  <>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Página {page}/{totalPages}
+                    </span>
+                    <div className="inline-flex items-center gap-px rounded border border-slate-200 bg-white p-px text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setPage(1)}
+                        disabled={page === 1}
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
+                        title="Primeira página"
+                      >
+                        «
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={page <= 1}
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
+                      >
+                        Anterior
+                      </button>
+                      <span className="min-w-[2ch] px-1.5 py-0.5 text-center font-semibold text-slate-800 dark:text-slate-100">
+                        {page}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={page >= totalPages}
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
+                      >
+                        Próxima
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPage(totalPages)}
+                        disabled={page === totalPages}
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
+                        title="Última página"
+                      >
+                        »
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
             <AppTable
-              summary={`${total} produto(s) — página ${page} de ${totalPages || 1}`}
               maxHeight="70vh"
+              className="[&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none"
+              tableClassName="min-w-full text-left text-sm"
             >
-              <thead className="bg-slate-50">
+              <thead className="sticky top-0 z-10">
                 <tr>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    SKU
-                  </th>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Título
-                  </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Custo (R$)
-                  </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Imposto (%)
-                  </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Taxa Extra (%)
-                  </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Desp. Fixas (R$)
-                  </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Altura (cm)
-                  </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Largura (cm)
-                  </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Comprimento (cm)
-                  </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Peso (kg)
-                  </th>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Criado em
-                  </th>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Ações
-                  </th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">SKU</th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Título</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Custo (R$)</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Imposto (%)</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Taxa Extra (%)</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Desp. Fixas (R$)</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Altura (cm)</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Largura (cm)</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Comprimento (cm)</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Peso (kg)</th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Criado em</th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -759,18 +874,10 @@ function ProdutosPageContent() {
                     <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.fixed_expenses != null ? Number(product.fixed_expenses).toFixed(2) : "—"}
                     </td>
-                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
-                      {product.height ?? "—"}
-                    </td>
-                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
-                      {product.width ?? "—"}
-                    </td>
-                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
-                      {product.length ?? "—"}
-                    </td>
-                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
-                      {product.weight ?? "—"}
-                    </td>
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">{product.height ?? "—"}</td>
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">{product.width ?? "—"}</td>
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">{product.length ?? "—"}</td>
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">{product.weight ?? "—"}</td>
                     <td className="p-2 text-xs text-slate-500 dark:text-slate-400">
                       {new Date(product.created_at).toLocaleDateString()}
                     </td>
@@ -779,7 +886,7 @@ function ProdutosPageContent() {
                         <button
                           type="button"
                           onClick={() => openEditProduct(product)}
-                          className="text-sm text-brand-blue hover:underline"
+                          className="text-sm text-[#0d6efd] hover:underline"
                         >
                           Editar
                         </button>
@@ -796,194 +903,154 @@ function ProdutosPageContent() {
                 ))}
               </tbody>
             </AppTable>
-
-            {totalPages > 1 && (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Mostrando página {page} de {totalPages} · {total} produto(s)
-                </p>
-                <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setPage(1)}
-                    disabled={page === 1}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    «
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page <= 1}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Anterior
-                  </button>
-                  <span className="px-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
-                    {page}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={page >= totalPages}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Próxima
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPage(totalPages)}
-                    disabled={page === totalPages}
-                    className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    »
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
+          </div>
         )
       ) : viewMode === "stats" ? (
         stats.length === 0 ? (
-        <p className="text-fg-muted">
-          Nenhum produto com anúncios vinculados. Clique em &quot;Vincular SKUs&quot; para associar automaticamente.
-        </p>
+          <p className="px-3 pb-3 text-sm text-slate-500">
+            Nenhum produto com anúncios vinculados. Use &quot;Vincular SKUs&quot; para associar automaticamente.
+          </p>
         ) : (
-        <>
-          <AppTable
-            summary={`${total} produto(s) com anúncios — página ${page} de ${totalPages || 1}`}
-            maxHeight="70vh"
-          >
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  SKU
-                </th>
-                <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Título
-                </th>
-                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Anúncios
-                </th>
-                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Variações
-                </th>
-                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Total
-                </th>
-                <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Ativos
-                </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Preço Mín
-                </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Preço Máx
-                </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Preço Médio
-                </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Custo
-                </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Estoque
-                </th>
-                <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Vendidos
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.map((stat) => (
-                <tr
-                  key={stat.product_id}
-                  className="border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
-                >
-                  <td className="p-2 font-mono text-xs text-slate-700 dark:text-slate-200">{stat.sku}</td>
-                  <td className="max-w-[200px] p-2" title={stat.title}>
-                    <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
-                      {stat.title}
-                    </span>
-                  </td>
-                  <td className="p-2 text-center">{stat.total_items}</td>
-                  <td className="p-2 text-center">{stat.total_variations}</td>
-                  <td className="p-2 text-center font-semibold">{stat.total_listings}</td>
-                  <td className="p-2 text-center">
-                    <span className={stat.active_items > 0 ? "text-green-600" : "text-fg-muted"}>
-                      {stat.active_items + stat.active_variations}
-                    </span>
-                  </td>
-                  <td className="p-2 text-right">
-                    {stat.min_item_price != null ? `R$ ${Number(stat.min_item_price).toFixed(2)}` : "—"}
-                  </td>
-                  <td className="p-2 text-right">
-                    {stat.max_item_price != null ? `R$ ${Number(stat.max_item_price).toFixed(2)}` : "—"}
-                  </td>
-                  <td className="p-2 text-right">
-                    {stat.avg_item_price != null ? `R$ ${Number(stat.avg_item_price).toFixed(2)}` : "—"}
-                  </td>
-                  <td className="p-2 text-right text-fg">
-                    {stat.cost_price != null ? `R$ ${Number(stat.cost_price).toFixed(2)}` : "—"}
-                  </td>
-                  <td className="p-2 text-right">{stat.total_available_qty}</td>
-                  <td className="p-2 text-right text-green-600">{stat.total_sold_qty}</td>
-                </tr>
-              ))}
-            </tbody>
-          </AppTable>
-
-          {totalPages > 1 && (
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Mostrando página {page} de {totalPages} · {total} produto(s) com anúncios
+          <div className="adminty-table-card">
+            <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                <span className="font-medium text-slate-800 dark:text-slate-100">{stats.length}</span>
+                {" produto(s) na página · total "}
+                <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
               </p>
-              <div className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setPage(1)}
-                  disabled={page === 1}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  «
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Anterior
-                </button>
-                <span className="px-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
-                  {page}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Próxima
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPage(totalPages)}
-                  disabled={page === totalPages}
-                  className="rounded-full px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  »
-                </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  Linhas
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                    className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 shadow-sm focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                    aria-label="Linhas por página"
+                  >
+                    {[10, 20, 25, 50, 100, 250, 500, 750, 1000].map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {totalPages > 1 && (
+                  <>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Página {page}/{totalPages}
+                    </span>
+                    <div className="inline-flex items-center gap-px rounded border border-slate-200 bg-white p-px text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setPage(1)}
+                        disabled={page === 1}
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
+                        title="Primeira página"
+                      >
+                        «
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={page <= 1}
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
+                      >
+                        Anterior
+                      </button>
+                      <span className="min-w-[2ch] px-1.5 py-0.5 text-center font-semibold text-slate-800 dark:text-slate-100">
+                        {page}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={page >= totalPages}
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
+                      >
+                        Próxima
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPage(totalPages)}
+                        disabled={page === totalPages}
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
+                        title="Última página"
+                      >
+                        »
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
-          )}
-        </>
+            <AppTable
+              maxHeight="70vh"
+              className="[&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none"
+              tableClassName="min-w-full text-left text-sm"
+            >
+              <thead className="sticky top-0 z-10">
+                <tr>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">SKU</th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Título</th>
+                  <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-white/95">Anúncios</th>
+                  <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-white/95">Variações</th>
+                  <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-white/95">Total</th>
+                  <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-white/95">Ativos</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Preço Mín</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Preço Máx</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Preço Médio</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Custo</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Estoque</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Vendidos</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.map((stat) => (
+                  <tr
+                    key={stat.product_id}
+                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
+                  >
+                    <td className="p-2 font-mono text-xs text-slate-700 dark:text-slate-200">{stat.sku}</td>
+                    <td className="max-w-[200px] p-2" title={stat.title}>
+                      <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
+                        {stat.title}
+                      </span>
+                    </td>
+                    <td className="p-2 text-center">{stat.total_items}</td>
+                    <td className="p-2 text-center">{stat.total_variations}</td>
+                    <td className="p-2 text-center font-semibold">{stat.total_listings}</td>
+                    <td className="p-2 text-center">
+                      <span className={stat.active_items > 0 ? "text-green-600" : "text-fg-muted"}>
+                        {stat.active_items + stat.active_variations}
+                      </span>
+                    </td>
+                    <td className="p-2 text-right">
+                      {stat.min_item_price != null ? `R$ ${Number(stat.min_item_price).toFixed(2)}` : "—"}
+                    </td>
+                    <td className="p-2 text-right">
+                      {stat.max_item_price != null ? `R$ ${Number(stat.max_item_price).toFixed(2)}` : "—"}
+                    </td>
+                    <td className="p-2 text-right">
+                      {stat.avg_item_price != null ? `R$ ${Number(stat.avg_item_price).toFixed(2)}` : "—"}
+                    </td>
+                    <td className="p-2 text-right text-fg">
+                      {stat.cost_price != null ? `R$ ${Number(stat.cost_price).toFixed(2)}` : "—"}
+                    </td>
+                    <td className="p-2 text-right">{stat.total_available_qty}</td>
+                    <td className="p-2 text-right text-green-600">{stat.total_sold_qty}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </AppTable>
+          </div>
         )
       ) : viewMode === "operational" ? (
         financeLoading ? (
-          <p className="text-fg-muted">Carregando custos…</p>
+          <p className="p-3 text-sm text-slate-500">Carregando custos…</p>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 px-3 pb-3">
             <p className="text-sm text-slate-600 dark:text-slate-300">
               Informe o valor <span className="font-medium">mensal estimado</span> de cada custo operacional da empresa.
               Os dados serão usados nas análises e telas futuras.
@@ -999,49 +1066,54 @@ function ProdutosPageContent() {
                 {financeMessage.text}
               </div>
             )}
-            <AppTable summary="Custos operacionais (R$ / mês)" maxHeight="min(70vh, 32rem)">
-              <thead className="bg-slate-50 dark:bg-slate-800/80">
-                <tr>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Categoria
-                  </th>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Exemplos
-                  </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Valor mensal (R$)
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {opRows.map((r) => (
-                  <tr
-                    key={r.category_key}
-                    className="border-b border-slate-100 bg-white/50 dark:border-slate-700 dark:bg-slate-800/40"
-                  >
-                    <td className="p-2 text-sm font-medium text-slate-900 dark:text-slate-50">{r.label}</td>
-                    <td className="max-w-md p-2 text-xs text-slate-600 dark:text-slate-400">{r.examples}</td>
-                    <td className="p-2 text-right">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={opInputs[r.category_key] ?? ""}
-                        onChange={(e) =>
-                          setOpInputs((prev) => ({ ...prev, [r.category_key]: e.target.value }))
-                        }
-                        placeholder="0,00"
-                        className="input w-36 py-1.5 text-right text-sm"
-                        aria-label={`Valor mensal ${r.label}`}
-                      />
-                    </td>
+            <div className="adminty-table-card">
+              <p className="border-b border-slate-100 px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+                Custos operacionais (R$ / mês)
+              </p>
+              <AppTable
+                maxHeight="min(70vh, 32rem)"
+                className="[&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none"
+                tableClassName="min-w-full text-left text-sm"
+              >
+                <thead className="sticky top-0 z-10">
+                  <tr>
+                    <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Categoria</th>
+                    <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Exemplos</th>
+                    <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">
+                      Valor mensal (R$)
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </AppTable>
+                </thead>
+                <tbody>
+                  {opRows.map((r) => (
+                    <tr
+                      key={r.category_key}
+                      className="border-b border-slate-100 bg-white/50 dark:border-slate-700 dark:bg-slate-800/40"
+                    >
+                      <td className="p-2 text-sm font-medium text-slate-900 dark:text-slate-50">{r.label}</td>
+                      <td className="max-w-md p-2 text-xs text-slate-600 dark:text-slate-400">{r.examples}</td>
+                      <td className="p-2 text-right">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={opInputs[r.category_key] ?? ""}
+                          onChange={(e) =>
+                            setOpInputs((prev) => ({ ...prev, [r.category_key]: e.target.value }))
+                          }
+                          placeholder="0,00"
+                          className="input w-36 py-1.5 text-right text-sm"
+                          aria-label={`Valor mensal ${r.label}`}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </AppTable>
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-600">
               <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
                 Total mensal (estimado):{" "}
-                <span className="tabular-nums text-brand-blue">
+                <span className="tabular-nums text-[#0d6efd]">
                   R$ {opTotalMonthly.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="ml-2 text-xs font-normal text-slate-500 dark:text-slate-400">
@@ -1052,7 +1124,7 @@ function ProdutosPageContent() {
                 type="button"
                 onClick={() => void handleSaveOperational()}
                 disabled={savingOperational}
-                className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+                className="btn btn-primary btn-sm disabled:opacity-50"
               >
                 {savingOperational ? "Salvando…" : "Salvar custos operacionais"}
               </button>
@@ -1061,9 +1133,9 @@ function ProdutosPageContent() {
         )
       ) : viewMode === "taxes" ? (
         financeLoading ? (
-          <p className="text-fg-muted">Carregando impostos…</p>
+          <p className="p-3 text-sm text-slate-500">Carregando impostos…</p>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 px-3 pb-3">
             <p className="text-sm text-slate-600 dark:text-slate-300">
               Cadastre <span className="font-medium">percentuais de referência</span> da sua carga tributária (empresa).
               Isso complementa o campo <span className="font-medium">Imposto (%)</span> de cada produto na aba Produtos.
@@ -1079,51 +1151,56 @@ function ProdutosPageContent() {
                 {financeMessage.text}
               </div>
             )}
-            <AppTable summary="Impostos e contribuições (%)" maxHeight="min(70vh, 28rem)">
-              <thead className="bg-slate-50 dark:bg-slate-800/80">
-                <tr>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Categoria
-                  </th>
-                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Exemplos
-                  </th>
-                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    % (referência)
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {taxRows.map((r) => (
-                  <tr
-                    key={r.category_key}
-                    className="border-b border-slate-100 bg-white/50 dark:border-slate-700 dark:bg-slate-800/40"
-                  >
-                    <td className="p-2 text-sm font-medium text-slate-900 dark:text-slate-50">{r.label}</td>
-                    <td className="max-w-md p-2 text-xs text-slate-600 dark:text-slate-400">{r.examples}</td>
-                    <td className="p-2 text-right">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={taxInputs[r.category_key] ?? ""}
-                        onChange={(e) =>
-                          setTaxInputs((prev) => ({ ...prev, [r.category_key]: e.target.value }))
-                        }
-                        placeholder="0,00"
-                        className="input w-28 py-1.5 text-right text-sm"
-                        aria-label={`Percentual ${r.label}`}
-                      />
-                    </td>
+            <div className="adminty-table-card">
+              <p className="border-b border-slate-100 px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+                Impostos e contribuições (%)
+              </p>
+              <AppTable
+                maxHeight="min(70vh, 28rem)"
+                className="[&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none"
+                tableClassName="min-w-full text-left text-sm"
+              >
+                <thead className="sticky top-0 z-10">
+                  <tr>
+                    <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Categoria</th>
+                    <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Exemplos</th>
+                    <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">
+                      % (referência)
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </AppTable>
+                </thead>
+                <tbody>
+                  {taxRows.map((r) => (
+                    <tr
+                      key={r.category_key}
+                      className="border-b border-slate-100 bg-white/50 dark:border-slate-700 dark:bg-slate-800/40"
+                    >
+                      <td className="p-2 text-sm font-medium text-slate-900 dark:text-slate-50">{r.label}</td>
+                      <td className="max-w-md p-2 text-xs text-slate-600 dark:text-slate-400">{r.examples}</td>
+                      <td className="p-2 text-right">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={taxInputs[r.category_key] ?? ""}
+                          onChange={(e) =>
+                            setTaxInputs((prev) => ({ ...prev, [r.category_key]: e.target.value }))
+                          }
+                          placeholder="0,00"
+                          className="input w-28 py-1.5 text-right text-sm"
+                          aria-label={`Percentual ${r.label}`}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </AppTable>
+            </div>
             <div className="flex justify-end border-t border-slate-200 pt-4 dark:border-slate-600">
               <button
                 type="button"
                 onClick={() => void handleSaveTaxes()}
                 disabled={savingTaxes}
-                className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+                className="btn btn-primary btn-sm disabled:opacity-50"
               >
                 {savingTaxes ? "Salvando…" : "Salvar impostos"}
               </button>
@@ -1131,6 +1208,65 @@ function ProdutosPageContent() {
           </div>
         )
       ) : null}
+
+      </div>
+
+      {filtersModalOpen && (viewMode === "products" || viewMode === "stats") && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setFiltersModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Filtros"
+        >
+          <div
+            className="w-full max-w-lg overflow-hidden rounded border border-slate-200 bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-800">Filtros</h2>
+                <p className="text-xs text-slate-500">Busque por SKU ou título na listagem atual.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFiltersModalOpen(false)}
+                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                aria-label="Fechar filtros"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleSearchSubmit} className="space-y-4 p-4">
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Buscar</label>
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="SKU ou título…"
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                />
+              </div>
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                <button
+                  type="button"
+                  onClick={() => clearListFilters()}
+                  className="rounded border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Limpar filtros
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm"
+                >
+                  Aplicar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal: Novo/Editar Produto */}
       {modalOpen && (
@@ -1557,6 +1693,30 @@ function ProdutosPageContent() {
         </div>
       )}
     </div>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      <path
+        d="M4 6h16M7 12h10M10 18h4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function KebabMenuIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      <circle cx="12" cy="5" r="1.7" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+      <circle cx="12" cy="19" r="1.7" fill="currentColor" />
+    </svg>
   );
 }
 

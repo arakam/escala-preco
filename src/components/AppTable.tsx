@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { CSSProperties } from "react";
 
 /**
  * Modelo padrão de tabela para o app:
@@ -23,6 +24,8 @@ export interface AppTableProps {
    * (útil para `table-fixed` + larguras via `<colgroup>`).
    */
   tableClassName?: string;
+  /** Estilos inline no `<table>` (ex.: largura fixa = soma das colunas para sticky alinhado ao `<colgroup>`). */
+  tableStyle?: CSSProperties;
 }
 
 export function AppTable({
@@ -31,6 +34,7 @@ export function AppTable({
   maxHeight = "70vh",
   className = "",
   tableClassName,
+  tableStyle,
 }: AppTableProps) {
   const tableClasses = tableClassName?.trim()
     ? `app-table text-left text-sm ${tableClassName}`
@@ -45,7 +49,7 @@ export function AppTable({
         className="w-full overflow-x-auto overflow-y-auto rounded-app border border-stroke bg-white shadow-card dark:border-slate-700 dark:bg-slate-800"
         style={maxHeight ? { maxHeight } : undefined}
       >
-        <table className={tableClasses}>
+        <table className={tableClasses} style={tableStyle}>
           {children}
         </table>
       </div>

@@ -1,13 +1,33 @@
- "use client";
+"use client";
 
 import Link from "next/link";
 import Image from "next/image";
+import { Open_Sans } from "next/font/google";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  AdmintyIconBoxes,
+  AdmintyIconCurrency,
+  AdmintyIconHistory,
+  AdmintyIconHome,
+  AdmintyIconMegaphone,
+  AdmintyIconMenu,
+  AdmintyIconPlug,
+  AdmintyIconPromo,
+  AdmintyIconSettings,
+  AdmintyIconTag,
+} from "@/components/adminty-nav-icons";
 import { OnboardingProvider, useOnboarding } from "@/contexts/onboarding-context";
 import { isPrecoAtacadoAllowed, navBlockedHref } from "@/lib/onboarding-gating";
 
+const admintyUiFont = Open_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
+const ADMINTY_SIDEBAR_COLLAPSED_KEY = "escalapreco_adminty_sidebar_collapsed";
 
 interface MLAccount {
   id: string;
@@ -17,25 +37,421 @@ interface MLAccount {
 
 function AppLayoutFallback() {
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "var(--body-bg)" }}>
-      <header className="sticky top-0 z-30 border-b border-primary-darker/50 bg-gradient-to-r from-primary-darker via-primary to-primary-dark shadow-md">
-        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4">
-          <Link href="/app" className="flex items-center gap-2">
+    <div className={`min-h-screen bg-[#ecf0f5] antialiased ${admintyUiFont.className}`}>
+      <aside className="fixed left-0 top-0 hidden h-full w-72 flex-col border-r border-black/10 shadow-xl md:flex" style={{ backgroundColor: "var(--adminty-sidebar, #404e67)" }}>
+        <div className="flex min-h-[5.75rem] items-center border-b border-white/10 px-3 py-3">
+          <Image
+            src="/logo.png"
+            alt="Escala Preço"
+            width={360}
+            height={100}
+            className="h-auto w-[13.75rem] max-w-full object-contain object-left brightness-0 invert"
+          />
+        </div>
+        <div className="space-y-2 p-4">
+          <div className="h-8 animate-pulse rounded bg-white/10" />
+          <div className="h-8 animate-pulse rounded bg-white/10" />
+          <div className="h-8 animate-pulse rounded bg-white/10" />
+        </div>
+      </aside>
+      <div className="min-h-screen md:pl-72">
+        <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200/90 bg-white px-4 shadow-sm">
+          <div>
+            <div className="mb-1 h-2 w-20 animate-pulse rounded bg-slate-200" />
+            <div className="h-3 w-32 animate-pulse rounded bg-slate-200" />
+          </div>
+          <div className="h-7 w-36 animate-pulse rounded-full bg-slate-100" />
+        </header>
+        <main className="px-3 py-4 sm:px-5 sm:py-6">
+          <div className="h-24 w-full animate-pulse rounded border border-slate-200 bg-white shadow-sm" />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function navItemActive(pathname: string | null, href: string) {
+  if (!pathname) return false;
+  if (href === "/app") return pathname === "/app";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function appPageTitle(pathname: string | null) {
+  if (!pathname || pathname === "/app") return "Início";
+  if (pathname.startsWith("/app/anuncios")) return "Anúncios";
+  if (pathname.startsWith("/app/atacado")) return "Atacado";
+  if (pathname.startsWith("/app/produtos")) return "Produtos";
+  if (pathname.startsWith("/app/precos")) return "Preço";
+  if (pathname.startsWith("/app/promocoes")) return "Promoções";
+  if (pathname.startsWith("/app/mercadolivre")) return "Mercado Livre";
+  if (pathname.startsWith("/app/historico")) return "Histórico";
+  if (pathname.startsWith("/app/configuracao")) return "Configuração";
+  return "Painel";
+}
+
+function AdmintyDashboardShell({
+  children,
+  accountLabel,
+  isMenuOpen,
+  setIsMenuOpen,
+  pathname,
+  allowAnuncios,
+  allowProdutos,
+  allowPrecoAtacado,
+  produtosBlocked,
+  precoAtacadoBlocked,
+  mlConnected,
+}: {
+  children: React.ReactNode;
+  accountLabel: string;
+  isMenuOpen: boolean;
+  setIsMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  pathname: string | null;
+  allowAnuncios: boolean;
+  allowProdutos: boolean;
+  allowPrecoAtacado: boolean;
+  produtosBlocked: string;
+  precoAtacadoBlocked: string;
+  mlConnected: boolean;
+}) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const pageTitle = appPageTitle(pathname);
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(ADMINTY_SIDEBAR_COLLAPSED_KEY);
+      if (v === "1") setSidebarCollapsed(true);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(ADMINTY_SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  const sidebarLink = (active: boolean, blocked: boolean) => {
+    const layout = sidebarCollapsed
+      ? "gap-3 border-l-[3px] py-2.5 pl-[13px] pr-3 md:justify-center md:gap-0 md:border-l-0 md:px-2 md:py-2.5 md:pl-2 md:pr-2"
+      : "gap-3 border-l-[3px] py-2.5 pl-[15px] pr-4";
+    const base = `flex items-center ${layout} text-[14px] font-normal leading-[1.45] tracking-normal transition-colors`;
+    const activeCollapsed = sidebarCollapsed && active ? "md:rounded-md md:bg-black/25" : "";
+    if (blocked) {
+      return `${base} border-transparent text-white/40 hover:bg-white/5 hover:text-white/60 md:hover:bg-white/5 ${activeCollapsed}`;
+    }
+    if (active) {
+      return `${base} border-[#01a9ac] bg-black/20 font-medium text-white ${activeCollapsed}`;
+    }
+    return `${base} border-transparent text-white/80 hover:bg-white/10 hover:text-white ${activeCollapsed}`;
+  };
+
+  const labelClass = sidebarCollapsed ? "md:sr-only" : "";
+
+  return (
+    <div
+      className={`adminty-shell relative min-h-screen bg-[#ecf0f5] text-slate-800 antialiased dark:bg-slate-950 dark:text-slate-100 ${admintyUiFont.className}`}
+    >
+      {isMenuOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-30 bg-slate-900/50 md:hidden"
+          aria-label="Fechar menu"
+          onClick={() => setIsMenuOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`fixed left-0 top-0 z-40 flex h-full w-72 flex-col border-r border-black/10 shadow-xl transition-[transform,width] duration-200 ease-out md:translate-x-0 ${
+          sidebarCollapsed ? "md:w-16" : "md:w-72"
+        } ${isMenuOpen ? "translate-x-0" : "-translate-x-full"}`}
+        style={{ backgroundColor: "var(--adminty-sidebar, #404e67)" }}
+      >
+        <div
+          className={`flex min-h-[5.75rem] shrink-0 items-center border-b border-white/10 px-3 py-3 sm:min-h-[6rem] ${
+            sidebarCollapsed ? "md:min-h-[4.75rem] md:justify-center md:px-2 md:py-2.5" : "gap-2"
+          }`}
+        >
+          <Link
+            href="/app"
+            className={`flex min-w-0 items-center ${sidebarCollapsed ? "flex-1 md:hidden" : "min-w-0 flex-1"}`}
+            onClick={() => setIsMenuOpen(false)}
+          >
             <Image
               src="/logo.png"
               alt="Escala Preço"
               width={360}
               height={100}
-              className="h-10 w-auto object-contain brightness-0 invert sm:h-14"
+              className="h-auto w-[13.75rem] max-w-full object-contain object-left brightness-0 invert"
             />
           </Link>
-          <div className="h-9 w-32 animate-pulse rounded-app bg-white/10" />
+          <button
+            type="button"
+            onClick={toggleSidebarCollapsed}
+            className={`hidden rounded border border-white/15 bg-white/5 p-2.5 text-white shadow-sm transition hover:bg-white/15 md:inline-flex ${
+              sidebarCollapsed ? "md:mx-auto" : "shrink-0"
+            }`}
+            aria-expanded={!sidebarCollapsed}
+            aria-label={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"}
+            title={sidebarCollapsed ? "Expandir menu" : "Recolher menu"}
+          >
+            <AdmintyIconMenu />
+          </button>
         </div>
-      </header>
-      <main className="w-full px-3 py-4 sm:px-4 sm:py-6" style={{ color: "var(--body-text)" }}>
-        <div className="h-24 w-full animate-pulse rounded-app bg-stroke/50" />
-      </main>
+
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2">
+          <Link
+            href="/app"
+            onClick={() => setIsMenuOpen(false)}
+            className={sidebarLink(navItemActive(pathname, "/app"), false)}
+            title={sidebarCollapsed ? "Início" : undefined}
+          >
+            <AdmintyIconHome />
+            <span className={labelClass}>Início</span>
+          </Link>
+          {allowAnuncios ? (
+            <Link
+              href="/app/anuncios"
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(navItemActive(pathname, "/app/anuncios"), false)}
+              title={sidebarCollapsed ? "Anúncios" : undefined}
+            >
+              <AdmintyIconMegaphone />
+              <span className={labelClass}>Anúncios</span>
+            </Link>
+          ) : (
+            <Link
+              href="/app/configuracao"
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(false, true)}
+              title={
+                sidebarCollapsed
+                  ? "Anúncios — conecte o ML em Configuração"
+                  : "Passo 1: conecte sua conta do Mercado Livre em Configuração."
+              }
+            >
+              <AdmintyIconMegaphone />
+              <span className={labelClass}>Anúncios</span>
+            </Link>
+          )}
+          {allowPrecoAtacado ? (
+            <Link
+              href="/app/atacado"
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(navItemActive(pathname, "/app/atacado"), false)}
+              title={sidebarCollapsed ? "Atacado" : undefined}
+            >
+              <AdmintyIconBoxes />
+              <span className={labelClass}>Atacado</span>
+            </Link>
+          ) : (
+            <Link
+              href={precoAtacadoBlocked}
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(false, true)}
+              title={
+                sidebarCollapsed
+                  ? "Atacado — disponível após sincronizar"
+                  : "Disponível após sincronizar anúncios e importar produtos."
+              }
+            >
+              <AdmintyIconBoxes />
+              <span className={labelClass}>Atacado</span>
+            </Link>
+          )}
+          {allowProdutos ? (
+            <Link
+              href="/app/produtos"
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(navItemActive(pathname, "/app/produtos"), false)}
+              title={sidebarCollapsed ? "Produtos" : undefined}
+            >
+              <AdmintyIconTag />
+              <span className={labelClass}>Produtos</span>
+            </Link>
+          ) : (
+            <Link
+              href={produtosBlocked}
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(false, true)}
+              title={
+                sidebarCollapsed
+                  ? "Produtos — ver requisitos"
+                  : !mlConnected
+                    ? "Conecte o Mercado Livre antes de gerenciar produtos."
+                    : "Sincronize os anúncios antes de importar produtos."
+              }
+            >
+              <AdmintyIconTag />
+              <span className={labelClass}>Produtos</span>
+            </Link>
+          )}
+          {allowPrecoAtacado ? (
+            <Link
+              href="/app/precos"
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(navItemActive(pathname, "/app/precos"), false)}
+              title={sidebarCollapsed ? "Preço" : undefined}
+            >
+              <AdmintyIconCurrency />
+              <span className={labelClass}>Preço</span>
+            </Link>
+          ) : (
+            <Link
+              href={precoAtacadoBlocked}
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(false, true)}
+              title={
+                sidebarCollapsed
+                  ? "Preço — disponível após sincronizar"
+                  : "Disponível após sincronizar anúncios e importar produtos."
+              }
+            >
+              <AdmintyIconCurrency />
+              <span className={labelClass}>Preço</span>
+            </Link>
+          )}
+          {allowPrecoAtacado ? (
+            <Link
+              href="/app/promocoes"
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(navItemActive(pathname, "/app/promocoes"), false)}
+              title={sidebarCollapsed ? "Promoções" : undefined}
+            >
+              <AdmintyIconPromo />
+              <span className={labelClass}>Promoções</span>
+            </Link>
+          ) : (
+            <Link
+              href={precoAtacadoBlocked}
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(false, true)}
+              title={
+                sidebarCollapsed
+                  ? "Promoções — disponível após sincronizar"
+                  : "Disponível após sincronizar anúncios e importar produtos."
+              }
+            >
+              <AdmintyIconPromo />
+              <span className={labelClass}>Promoções</span>
+            </Link>
+          )}
+          <Link
+            href="/app/configuracao"
+            onClick={() => setIsMenuOpen(false)}
+            className={sidebarLink(navItemActive(pathname, "/app/configuracao"), false)}
+            title={sidebarCollapsed ? "Configuração" : undefined}
+          >
+            <AdmintyIconSettings />
+            <span className={labelClass}>Configuração</span>
+          </Link>
+          <Link
+            href="/app/mercadolivre"
+            onClick={() => setIsMenuOpen(false)}
+            className={sidebarLink(navItemActive(pathname, "/app/mercadolivre"), false)}
+            title={sidebarCollapsed ? "Mercado Livre" : undefined}
+          >
+            <AdmintyIconPlug />
+            <span className={labelClass}>Mercado Livre</span>
+          </Link>
+          <Link
+            href="/app/historico"
+            onClick={() => setIsMenuOpen(false)}
+            className={sidebarLink(navItemActive(pathname, "/app/historico"), false)}
+            title={sidebarCollapsed ? "Histórico" : undefined}
+          >
+            <AdmintyIconHistory />
+            <span className={labelClass}>Histórico</span>
+          </Link>
+        </nav>
+
+        <div className={`shrink-0 border-t border-white/10 p-3 ${sidebarCollapsed ? "md:px-2 md:py-2" : ""}`}>
+          <form action="/api/auth/logout" method="post">
+            <button
+              type="submit"
+              className={`flex w-full items-center justify-center rounded border border-white/15 bg-white/5 py-2 text-[14px] font-normal tracking-normal text-white/90 transition hover:bg-white/10 hover:text-white ${
+                sidebarCollapsed ? "md:px-0" : ""
+              }`}
+              title={sidebarCollapsed ? "Sair" : undefined}
+            >
+              <span className={labelClass}>Sair</span>
+            </button>
+          </form>
+        </div>
+      </aside>
+
+      <div className={`flex min-h-screen flex-1 flex-col transition-[padding] duration-200 ease-out ${sidebarCollapsed ? "md:pl-16" : "md:pl-72"}`}>
+        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-slate-200/90 bg-white px-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsMenuOpen((o) => !o)}
+              className="btn btn-icon btn-sm btn-outline-secondary md:hidden"
+              aria-label={isMenuOpen ? "Fechar menu" : "Abrir menu"}
+              aria-expanded={isMenuOpen}
+            >
+              {isMenuOpen ? <CloseIconDark /> : <MenuIconDark />}
+            </button>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                Navegação
+              </p>
+              <p className="truncate text-[15px] font-normal leading-tight text-slate-800 dark:text-slate-100">
+                <span className="text-slate-500 dark:text-slate-400">Painel</span>
+                <span className="mx-1.5 font-light text-slate-300 dark:text-slate-600">/</span>
+                <span className="font-semibold" style={{ color: "var(--adminty-accent, #01a9ac)" }}>
+                  {pageTitle}
+                </span>
+              </p>
+            </div>
+          </div>
+          {accountLabel && (
+            <span className="hidden max-w-[200px] truncate rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[13px] font-medium text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 md:inline-block">
+              {accountLabel}
+            </span>
+          )}
+        </header>
+
+        <main className="flex-1 px-3 py-4 sm:px-5 sm:py-6" style={{ color: "var(--body-text)" }}>
+          <Suspense fallback={<div className="min-h-24 animate-pulse rounded-lg bg-white/80 shadow-sm" />}>
+            {children}
+          </Suspense>
+        </main>
+      </div>
     </div>
+  );
+}
+
+function CloseIconDark() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M6 6l12 12M18 6L6 18"
+        className="stroke-slate-700"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function MenuIconDark() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M4 7h16M4 12h16M4 17h16"
+        className="stroke-slate-700"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
@@ -44,12 +460,15 @@ function AppShell({
   accountLabel,
   isMenuOpen,
   setIsMenuOpen,
+  admintyShell,
 }: {
   children: React.ReactNode;
   accountLabel: string;
   isMenuOpen: boolean;
   setIsMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  admintyShell: boolean;
 }) {
+  const pathname = usePathname();
   const { status, loading } = useOnboarding();
 
   const allowAnuncios = !loading && !!status?.ml_connected;
@@ -60,6 +479,25 @@ function AppShell({
     status ?? { ml_connected: false, listings_synced: false, products_imported: false }
   );
   const precoAtacadoBlocked = produtosBlocked;
+
+  if (admintyShell) {
+    return (
+      <AdmintyDashboardShell
+        accountLabel={accountLabel}
+        isMenuOpen={isMenuOpen}
+        setIsMenuOpen={setIsMenuOpen}
+        pathname={pathname}
+        allowAnuncios={allowAnuncios}
+        allowProdutos={allowProdutos}
+        allowPrecoAtacado={allowPrecoAtacado}
+        produtosBlocked={produtosBlocked}
+        precoAtacadoBlocked={precoAtacadoBlocked}
+        mlConnected={!!status?.ml_connected}
+      >
+        {children}
+      </AdmintyDashboardShell>
+    );
+  }
 
   const gatedActive =
     "inline-flex items-center gap-2 rounded-app px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10 hover:text-white";
@@ -203,10 +641,9 @@ function AppShell({
             <form action="/api/auth/logout" method="post">
               <button
                 type="submit"
-                className="ml-2 inline-flex items-center gap-2 rounded-app bg-white/5 px-3 py-2 text-sm font-medium text-white/90 backdrop-blur transition hover:bg-white/15 hover:text-orange-100"
+                className="ml-2 rounded-app border border-white/20 bg-white/5 px-3 py-2 text-sm font-medium text-white/90 transition hover:bg-white/15 hover:text-white"
               >
-                <LogoutIcon />
-                <span>Sair</span>
+                Sair
               </button>
             </form>
           </nav>
@@ -380,10 +817,9 @@ function AppShell({
               <form action="/api/auth/logout" method="post" className="pt-1">
                 <button
                   type="submit"
-                  className="flex w-full items-center justify-center gap-2 rounded-app bg-white/10 px-3 py-2 text-sm font-medium text-orange-100 backdrop-blur transition hover:bg-white/20"
+                  className="w-full rounded-app border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:bg-white/20"
                 >
-                  <LogoutIcon />
-                  <span>Sair</span>
+                  Sair
                 </button>
               </form>
             </nav>
@@ -459,9 +895,16 @@ function AppLayoutInner({
     ? currentAccount.ml_nickname || `Conta ${currentAccount.ml_user_id}` || currentAccount.id.slice(0, 8)
     : "";
 
+  const admintyShell = true;
+
   return (
     <OnboardingProvider accountId={accountId}>
-      <AppShell accountLabel={accountLabel} isMenuOpen={isMenuOpen} setIsMenuOpen={setIsMenuOpen}>
+      <AppShell
+        accountLabel={accountLabel}
+        isMenuOpen={isMenuOpen}
+        setIsMenuOpen={setIsMenuOpen}
+        admintyShell={admintyShell}
+      >
         {children}
       </AppShell>
     </OnboardingProvider>
@@ -583,21 +1026,6 @@ function CloseIcon() {
         className="stroke-white/90"
         strokeWidth="1.5"
         strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function LogoutIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-      <path
-        d="M10 5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-2h2v1h5V6h-5v1h-2V5z"
-        className="fill-white/80"
-      />
-      <path
-        d="M5.3 8.3a1 1 0 0 1 1.4 0L9 10.59V9h2v6H9v-1.59l-2.3 2.29a1 1 0 1 1-1.4-1.42L6.59 12 5.3 10.71a1 1 0 0 1 0-1.41z"
-        className="fill-white/90"
       />
     </svg>
   );

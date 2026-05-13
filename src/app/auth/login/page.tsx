@@ -117,7 +117,7 @@ function LoginForm() {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 w-full rounded bg-brand-blue py-2 font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+            className="btn btn-primary mt-2 w-full py-2.5 font-medium disabled:opacity-50"
           >
             {loading ? "Entrando…" : "Entrar"}
           </button>

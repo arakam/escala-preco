@@ -75,22 +75,80 @@ body {
   @apply text-lg font-semibold text-gray-900 dark:text-slate-50;
 }
 
-/* ========== Botões ========== */
+/* ========== Botões (padrão [Adminty — Basic / Dropdown / Icon outline](https://colorlib.com/polygon/adminty/default/pages/button.html)) ========== */
 .btn {
-  @apply inline-flex items-center justify-center rounded-app px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+  @apply inline-flex items-center justify-center gap-2 rounded border border-transparent px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:focus:ring-offset-slate-900;
 }
+.btn-sm {
+  @apply px-3 py-1.5 text-xs;
+}
+.btn-mini {
+  @apply px-2.5 py-1 text-[11px] font-semibold;
+}
+.btn-lg {
+  @apply px-5 py-2.5 text-base;
+}
+/* Basic (sólidos) — primária alinhada ao azul das tabelas Adminty */
 .btn-primary {
-  @apply bg-primary text-white hover:bg-primary-dark focus:ring-primary dark:bg-primary dark:hover:bg-primary-dark;
+  @apply border-[#0d6efd] bg-[#0d6efd] text-white shadow-sm hover:border-[#0b5ed7] hover:bg-[#0b5ed7] focus:ring-[#0d6efd]/50 dark:hover:border-[#3b82f6] dark:hover:bg-[#2563eb];
 }
-.btn-secondary {
-  @apply border border-stroke bg-white text-gray-700 hover:bg-gray-50 focus:ring-gray-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700;
+.btn-success {
+  @apply border-emerald-600 bg-emerald-600 text-white shadow-sm hover:border-emerald-700 hover:bg-emerald-700 focus:ring-emerald-500/40;
+}
+.btn-info {
+  @apply border-sky-600 bg-sky-600 text-white shadow-sm hover:border-sky-700 hover:bg-sky-700 focus:ring-sky-500/40;
+}
+.btn-warning {
+  @apply border-amber-500 bg-amber-500 text-white shadow-sm hover:border-amber-600 hover:bg-amber-600 focus:ring-amber-400/50;
 }
 .btn-danger {
-  @apply bg-error text-white hover:bg-error-dark focus:ring-error dark:bg-red-600 dark:hover:bg-red-700;
+  @apply border-error bg-error text-white shadow-sm hover:brightness-95 focus:ring-error/50 dark:border-red-600 dark:bg-red-600 dark:hover:bg-red-700;
+}
+.btn-inverse {
+  @apply border-slate-700 bg-slate-700 text-white shadow-sm hover:border-slate-800 hover:bg-slate-800 focus:ring-slate-500/40 dark:border-slate-600 dark:bg-slate-600 dark:hover:bg-slate-500;
+}
+.btn-secondary {
+  @apply border-stroke bg-white text-gray-700 shadow-sm hover:bg-gray-50 focus:ring-gray-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700;
 }
 .btn-ghost {
-  @apply bg-transparent text-gray-700 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-700;
+  @apply border-transparent bg-transparent text-gray-700 hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-slate-700;
 }
+/* Icon Border — só ícone (toolbar); combinar com .btn .btn-icon */
+.btn-icon {
+  @apply h-9 w-9 min-h-[2.25rem] min-w-[2.25rem] shrink-0 gap-0 p-0;
+}
+.btn-icon.btn-sm {
+  @apply h-8 w-8 min-h-8 min-w-8;
+}
+.btn-outline-primary {
+  @apply border-[#0d6efd] bg-white text-[#0d6efd] shadow-sm hover:bg-[#0d6efd] hover:text-white focus:ring-[#0d6efd]/35 dark:border-[#3b82f6] dark:bg-slate-800 dark:text-[#93c5fd] dark:hover:bg-[#0d6efd] dark:hover:text-white;
+}
+.btn-outline-secondary {
+  @apply border-slate-300 bg-white text-slate-600 shadow-sm hover:border-slate-400 hover:bg-slate-50 hover:text-[#0d6efd] focus:ring-slate-400/30 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-[#93c5fd];
+}
+.btn-outline-success {
+  @apply border-emerald-600 bg-white text-emerald-700 shadow-sm hover:bg-emerald-600 hover:text-white focus:ring-emerald-500/30 dark:bg-slate-800 dark:text-emerald-400 dark:hover:bg-emerald-600 dark:hover:text-white;
+}
+.btn-outline-danger {
+  @apply border-error bg-white text-error shadow-sm hover:bg-error hover:text-white focus:ring-error/30 dark:bg-slate-800 dark:text-red-400 dark:hover:bg-error dark:hover:text-white;
+}
+.btn-outline-inverse {
+  @apply border-slate-600 bg-transparent text-slate-700 shadow-sm hover:bg-slate-700 hover:text-white focus:ring-slate-500/30 dark:border-slate-500 dark:text-slate-200 dark:hover:bg-slate-600 dark:hover:text-white;
+}
+/* Dropdown: wrapper, painel e itens (texto; sem ícone obrigatório) */
+.btn-dropdown {
+  @apply relative inline-flex align-middle;
+}
+.btn-dropdown-menu {
+  @apply absolute z-40 mt-1 min-w-[200px] overflow-hidden rounded-app-lg border border-slate-200 bg-white py-1 text-left shadow-dropdown dark:border-slate-600 dark:bg-slate-800;
+}
+.btn-dropdown-item {
+  @apply flex w-full cursor-pointer items-center border-0 bg-transparent px-3 py-2 text-left text-xs font-normal text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50;
+}
+.btn-dropdown-item:disabled {
+  @apply cursor-not-allowed opacity-50 hover:bg-transparent dark:hover:bg-transparent;
+}
+/* Toggle com seta: use .btn + variante + .btn-sm + classes utilitárias (ex.: gap, chevron SVG) */
 .btn-soft-success {
   @apply border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300 dark:hover:bg-green-900/40;
 }
@@ -193,6 +251,16 @@ body {
 }
 .dark .pricing-table-with-sticky .app-table thead th.sticky-col { background: #1e293b; }
 
+/* Colunas fixas no cabeçalho dentro do cartão Adminty (mesmo tom do degradê da tabela) */
+.adminty-table-card.pricing-table-with-sticky .app-table thead th.sticky-col {
+  background: #0b5ed7;
+  box-shadow: 2px 0 5px rgba(15, 23, 42, 0.18);
+}
+.dark .adminty-table-card.pricing-table-with-sticky .app-table thead th.sticky-col {
+  background: #1d4ed8;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.25);
+}
+
 .pricing-table-with-sticky .app-table tbody td.sticky-col {
   box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.06);
   background: #fff;
@@ -272,4 +340,102 @@ body {
 }
 .section-desc {
   @apply mb-4 text-gray-600 dark:text-slate-300;
+}
+
+/* ========== Preview estilo Adminty (tela Anúncios) ========== */
+.adminty-shell {
+  --adminty-sidebar: #404e67;
+  --adminty-sidebar-deep: #374056;
+  --adminty-accent: #01a9ac;
+  --adminty-accent-dark: #018589;
+  --adminty-page-bg: #ecf0f5;
+}
+
+.adminty-table-card .app-table thead {
+  background: linear-gradient(180deg, #2f80ed 0%, #0d6efd 48%, #0b5ed7 100%);
+  box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.08);
+}
+.adminty-table-card .app-table thead tr {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+.adminty-table-card .app-table thead th {
+  color: #fff;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.65rem;
+}
+.dark .adminty-table-card .app-table thead {
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+}
+.dark .adminty-table-card .app-table thead th {
+  color: #eff6ff;
+}
+
+.adminty-table-card .app-table tbody tr:nth-child(odd) {
+  background-color: #fff;
+}
+.adminty-table-card .app-table tbody tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+.adminty-table-card .app-table tbody tr:hover {
+  background-color: rgba(13, 110, 253, 0.06);
+}
+.dark .adminty-table-card .app-table tbody tr:nth-child(odd) {
+  background-color: var(--card-bg);
+}
+.dark .adminty-table-card .app-table tbody tr:nth-child(even) {
+  background-color: rgba(30, 41, 59, 0.6);
+}
+.dark .adminty-table-card .app-table tbody tr:hover {
+  background-color: rgba(37, 99, 235, 0.14);
+}
+
+/* ========== Preview estilo Adminty (tela Anúncios) ========== */
+.adminty-shell {
+  --adminty-sidebar: #404e67;
+  --adminty-sidebar-deep: #374056;
+  --adminty-accent: #01a9ac;
+  --adminty-accent-dark: #018589;
+  --adminty-page-bg: #ecf0f5;
+}
+
+.adminty-table-card .app-table thead {
+  background: linear-gradient(180deg, #2f80ed 0%, #0d6efd 48%, #0b5ed7 100%);
+  box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.08);
+}
+.adminty-table-card .app-table thead tr {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+.adminty-table-card .app-table thead th {
+  color: #fff;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.65rem;
+}
+.dark .adminty-table-card .app-table thead {
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+}
+.dark .adminty-table-card .app-table thead th {
+  color: #eff6ff;
+}
+
+.adminty-table-card .app-table tbody tr:nth-child(odd) {
+  background-color: #fff;
+}
+.adminty-table-card .app-table tbody tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+.adminty-table-card .app-table tbody tr:hover {
+  background-color: rgba(13, 110, 253, 0.06);
+}
+.dark .adminty-table-card .app-table tbody tr:nth-child(odd) {
+  background-color: var(--card-bg);
+}
+.dark .adminty-table-card .app-table tbody tr:nth-child(even) {
+  background-color: rgba(30, 41, 59, 0.6);
+}
+.dark .adminty-table-card .app-table tbody tr:hover {
+  background-color: rgba(37, 99, 235, 0.14);
 }

@@ -70,24 +70,11 @@ function ptypeFilterFromSearchParams(searchParams: URLSearchParams): string {
   return n && /^[A-Z][A-Z0-9_]{0,63}$/.test(n) ? n : "";
 }
 
-function PromocoesHelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  if (!open) return null;
+function PromocoesHelpContent() {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden />
-      <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-4 top-4 text-fg-muted hover:text-fg"
-          aria-label="Fechar"
-        >
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-        <h2 className="mb-4 text-xl font-semibold">Como funciona a tela Promoções</h2>
-        <div className="space-y-4 text-sm text-fg">
+    <div className="space-y-4 text-sm text-fg">
+      <h2 className="text-lg font-semibold text-fg-strong">Como funciona a tela Promoções</h2>
+      <div className="space-y-4">
           <section>
             <h3 className="mb-2 font-medium text-fg-strong">Objetivo</h3>
             <p>
@@ -155,16 +142,6 @@ function PromocoesHelpModal({ open, onClose }: { open: boolean; onClose: () => v
               </li>
             </ul>
           </section>
-        </div>
-        <div className="mt-6 flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark"
-          >
-            Entendi
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -239,27 +216,6 @@ function formatCampaignDatePt(iso: string | null | undefined): string {
   });
 }
 
-/** Ícone de alfinete (congelar coluna), alinhado à tela Preços */
-function PinIcon({ pinned, className }: { pinned: boolean; className?: string }) {
-  const pathD = "M16 12V4h1V2H7v2h1v8l-4 4v2h12v-2l-4-4z";
-  return (
-    <svg
-      className={className}
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill={pinned ? "currentColor" : "none"}
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d={pathD} />
-    </svg>
-  );
-}
-
 /** Larguras mínimas (colgroup + sticky `left`) — mesma ideia da Calculadora de Preços */
 const PROMOCOES_COLUMNS: { minWidth: number }[] = [
   { minWidth: 120 },
@@ -318,7 +274,10 @@ function PromocoesContent() {
   const profitFromUrl = useMemo(() => profitFilterFromSearchParams(searchParams), [searchParams]);
   const ptypeFromUrl = useMemo(() => ptypeFilterFromSearchParams(searchParams), [searchParams]);
   const campFromUrl = useMemo(() => campFilterFromSearchParams(searchParams), [searchParams]);
-  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
+  const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
+  const optionsMenuRef = useRef<HTMLDivElement>(null);
+  const [promoTab, setPromoTab] = useState<"lista" | "como-funciona">("lista");
   const [draftSearch, setDraftSearch] = useState(qFromUrl);
   const [draftLinkFilter, setDraftLinkFilter] = useState<PromoLinkFilter>("all");
   const [draftKindFilter, setDraftKindFilter] = useState<PromoKindFilter>("");
@@ -335,14 +294,14 @@ function PromocoesContent() {
   const [alerts, setAlerts] = useState<PromoAlert[]>([]);
   const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [snapshotAt, setSnapshotAt] = useState<string | null>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [snapshotInfoOpen, setSnapshotInfoOpen] = useState(false);
+  const snapshotInfoRef = useRef<HTMLDivElement>(null);
   const [copiedCell, setCopiedCell] = useState<string | null>(null);
   const loadPromoGen = useRef(0);
 
   const [stickyColumns, setStickyColumns] = useState<Set<number>>(() => new Set());
   const [stickyHydrated, setStickyHydrated] = useState(false);
-  const [contextMenuCol, setContextMenuCol] = useState<number | null>(null);
-  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [headerMenuColumn, setHeaderMenuColumn] = useState<number | null>(null);
 
   const { stickyHeaderStyles, stickyBodyStyles } = useMemo(() => {
     const head: (CSSProperties | undefined)[] = Array.from(
@@ -375,8 +334,7 @@ function PromocoesContent() {
       else next.add(colIndex);
       return next;
     });
-    setContextMenuCol(null);
-    setContextMenuPos(null);
+    setHeaderMenuColumn(null);
   }, []);
 
   useEffect(() => {
@@ -397,18 +355,43 @@ function PromocoesContent() {
   }, [stickyColumns, stickyHydrated]);
 
   useEffect(() => {
-    if (contextMenuCol === null) return;
-    const close = () => {
-      setContextMenuCol(null);
-      setContextMenuPos(null);
+    if (headerMenuColumn === null) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      const roots =
+        typeof document !== "undefined"
+          ? document.querySelectorAll("[data-promocoes-th-menu-root]")
+          : null;
+      if (roots) {
+        for (let i = 0; i < roots.length; i++) {
+          if (roots[i].contains(t)) return;
+        }
+      }
+      setHeaderMenuColumn(null);
     };
-    window.addEventListener("click", close);
-    window.addEventListener("contextmenu", close);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("contextmenu", close);
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [headerMenuColumn]);
+
+  useEffect(() => {
+    if (!optionsMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = optionsMenuRef.current;
+      if (el && !el.contains(e.target as Node)) setOptionsMenuOpen(false);
     };
-  }, [contextMenuCol]);
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [optionsMenuOpen]);
+
+  useEffect(() => {
+    if (!snapshotInfoOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = snapshotInfoRef.current;
+      if (el && !el.contains(e.target as Node)) setSnapshotInfoOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [snapshotInfoOpen]);
 
   const accountId = useMemo(() => {
     if (accounts.length === 0) return "";
@@ -585,7 +568,7 @@ function PromocoesContent() {
       if (draftCampFilter) params.set("camp", draftCampFilter);
       else params.delete("camp");
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-      setFilterPanelOpen(false);
+      setFiltersModalOpen(false);
     },
     [
       draftSearch,
@@ -618,12 +601,9 @@ function PromocoesContent() {
     params.delete("ptype");
     params.delete("camp");
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-    setFilterPanelOpen(false);
+    setFiltersModalOpen(false);
   }, [accountId, pathname, router, searchParams]);
 
-  const filterPanelHasActiveDot = Boolean(
-    qFromUrl || linkFromUrl !== "all" || kindFromUrl || profitFromUrl || ptypeFromUrl || campFromUrl
-  );
   const showFilterResetButton = Boolean(
     draftSearch.trim() ||
       qFromUrl ||
@@ -638,6 +618,30 @@ function PromocoesContent() {
       draftCampFilter ||
       campFromUrl
   );
+
+  const appliedPromoFilterLabels = useMemo(() => {
+    const labels: string[] = [];
+    if (qFromUrl) {
+      const short = qFromUrl.length > 48 ? `${qFromUrl.slice(0, 48)}…` : qFromUrl;
+      labels.push(`Busca: ${short}`);
+    }
+    if (linkFromUrl === "linked") labels.push("Vínculo: só vinculados");
+    if (linkFromUrl === "unlinked") labels.push("Vínculo: só não vinculados");
+    if (kindFromUrl === "ativa") labels.push("Tipo: ativa");
+    if (kindFromUrl === "possível") labels.push("Tipo: possível");
+    if (profitFromUrl === "high") labels.push("Lucro: > 20%");
+    if (profitFromUrl === "medium") labels.push("Lucro: 10–20%");
+    if (profitFromUrl === "low") labels.push("Lucro: 0–10%");
+    if (profitFromUrl === "negative") labels.push("Lucro: prejuízo");
+    if (ptypeFromUrl) {
+      labels.push(`Campanha ML: ${labelForMlPromotionType(ptypeFromUrl) ?? ptypeFromUrl}`);
+    }
+    if (campFromUrl === "in") labels.push("Prazo: em vigência");
+    if (campFromUrl === "future") labels.push("Prazo: futura");
+    if (campFromUrl === "past") labels.push("Prazo: encerrada");
+    if (campFromUrl === "nodates") labels.push("Prazo: sem datas");
+    return labels;
+  }, [qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl]);
 
   const alertByItem = useMemo(() => {
     const m = new Map<string, PromoAlert>();
@@ -666,8 +670,28 @@ function PromocoesContent() {
 
   const safeFlatRows = Array.isArray(flatRows) ? flatRows : [];
 
+  const snapshotAtFormatted = useMemo(() => {
+    if (!snapshotAt) return "";
+    return new Date(snapshotAt).toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  }, [snapshotAt]);
+
   const cacheEmptyHint =
     !loading && !error && total > 0 && safeFlatRows.length === 0 && !snapshotAt;
+
+  const renderPromoHeaderMenu = (colIndex: number) => {
+    if (headerMenuColumn !== colIndex) return null;
+    return (
+      <div className="btn-dropdown-menu left-1 top-full z-50 mt-1 w-48 shadow-xl">
+        <button type="button" onClick={() => toggleStickyColumn(colIndex)} className="btn-dropdown-item">
+          {stickyColumns.has(colIndex) ? "Descongelar coluna" : "Congelar coluna"}
+        </button>
+      </div>
+    );
+  };
 
   const promoStickyTh = (
     colIndex: number,
@@ -676,41 +700,36 @@ function PromocoesContent() {
   ) => {
     const align = opts?.align ?? "left";
     const textAlign = align === "right" ? "text-right" : "text-left";
-    const flexJustify = align === "right" ? "justify-end" : "justify-between";
+    const btnJustify = align === "right" ? "justify-end" : "justify-between";
     return (
       <th
-        className={`p-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 ${textAlign} ${stickyColumns.has(colIndex) ? "sticky-col" : ""} ${opts?.thClass ?? ""}`}
+        data-promocoes-th-menu-root
+        className={`relative select-none p-2 text-xs font-semibold uppercase tracking-wide text-white/90 ${textAlign} ${stickyColumns.has(colIndex) ? "sticky-col" : ""} ${opts?.thClass ?? ""}`}
         title={opts?.title}
         style={stickyHeaderStyles[colIndex]}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setContextMenuCol(colIndex);
-          setContextMenuPos({ x: e.clientX, y: e.clientY });
-        }}
       >
-        <div className={`flex min-w-0 items-center gap-1 ${flexJustify}`}>
-          <span className="min-w-0">{label}</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleStickyColumn(colIndex);
-            }}
-            title={stickyColumns.has(colIndex) ? "Descongelar coluna" : "Congelar coluna"}
-            className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100 dark:text-slate-400 dark:hover:bg-slate-700/50"
-          >
-            <PinIcon pinned={stickyColumns.has(colIndex)} className={stickyColumns.has(colIndex) ? "text-primary" : ""} />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setHeaderMenuColumn((c) => (c === colIndex ? null : colIndex));
+          }}
+          className={`inline-flex w-full min-w-0 items-center gap-1 rounded-sm hover:bg-white/10 ${btnJustify}`}
+          aria-expanded={headerMenuColumn === colIndex}
+        >
+          <span className={`min-w-0 truncate ${align === "right" ? "text-right" : "text-left"}`}>{label}</span>
+          <span className="shrink-0 text-[10px] leading-none text-white/65">▾</span>
+        </button>
+        {renderPromoHeaderMenu(colIndex)}
       </th>
     );
   };
 
   if (!accountsLoaded) {
     return (
-      <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
+      <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
         <div className="flex flex-col items-center justify-center py-8">
-          <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-primary" />
+          <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-[#0d6efd]" />
           <p className="text-sm text-slate-500">Carregando…</p>
         </div>
       </div>
@@ -719,8 +738,8 @@ function PromocoesContent() {
 
   if (accounts.length === 0) {
     return (
-      <div className="rounded-app bg-amber-50 p-4 shadow-sm ring-1 ring-amber-200 dark:bg-amber-950/30 dark:ring-amber-900/50">
-        <p className="text-amber-900 dark:text-amber-200">
+      <div className="overflow-hidden rounded border border-amber-200 bg-amber-50 p-6 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/30">
+        <p className="text-sm text-amber-900 dark:text-amber-200">
           Conecte sua conta do Mercado Livre em{" "}
           <a href="/app/configuracao" className="font-medium underline">
             Configuração
@@ -732,269 +751,204 @@ function PromocoesContent() {
   }
 
   return (
-    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
-      <SmartLoaderOverlay open={loading || refreshing} messages={[...loaderMessages]} />
-      <PromocoesHelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
-      <div className="flex w-full min-h-0 gap-4">
-        <aside
-          className={`flex shrink-0 flex-col self-start rounded-r-lg border border-slate-200 bg-white shadow-sm transition-[width] duration-200 ease-out dark:border-slate-600 dark:bg-slate-800 ${
-            filterPanelOpen ? "w-[280px]" : "w-10"
-          }`}
-        >
-          {filterPanelOpen ? (
-            <div className="flex max-h-[min(85vh,48rem)] flex-col gap-3 overflow-y-auto p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtros</span>
-                <button
-                  type="button"
-                  onClick={() => setFilterPanelOpen(false)}
-                  className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-                  title="Fechar"
+    <div className="adminty-promocoes-page space-y-5">
+      <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+        <SmartLoaderOverlay open={loading || refreshing} messages={[...loaderMessages]} />
+
+        <div className="border-b border-slate-200 bg-white px-3 pt-3">
+          <div className="flex flex-wrap items-end gap-1">
+            <button
+              type="button"
+              onClick={() => setPromoTab("lista")}
+              className={
+                promoTab === "lista"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+              }
+            >
+              Promoções
+            </button>
+            <button
+              type="button"
+              onClick={() => setPromoTab("como-funciona")}
+              className={
+                promoTab === "como-funciona"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+              }
+            >
+              Como funciona?
+            </button>
+          </div>
+        </div>
+
+        {promoTab === "como-funciona" && (
+          <div className="max-h-[min(70vh,720px)] overflow-y-auto border-b border-slate-100 bg-white px-4 py-4 dark:bg-slate-900/20">
+            <PromocoesHelpContent />
+          </div>
+        )}
+
+        {promoTab === "lista" && (
+        <div>
+        <div className="border-b border-slate-100 px-3 py-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void refreshFromMl()}
+              disabled={loading || refreshing}
+              className="btn btn-primary btn-sm disabled:cursor-not-allowed"
+            >
+              {refreshing ? "Recarregando…" : "Recarregar Promoções"}
+            </button>
+            {accounts.length > 1 && (
+              <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                <span className="whitespace-nowrap font-medium text-slate-700 dark:text-slate-200">Conta</span>
+                <select
+                  value={accountId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, v);
+                    const params = new URLSearchParams(searchParams.toString());
+                    params.set("accountId", v);
+                    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+                  }}
+                  className="h-8 min-w-[10rem] rounded border border-slate-200 bg-white px-2 text-xs text-slate-800 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
                 >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <form onSubmit={handleFilterSubmit} className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Buscar</span>
-                  <input
-                    type="text"
-                    value={draftSearch}
-                    onChange={(e) => setDraftSearch(e.target.value)}
-                    placeholder="Título ou MLB…"
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Vínculo MLB → produto</span>
-                  <select
-                    value={draftLinkFilter}
-                    onChange={(e) => setDraftLinkFilter(e.target.value as PromoLinkFilter)}
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                  >
-                    <option value="all">Todos</option>
-                    <option value="linked">Só vinculados</option>
-                    <option value="unlinked">Só não vinculados</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Tipo</span>
-                  <div className="flex flex-wrap gap-1">
-                    {(
-                      [
-                        { value: "" as const, label: "Todos" },
-                        { value: "ativa" as const, label: "Ativa" },
-                        { value: "possível" as const, label: "Possível" },
-                      ] as const
-                    ).map(({ value, label }) => (
-                      <button
-                        key={value || "tipo-all"}
-                        type="button"
-                        onClick={() => setDraftKindFilter(value)}
-                        className={`rounded px-2 py-1 text-xs font-medium ${
-                          draftKindFilter === value
-                            ? "bg-brand-blue text-white"
-                            : "border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Lucratividade</span>
-                  <div className="flex flex-wrap gap-1">
-                    {(
-                      [
-                        { value: "" as const, label: "Todos" },
-                        { value: "high" as const, label: "> 20%" },
-                        { value: "medium" as const, label: "10–20%" },
-                        { value: "low" as const, label: "0–10%" },
-                        { value: "negative" as const, label: "Prejuízo" },
-                      ] as const
-                    ).map(({ value, label }) => (
-                      <button
-                        key={value || "profit-all"}
-                        type="button"
-                        onClick={() => setDraftProfitFilter(value)}
-                        className={`rounded px-2 py-1 text-xs font-medium ${
-                          draftProfitFilter === value
-                            ? "bg-brand-blue text-white"
-                            : "border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Campanha ML (tipo)</span>
-                  <select
-                    value={draftPtypeFilter}
-                    onChange={(e) => setDraftPtypeFilter(e.target.value)}
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-[11px] font-medium leading-snug text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                  >
-                    <option value="">Todos os tipos</option>
-                    {ML_PROMOTION_TYPE_CATALOG.map((e) => (
-                      <option key={e.code} value={e.code}>
-                        {e.labelPt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Prazo da campanha</span>
-                  <select
-                    value={draftCampFilter}
-                    onChange={(e) => setDraftCampFilter(e.target.value as PromoCampaignPhase)}
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                  >
-                    <option value="">Todas</option>
-                    <option value="in">Em vigência</option>
-                    <option value="future">Futura (ainda não começou)</option>
-                    <option value="past">Encerrada</option>
-                    <option value="nodates">Sem datas no ML</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-2 pt-1">
-                  <button
-                    type="submit"
-                    className="w-full rounded bg-primary py-2 text-xs font-semibold text-white hover:bg-primary-dark"
-                  >
-                    Aplicar filtros
-                  </button>
-                  {showFilterResetButton && (
-                    <button
-                      type="button"
-                      onClick={() => clearFilters()}
-                      className="w-full rounded border border-slate-300 bg-white py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/50"
-                    >
-                      Limpar filtros
-                    </button>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.ml_nickname || `Conta ${a.ml_user_id}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px] text-slate-600">
+            <span className="font-semibold text-slate-700">Filtros:</span>
+            {appliedPromoFilterLabels.length > 0 ? (
+              appliedPromoFilterLabels.map((label, idx) => (
+                <span
+                  key={`${idx}-${label}`}
+                  className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  {label}
+                </span>
+              ))
+            ) : (
+              <span className="text-slate-500">Nenhum filtro aplicado</span>
+            )}
+            {appliedPromoFilterLabels.length > 0 && (
+              <button
+                type="button"
+                onClick={() => clearFilters()}
+                className="text-[11px] font-semibold text-[#0d6efd] hover:underline"
+              >
+                Limpar
+              </button>
+            )}
+          </div>
+          <div className="btn-dropdown relative flex items-center gap-1" ref={optionsMenuRef}>
+            <div className="relative" ref={snapshotInfoRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setOptionsMenuOpen(false);
+                  setSnapshotInfoOpen((o) => !o);
+                }}
+                title={
+                  snapshotAt
+                    ? `Última sincronização ML: ${snapshotAtFormatted} (horário de São Paulo).`
+                    : "Ainda não há snapshot no cache para estes filtros. Use Recarregar Promoções para buscar no ML e gravar os dados."
+                }
+                aria-label="Última sincronização com o Mercado Livre"
+                aria-expanded={snapshotInfoOpen}
+                className="btn btn-icon btn-sm btn-outline-secondary"
+              >
+                <ClockIcon />
+              </button>
+              {snapshotInfoOpen && (
+                <div className="absolute right-0 top-9 z-30 w-72 rounded border border-slate-200 bg-white px-3 py-2 text-left text-[11px] leading-snug text-slate-700 shadow-lg dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                  {snapshotAt ? (
+                    <>
+                      <span className="font-semibold text-slate-800 dark:text-slate-100">Última sincronização ML</span>
+                      {": "}
+                      {snapshotAtFormatted}
+                      <span className="text-slate-500"> (horário de São Paulo).</span>
+                    </>
+                  ) : (
+                    <>
+                      Ainda não há snapshot no cache para estes filtros. Use{" "}
+                      <strong className="font-medium text-slate-800 dark:text-slate-100">Recarregar Promoções</strong>{" "}
+                      para buscar no ML e gravar os dados.
+                    </>
                   )}
                 </div>
-              </form>
+              )}
             </div>
-          ) : (
             <button
               type="button"
               onClick={() => {
+                setSnapshotInfoOpen(false);
                 setDraftSearch(qFromUrl);
                 setDraftLinkFilter(linkFromUrl);
                 setDraftKindFilter(kindFromUrl);
                 setDraftProfitFilter(profitFromUrl);
                 setDraftPtypeFilter(ptypeFromUrl);
                 setDraftCampFilter(campFromUrl);
-                setFilterPanelOpen(true);
+                setFiltersModalOpen(true);
               }}
-              className="flex w-full flex-col items-center gap-0.5 py-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50 dark:hover:text-slate-200"
+              className="btn btn-icon btn-sm btn-outline-secondary"
               title="Abrir filtros"
+              aria-label="Abrir filtros"
             >
-              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
-                />
-              </svg>
-              {filterPanelHasActiveDot && (
-                <span className="rounded-full bg-primary h-1.5 w-1.5" title="Filtros ativos" />
-              )}
+              <FilterIcon />
             </button>
-          )}
-        </aside>
-
-        <main className="min-w-0 flex-1">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 sm:text-xl">Promoções</h1>
+            <button
+              type="button"
+              onClick={() => {
+                setSnapshotInfoOpen(false);
+                setOptionsMenuOpen((o) => !o);
+              }}
+              className="btn btn-icon btn-sm btn-outline-secondary"
+              title="Opções"
+              aria-label="Opções"
+              aria-expanded={optionsMenuOpen}
+            >
+              <KebabMenuIcon />
+            </button>
+            {optionsMenuOpen && (
+              <div className="btn-dropdown-menu right-0 top-9 z-20 w-52 dark:border-slate-600 dark:bg-slate-800">
                 <button
                   type="button"
-                  onClick={() => setHelpOpen(true)}
-                  className="rounded-full p-1 text-fg-muted hover:bg-gray-100 hover:text-fg dark:hover:bg-slate-700"
-                  title="Como funciona"
-                  aria-label="Ajuda"
+                  onClick={() => {
+                    void loadData();
+                    setOptionsMenuOpen(false);
+                  }}
+                  className="btn-dropdown-item"
                 >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
+                  Atualizar tabela
                 </button>
-              </div>
-              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
-                Promoções ativas e convites no Mercado Livre — dados do cache no banco; use{" "}
-                <strong className="font-medium text-fg-strong">?</strong> para detalhes e filtros. Clique com o botão
-                direito no cabeçalho da tabela para congelar colunas (alfinete).
-              </p>
-            </div>
-            <div className="flex w-full min-w-0 flex-col gap-3 sm:w-auto sm:max-w-xl sm:items-end">
-              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                 <button
                   type="button"
-                  onClick={() => void refreshFromMl()}
+                  onClick={() => {
+                    setOptionsMenuOpen(false);
+                    void refreshFromMl();
+                  }}
                   disabled={loading || refreshing}
-                  className="rounded-app border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/15 disabled:opacity-50 dark:border-primary/30 dark:bg-primary/15"
+                  className="btn-dropdown-item"
                 >
-                  Recarregar Promoções
+                  Recarregar do ML…
                 </button>
-                {accounts.length > 1 && (
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="text-fg-muted sm:text-right">Conta</span>
-                    <select
-                      value={accountId}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, v);
-                        const params = new URLSearchParams(searchParams.toString());
-                        params.set("accountId", v);
-                        router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-                      }}
-                      className="rounded-app border border-stroke bg-card px-3 py-2 text-fg-strong dark:border-slate-600 dark:bg-slate-900"
-                    >
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.ml_nickname || `Conta ${a.ml_user_id}`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
               </div>
-              <p className="text-xs text-fg-muted sm:text-right">
-                {snapshotAt ? (
-                  <>
-                    <span className="font-medium text-fg-strong">Última sincronização com o Mercado Livre: </span>
-                    {new Date(snapshotAt).toLocaleString("pt-BR", {
-                      timeZone: "America/Sao_Paulo",
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    })}
-                    <span className="text-fg-muted"> (horário de São Paulo).</span>
-                  </>
-                ) : (
-                  <>
-                    Ainda não há snapshot gravado no banco para esta página e filtros. Clique em{" "}
-                    <strong className="font-medium text-fg-strong">Recarregar Promoções</strong> para buscar no ML, salvar e
-                    preencher o cache de <strong className="font-medium text-fg-strong">toda a lista</strong> (todas as
-                    páginas desta busca e vínculo).
-                  </>
-                )}
-              </p>
-            </div>
+            )}
           </div>
+        </div>
 
       {cacheEmptyHint && (
-        <div className="mb-4 rounded-app border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100">
+        <div className="border-b border-sky-100 bg-sky-50 px-3 py-3 text-sm text-sky-950 dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-100">
           Não há linhas salvas no banco para esta página e filtros. Clique em <strong>Recarregar Promoções</strong> para
           consultar o Mercado Livre, gravar em <code className="rounded bg-sky-100/90 px-1 text-xs dark:bg-sky-900/50">promotions_cache_rows</code> e atualizar a tabela (pode levar
           um minuto).
@@ -1002,7 +956,7 @@ function PromocoesContent() {
       )}
 
       {error && (
-        <div className="mb-4 rounded-app border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+        <div className="border-b border-amber-100 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
           {error}
           <p className="mt-2 text-xs text-amber-800 dark:text-amber-300/90">
             Se o erro citar tabela inexistente, execute as migrations{" "}
@@ -1016,42 +970,26 @@ function PromocoesContent() {
         </div>
       )}
 
-      <div className="pricing-table-with-sticky">
-        {contextMenuCol !== null && contextMenuPos && (
-          <div
-            className="fixed z-30 rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-800"
-            style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
-          >
-            <button
-              type="button"
-              onClick={() => toggleStickyColumn(contextMenuCol)}
-              className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
-            >
-              {stickyColumns.has(contextMenuCol) ? "Descongelar coluna" : "Congelar coluna"}
-            </button>
-          </div>
-        )}
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-slate-600 dark:text-slate-300">
+      <div className="pricing-table-with-sticky adminty-table-card">
+        <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
+          <p className="text-xs text-slate-600 dark:text-slate-300">
             <span className="font-medium text-slate-800 dark:text-slate-100">{safeFlatRows.length}</span>
-            {" linha"}
-            {safeFlatRows.length !== 1 ? "s" : ""}
-            {" nesta página · "}
+            {" "}
+            {safeFlatRows.length === 1 ? "promoção na página" : "promoções na página"}
+            {" · total "}
             <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
-            {" no filtro"}
+            <span className="text-slate-500"> · {pageSize} por página</span>
           </p>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {totalPages > 1 && (
               <>
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  Página {page} de {totalPages}
-                </span>
-                <div className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-1 text-xs ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-600">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">Página {page}/{totalPages}</span>
+                <div className="inline-flex items-center gap-px rounded border border-slate-200 bg-white p-px text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-800">
                   <button
                     type="button"
                     onClick={() => setPage(1)}
                     disabled={page === 1 || loading || refreshing}
-                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                    className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
                     title="Primeira página"
                   >
                     «
@@ -1060,18 +998,18 @@ function PromocoesContent() {
                     type="button"
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     disabled={page <= 1 || loading || refreshing}
-                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                    className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
                     Anterior
                   </button>
-                  <span className="min-w-[2ch] px-1.5 py-1 text-center font-semibold text-slate-800 dark:text-slate-100">
+                  <span className="min-w-[2ch] px-1.5 py-0.5 text-center font-semibold text-slate-800 dark:text-slate-100">
                     {page}
                   </span>
                   <button
                     type="button"
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     disabled={page >= totalPages || loading || refreshing}
-                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                    className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
                   >
                     Próxima
                   </button>
@@ -1079,7 +1017,7 @@ function PromocoesContent() {
                     type="button"
                     onClick={() => setPage(totalPages)}
                     disabled={page === totalPages || loading || refreshing}
-                    className="rounded-full px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                    className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
                     title="Última página"
                   >
                     »
@@ -1090,13 +1028,17 @@ function PromocoesContent() {
           </div>
         </div>
 
-        <AppTable maxHeight="70vh" tableClassName="table-fixed w-max min-w-[max(100%,max-content)]">
+        <AppTable
+          className="[&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none"
+          maxHeight="70vh"
+          tableClassName="table-fixed w-max min-w-[max(100%,max-content)]"
+        >
           <colgroup>
             {PROMOCOES_COLUMNS.map((c, i) => (
               <col key={i} style={{ width: c.minWidth }} />
             ))}
           </colgroup>
-          <thead className="bg-slate-50">
+          <thead className="sticky top-0 z-10">
             <tr>
               {promoStickyTh(0, "Aviso")}
               {promoStickyTh(1, "Foto")}
@@ -1376,19 +1318,211 @@ function PromocoesContent() {
       </div>
 
       {total === 0 && !loading && !error && (
-        <p className="mt-4 text-center text-sm text-fg-muted">Nenhum anúncio nesta página.</p>
-      )}
-
-      {safeFlatRows.length > 0 && !loading && (
-        <p className="mt-3 text-center text-xs text-fg-muted">
-          {safeFlatRows.length} linha{safeFlatRows.length !== 1 ? "s" : ""} nesta página (uma por promoção; anúncios sem
-          promoção aparecem uma vez).
+        <p className="border-t border-slate-100 px-3 py-3 text-center text-sm text-slate-500 dark:text-slate-400">
+          Nenhum resultado nesta página.
         </p>
       )}
 
-        </main>
+        </div>
+        )}
+
       </div>
+
+      {filtersModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setFiltersModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Filtros de promoções"
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded border border-slate-200 bg-white shadow-xl dark:border-slate-600 dark:bg-slate-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">Filtros</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Refine busca, vínculo, tipo e campanha.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFiltersModalOpen(false)}
+                className="btn btn-secondary btn-sm"
+                aria-label="Fechar filtros"
+              >
+                Fechar
+              </button>
+            </div>
+            <form onSubmit={handleFilterSubmit} className="space-y-4 p-4">
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Buscar</label>
+                <input
+                  type="text"
+                  value={draftSearch}
+                  onChange={(e) => setDraftSearch(e.target.value)}
+                  placeholder="Título ou MLB…"
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Vínculo MLB → produto
+                </label>
+                <select
+                  value={draftLinkFilter}
+                  onChange={(e) => setDraftLinkFilter(e.target.value as PromoLinkFilter)}
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <option value="all">Todos</option>
+                  <option value="linked">Só vinculados</option>
+                  <option value="unlinked">Só não vinculados</option>
+                </select>
+              </div>
+              <div>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tipo</span>
+                <div className="flex flex-wrap gap-1">
+                  {(
+                    [
+                      { value: "" as const, label: "Todos" },
+                      { value: "ativa" as const, label: "Ativa" },
+                      { value: "possível" as const, label: "Possível" },
+                    ] as const
+                  ).map(({ value, label }) => (
+                    <button
+                      key={value || "tipo-all"}
+                      type="button"
+                      onClick={() => setDraftKindFilter(value)}
+                      className={`btn btn-mini ${
+                        draftKindFilter === value ? "btn-primary" : "btn-outline-secondary"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Lucratividade</span>
+                <div className="flex flex-wrap gap-1">
+                  {(
+                    [
+                      { value: "" as const, label: "Todos" },
+                      { value: "high" as const, label: "> 20%" },
+                      { value: "medium" as const, label: "10–20%" },
+                      { value: "low" as const, label: "0–10%" },
+                      { value: "negative" as const, label: "Prejuízo" },
+                    ] as const
+                  ).map(({ value, label }) => (
+                    <button
+                      key={value || "profit-all"}
+                      type="button"
+                      onClick={() => setDraftProfitFilter(value)}
+                      className={`btn btn-mini ${
+                        draftProfitFilter === value ? "btn-primary" : "btn-outline-secondary"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Campanha ML (tipo)
+                </label>
+                <select
+                  value={draftPtypeFilter}
+                  onChange={(e) => setDraftPtypeFilter(e.target.value)}
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-[11px] font-medium text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <option value="">Todos os tipos</option>
+                  {ML_PROMOTION_TYPE_CATALOG.map((e) => (
+                    <option key={e.code} value={e.code}>
+                      {e.labelPt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Prazo da campanha
+                </label>
+                <select
+                  value={draftCampFilter}
+                  onChange={(e) => setDraftCampFilter(e.target.value as PromoCampaignPhase)}
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <option value="">Todas</option>
+                  <option value="in">Em vigência</option>
+                  <option value="future">Futura (ainda não começou)</option>
+                  <option value="past">Encerrada</option>
+                  <option value="nodates">Sem datas no ML</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                {showFilterResetButton && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearFilters();
+                      setFiltersModalOpen(false);
+                    }}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    Limpar
+                  </button>
+                )}
+                <button type="submit" className="btn btn-primary btn-sm">
+                  Aplicar filtros
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M12 8v5l3 2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      <path
+        d="M4 6h16M7 12h10M10 18h4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function KebabMenuIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      <circle cx="12" cy="5" r="1.7" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+      <circle cx="12" cy="19" r="1.7" fill="currentColor" />
+    </svg>
   );
 }
 
@@ -1397,8 +1531,8 @@ export default function PromocoesPage() {
     <OnboardingGate required="catalog">
       <Suspense
         fallback={
-          <div className="rounded-app border border-stroke bg-card p-8 dark:border-slate-700">
-            <p className="text-fg-muted">Carregando…</p>
+          <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-8 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+            <p className="text-sm text-slate-500">Carregando…</p>
           </div>
         }
       >

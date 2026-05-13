@@ -78,13 +78,13 @@ export function validateTiers(tiers: Tier[]): string[] {
       errors.push(`Quantidade mínima ${sorted[i].min_qty} duplicada`);
     }
     minQtys.add(sorted[i].min_qty);
+  }
 
-    // Sem buracos: se temos tier com min_qty X, devemos ter todos menores
-    if (i > 0 && sorted[i].min_qty !== sorted[i - 1].min_qty + 1) {
-      // Não exigimos sequência exata (1,2,3...), mas ordem crescente está ok
-      // O requisito era: se Tier3 existe, Tier2 e Tier1 devem existir
-      // Isso significa que não pode ter "buracos" - ex: Tier1 (qty 2) e Tier3 (qty 10) sem Tier2
-      // Na verdade "buracos" = se temos 3 tiers, devem estar em ordem e não duplicados. Ok.
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].min_qty <= sorted[i - 1].min_qty) {
+      errors.push(
+        `Cada quantidade mínima deve ser maior que a anterior (recebido ${sorted[i].min_qty} após ${sorted[i - 1].min_qty}).`
+      );
     }
   }
 

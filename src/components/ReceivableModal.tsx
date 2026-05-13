@@ -99,7 +99,7 @@ export function ReceivableModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-fg-muted hover:bg-gray-100 hover:text-fg dark:hover:bg-slate-700"
+            className="btn btn-icon btn-sm btn-outline-secondary"
             aria-label="Fechar"
           >
             ✕
@@ -118,7 +118,7 @@ export function ReceivableModal({
               <button
                 type="button"
                 onClick={fetchAndSet}
-                className="rounded bg-gray-200 px-3 py-1.5 text-sm font-medium text-fg-strong hover:bg-gray-300 dark:bg-slate-600 dark:text-slate-100 dark:hover:bg-slate-500"
+                className="btn btn-secondary btn-sm"
               >
                 Tentar novamente
               </button>

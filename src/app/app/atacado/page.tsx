@@ -1,7 +1,6 @@
 "use client";
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
 import { OnboardingGate } from "@/components/OnboardingGate";
@@ -79,19 +78,21 @@ const ATACADO_COLUMNS: { minWidth: number }[] = [
   { minWidth: 120 },
   { minWidth: 88 },
   { minWidth: 96 },
-  { minWidth: 76 },
   { minWidth: 92 },
-  { minWidth: 76 },
   { minWidth: 92 },
-  { minWidth: 76 },
   { minWidth: 92 },
-  { minWidth: 76 },
   { minWidth: 92 },
-  { minWidth: 76 },
+  { minWidth: 92 },
+  { minWidth: 92 },
+  { minWidth: 92 },
+  { minWidth: 92 },
   { minWidth: 92 },
   { minWidth: 100 },
   { minWidth: 120 },
 ];
+
+/** Soma das larguras do `<colgroup>`: tabela com esta largura evita redistribuição em `table-fixed` que deslocava `left` das colunas sticky. */
+const ATACADO_TABLE_TOTAL_WIDTH_PX = ATACADO_COLUMNS.reduce((s, c) => s + c.minWidth, 0);
 
 function readAtacadoStickyInitial(): Set<number> {
   if (typeof window === "undefined") return new Set();
@@ -111,23 +112,18 @@ function readAtacadoStickyInitial(): Set<number> {
   }
 }
 
-/** Ícone de alfinete para congelar/descongelar coluna no cabeçalho */
-function PinIcon({ pinned, className }: { pinned: boolean; className?: string }) {
-  const pathD = "M16 12V4h1V2H7v2h1v8l-4 4v2h12v-2l-4-4z";
+/** Ícone de alfinete no menu do cabeçalho (mesmo traço da tela Anúncios) */
+function ColumnHeaderMenuPinIcon() {
   return (
-    <svg
-      className={className}
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill={pinned ? "currentColor" : "none"}
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d={pathD} />
+    <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-400" aria-hidden="true">
+      <path
+        d="m14 4 6 6-3 1-3 3v4l-2 2-2-6-6-2 2-2h4l3-3 1-3z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -160,24 +156,49 @@ function AtacadoIconButton({
 }
 
 type RowStatus = "saved" | "edited" | "error";
+
+const ATACADO_SLOT_COUNT = 5;
+
 type RowEditState = {
-  tiers: Tier[];
+  /** Faixas na ordem das colunas (índice 0 = «Qt. Atac. 1»). Não reordenar por min_qty — evita trocar preços de coluna. */
+  slots: (Tier | null)[];
   status: RowStatus;
   error?: string;
 };
 
-function ensureTiers5(tiers: Tier[]): (Tier | null)[] {
-  const result: (Tier | null)[] = Array(5).fill(null);
-  for (let i = 0; i < Math.min(5, tiers.length); i++) {
-    result[i] = tiers[i] ?? null;
-  }
-  return result;
+function padSlots5(slots: (Tier | null)[] | undefined): (Tier | null)[] {
+  const s = slots ?? [];
+  const out: (Tier | null)[] = s.slice(0, ATACADO_SLOT_COUNT);
+  while (out.length < ATACADO_SLOT_COUNT) out.push(null);
+  return out;
 }
 
-/** Mesma regra de `updateTier`: só mantém faixas com min_qty ≥ 2 e ordena. */
-function tiersFromSlots(slots: (Tier | null)[]): Tier[] {
-  const toKeep = slots.filter((x): x is Tier => x != null && x.min_qty >= 2);
-  return [...toKeep].sort((a, b) => a.min_qty - b.min_qty);
+function rowTiersToSlots(tiers: Tier[]): (Tier | null)[] {
+  const out: (Tier | null)[] = Array(ATACADO_SLOT_COUNT).fill(null);
+  for (let i = 0; i < Math.min(ATACADO_SLOT_COUNT, tiers.length); i++) {
+    out[i] = tiers[i] ?? null;
+  }
+  return out;
+}
+
+function defaultRowEditState(r: AtacadoRow): RowEditState {
+  return { slots: rowTiersToSlots(r.tiers), status: "saved" };
+}
+
+function nonNullTiersInSlotOrder(slots: (Tier | null)[]): Tier[] {
+  return padSlots5(slots).filter((x): x is Tier => x != null);
+}
+
+/** Quantidades mínimas estritamente crescentes da esquerda para a direita (só slots não nulos). */
+function minQtyStrictlyOrderedInSlots(slots: (Tier | null)[]): boolean {
+  let last = -Infinity;
+  for (const t of padSlots5(slots)) {
+    if (t == null) continue;
+    if (typeof t.min_qty !== "number" || !Number.isInteger(t.min_qty)) return false;
+    if (t.min_qty <= last) return false;
+    last = t.min_qty;
+  }
+  return true;
 }
 
 function bulkBasePrice(r: AtacadoRow, base: "current" | "promotion"): number | null {
@@ -236,6 +257,95 @@ interface BulkDiscountConditional {
   discountBase: "current" | "promotion";
 }
 
+function AtacadoHelpContent() {
+  return (
+    <div className="space-y-4 text-sm text-slate-700 dark:text-slate-300">
+      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Como funciona a tela Atacado</h2>
+      <div className="space-y-4">
+        <section>
+          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Objetivo</h3>
+          <p>
+            Aqui você cadastra e ajusta até <strong>cinco faixas de preço de atacado</strong> por anúncio (ou variação):
+            quantidade mínima da faixa e preço em reais. Os valores ficam salvos no sistema e podem ser enviados ao
+            Mercado Livre quando você <strong>aplicar</strong> as alterações.
+          </p>
+        </section>
+        <section>
+          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Salvar e aplicar no Mercado Livre</h3>
+          <ul className="list-inside list-disc space-y-1">
+            <li>
+              <strong>Salvar alterações</strong> — grava no banco as edições da página atual (linhas com mudança). Ao
+              aplicar no ML, alterações ainda não salvas são salvas automaticamente antes do envio.
+            </li>
+            <li>
+              <strong>Aplicar no Mercado Livre</strong> — envia ao ML os preços de atacado salvos para os itens
+              elegíveis. Pode abrir um painel de progresso com totais e erros por linha.
+            </li>
+            <li>
+              A lista depende dos anúncios já sincronizados; se não houver linhas, sincronize primeiro na tela{" "}
+              <a href="/app/anuncios" className="font-medium text-[#0d6efd] underline hover:no-underline">
+                Anúncios
+              </a>
+              .
+            </li>
+          </ul>
+        </section>
+        <section>
+          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Importar CSV</h3>
+          <p>
+            Use <strong>Importar CSV</strong> para carregar um arquivo com colunas de atacado em lote. O sistema mostra
+            um preview com linhas válidas e erros antes de você <strong>confirmar a importação</strong>.
+          </p>
+        </section>
+        <section>
+          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Filtros e opções</h3>
+          <ul className="list-inside list-disc space-y-1">
+            <li>
+              A linha <strong>Filtros:</strong> mostra o que está ativo; <strong>Limpar</strong> remove os filtros
+              aplicados.
+            </li>
+            <li>
+              O ícone de <strong>funil</strong> abre o modal (MLB, MLBU, título, SKU, tipo de variação, texto extra,
+              opção de ocultar variações).
+            </li>
+            <li>
+              <strong>Importar CSV</strong> e <strong>Exportar CSV</strong> ficam lado a lado na barra superior — o
+              arquivo exportado segue o mesmo modelo para editar e voltar a importar. O menu <strong>⋮</strong>{" "}
+              continua a oferecer <strong>Exportar CSV</strong> e <strong>Atualizar tabela</strong> (recarrega do
+              servidor com os mesmos filtros).
+            </li>
+          </ul>
+        </section>
+        <section>
+          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Ações em massa</h3>
+          <p>
+            No dropdown <strong>Ações em massa</strong> você pode definir quantidade mínima de uma faixa para todas as
+            linhas da página, aplicar preço com desconto percentual (com regras opcionais) ou limpar todas as colunas de
+            atacado da página.
+          </p>
+        </section>
+        <section>
+          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Tabela</h3>
+          <ul className="list-inside list-disc space-y-1">
+            <li>
+              Edite diretamente os campos de <strong>Atacado 1–5</strong> (quantidade mínima e preço). Colunas de
+              preço atual e promoção ajudam na referência.
+            </li>
+            <li>
+              Use o menu <strong>▾</strong> no título da coluna para <strong>congelar</strong> colunas à esquerda ao
+              rolar horizontalmente.
+            </li>
+            <li>
+              Em <strong>Ações</strong>, conforme disponível, é possível abrir estimativas de recebível por unidade
+              (taxas ML) para cenários de preço.
+            </li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function AtacadoPageContent() {
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
   const [accountsLoaded, setAccountsLoaded] = useState(false);
@@ -249,8 +359,11 @@ function AtacadoPageContent() {
   const [loadingRows, setLoadingRows] = useState(true);
   const [saving, setSaving] = useState(false);
   
-  /** Painel de filtros lateral (só critérios de atacado) */
-  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  /** Modal de filtros (mesmo padrão da tela Anúncios) */
+  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
+  const [atacadoTab, setAtacadoTab] = useState<"lista" | "como-funciona">("lista");
+  const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
+  const optionsMenuRef = useRef<HTMLDivElement>(null);
   const [draftMlb, setDraftMlb] = useState("");
   const [draftMlbu, setDraftMlbu] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
@@ -292,6 +405,7 @@ function AtacadoPageContent() {
 
   /** Texto digitado no campo de preço (por linha e tier) para permitir decimais com vírgula enquanto digita */
   const [editingPrice, setEditingPrice] = useState<Record<string, string>>({});
+  const [editingMinQty, setEditingMinQty] = useState<Record<string, string>>({});
 
   /** Célula que acabou de ser copiada (ex: "mlb:MLB123:item") para mostrar "Copiado!" */
   const [copiedCell, setCopiedCell] = useState<string | null>(null);
@@ -311,16 +425,51 @@ function AtacadoPageContent() {
   const [bulkDiscountModalOpen, setBulkDiscountModalOpen] = useState(false);
   const bulkActionsRef = useRef<HTMLDivElement>(null);
 
+  const appliedAtacadoFilterLabels = useMemo(() => {
+    const chips: string[] = [];
+    if (filtersApplied.mlb.trim()) chips.push(`MLB: ${filtersApplied.mlb.trim()}`);
+    if (filtersApplied.mlbu.trim()) chips.push(`MLBU: ${filtersApplied.mlbu.trim()}`);
+    if (filtersApplied.title.trim()) chips.push(`Título: ${filtersApplied.title.trim()}`);
+    if (filtersApplied.sku.trim()) chips.push(`SKU: ${filtersApplied.sku.trim()}`);
+    if (filtersApplied.variation === "com") chips.push("Variação: com");
+    if (filtersApplied.variation === "sem") chips.push("Variação: sem");
+    if (filtersApplied.filterExtra) {
+      const map: Record<string, string> = {
+        mlbu: "Refino: só MLBU",
+        com_familia: "Refino: com família",
+        com_rascunho: "Refino: com rascunho",
+        sem_rascunho: "Refino: sem rascunho",
+        price_high: "Refino: preço alto",
+      };
+      chips.push(map[filtersApplied.filterExtra] ?? `Refino: ${filtersApplied.filterExtra}`);
+    }
+    if (filtersApplied.hideVariations) chips.push("Só anúncios (sem variações)");
+    return chips;
+  }, [filtersApplied]);
+
   const searchParams = useSearchParams();
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
 
   const [stickyColumns, setStickyColumns] = useState<Set<number>>(() => new Set());
   const [stickyHydrated, setStickyHydrated] = useState(false);
+  const [headerMenuColIndex, setHeaderMenuColIndex] = useState<number | null>(null);
+  const atacadoTheadRef = useRef<HTMLTableSectionElement>(null);
 
   useEffect(() => {
     setStickyColumns(readAtacadoStickyInitial());
     setStickyHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (headerMenuColIndex === null) return;
+    const close = (e: MouseEvent) => {
+      if (atacadoTheadRef.current && !atacadoTheadRef.current.contains(e.target as Node)) {
+        setHeaderMenuColIndex(null);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [headerMenuColIndex]);
 
   const toggleStickyColumn = useCallback((colIndex: number) => {
     setStickyColumns((prev) => {
@@ -329,21 +478,33 @@ function AtacadoPageContent() {
       else next.add(colIndex);
       return next;
     });
+    setHeaderMenuColIndex(null);
   }, []);
 
   const { stickyHeaderStyles, stickyBodyStyles } = useMemo(() => {
     const len = ATACADO_COLUMNS.length;
     const head: (CSSProperties | undefined)[] = Array.from({ length: len }, () => undefined);
     const body: (CSSProperties | undefined)[] = Array.from({ length: len }, () => undefined);
-    let left = 0;
+    /** Mesma ideia que `frozenColumnLeft` em Anúncios: soma só colunas pinadas à esquerda deste índice. */
+    const stickyLeft = (colIndex: number) =>
+      Array.from(stickyColumns)
+        .filter((j) => j < colIndex)
+        .reduce((sum, j) => sum + ATACADO_COLUMNS[j].minWidth, 0);
     let order = 0;
     for (let i = 0; i < len; i++) {
       if (stickyColumns.has(i)) {
         const w = ATACADO_COLUMNS[i].minWidth;
-        const base = { position: "sticky" as const, left, boxSizing: "border-box" as const };
+        const left = stickyLeft(i);
+        const base = {
+          position: "sticky" as const,
+          left,
+          width: w,
+          minWidth: w,
+          maxWidth: w,
+          boxSizing: "border-box" as const,
+        };
         head[i] = { ...base, zIndex: 30 + order };
         body[i] = { ...base, zIndex: 2 + order };
-        left += w;
         order++;
       }
     }
@@ -362,33 +523,50 @@ function AtacadoPageContent() {
     }
   }, [stickyColumns, stickyHydrated]);
 
-  function renderPinnedHeaderCell(
+  function renderAtacadoHeaderMenu(colIndex: number) {
+    if (headerMenuColIndex !== colIndex) return null;
+    const pinned = stickyColumns.has(colIndex);
+    return (
+      <div className="absolute left-1 top-full z-50 mt-1 w-48 overflow-hidden rounded border border-slate-200 bg-white py-1 text-[12px] normal-case tracking-normal text-slate-700 shadow-xl">
+        <button
+          type="button"
+          onClick={() => toggleStickyColumn(colIndex)}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+        >
+          <ColumnHeaderMenuPinIcon />
+          {pinned ? "Descongelar coluna" : "Congelar coluna"}
+        </button>
+      </div>
+    );
+  }
+
+  function renderAtacadoColumnHeader(
     colIndex: number,
-    headerClassName: string,
     label: React.ReactNode,
+    extraClass = "",
     thProps?: React.ThHTMLAttributes<HTMLTableCellElement>
   ) {
     const pinned = stickyColumns.has(colIndex);
+    const { style: thExtraStyle, ...thRest } = thProps ?? {};
     return (
       <th
-        className={`${headerClassName} ${pinned ? "sticky-col" : ""}`}
-        style={stickyHeaderStyles[colIndex]}
-        {...thProps}
+        className={`relative select-none p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95 ${extraClass} ${pinned ? "sticky-col" : ""}`}
+        style={{ ...thExtraStyle, ...(stickyHeaderStyles[colIndex] ?? {}) }}
+        {...thRest}
       >
-        <div className="flex items-center justify-between gap-1">
-          <span className="min-w-0">{label}</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleStickyColumn(colIndex);
-            }}
-            title={pinned ? "Descongelar coluna" : "Congelar coluna"}
-            className="shrink-0 rounded p-0.5 text-slate-500 opacity-70 hover:bg-slate-200 hover:opacity-100 dark:text-slate-400 dark:hover:bg-slate-600"
-          >
-            <PinIcon pinned={pinned} className={pinned ? "text-primary" : ""} />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setHeaderMenuColIndex((c) => (c === colIndex ? null : colIndex));
+          }}
+          className="inline-flex w-full items-center justify-between gap-1 rounded-sm text-left hover:bg-white/10"
+          aria-expanded={headerMenuColIndex === colIndex}
+        >
+          <span className="min-w-0 truncate">{label}</span>
+          <span className="shrink-0 text-[10px] text-white/65">▾</span>
+        </button>
+        {renderAtacadoHeaderMenu(colIndex)}
       </th>
     );
   }
@@ -396,7 +574,7 @@ function AtacadoPageContent() {
   /** Renderiza uma linha editável */
   function renderAtacadoRow(r: AtacadoRow) {
     const cur = getEditState(r);
-    const tiers5 = ensureTiers5(cur.tiers);
+    const slots5 = padSlots5(cur.slots);
     const err = validateRow(r);
     const isInvalid = cur.status === "edited" && err != null;
     const stickyTd = (colIndex: number, className: string, children: React.ReactNode) => (
@@ -462,7 +640,19 @@ function AtacadoPageContent() {
         )}
         {[0, 1, 2, 3, 4].map((i) => {
           const priceInputKey = `${rowKey(r)}-${i}`;
-          const priceDisplay = editingPrice[priceInputKey] !== undefined ? editingPrice[priceInputKey] : tiers5[i]?.price != null ? formatPriceDisplay(tiers5[i].price) : "";
+          const minInputKey = `${rowKey(r)}-${i}`;
+          const priceDisplay =
+            editingPrice[priceInputKey] !== undefined
+              ? editingPrice[priceInputKey]
+              : slots5[i]?.price != null
+                ? formatPriceDisplay(slots5[i]!.price)
+                : "";
+          const minQtyStr =
+            editingMinQty[minInputKey] !== undefined
+              ? editingMinQty[minInputKey]
+              : slots5[i]?.min_qty != null
+                ? String(slots5[i]!.min_qty)
+                : "";
           const minCol = 7 + i * 2;
           const priceCol = 8 + i * 2;
           return (
@@ -470,12 +660,37 @@ function AtacadoPageContent() {
               {stickyTd(
                 minCol,
                 "p-2",
-                <input type="number" min={2} step={1} placeholder={i === 0 ? "2" : ""} value={tiers5[i]?.min_qty ?? ""} onChange={(e) => updateTier(r, i, "min_qty", e.target.value)} className={`w-16 rounded border px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : "border-gray-200"}`} />
+                <input
+                  type="text"
+                  autoComplete="off"
+                  placeholder={i === 0 ? "2" : ""}
+                  value={minQtyStr}
+                  onChange={(e) => setEditingMinQty((prev) => ({ ...prev, [minInputKey]: e.target.value }))}
+                  onBlur={(e) => commitMinQtyBlur(r, i, e.target.value)}
+                  className={`w-16 rounded border px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : "border-gray-200"}`}
+                />
               )}
               {stickyTd(
                 priceCol,
                 "p-2",
-                <input type="text" inputMode="decimal" placeholder="0,00" value={priceDisplay} onChange={(e) => setEditingPrice((prev) => ({ ...prev, [priceInputKey]: e.target.value }))} onBlur={(e) => { const raw = e.target.value.trim(); const parsed = raw !== "" ? parsePriceInput(raw) : tiers5[i]?.price ?? 0; updateTier(r, i, "price", parsed); setEditingPrice((prev) => { const next = { ...prev }; delete next[priceInputKey]; return next; }); }} className={`w-20 rounded border px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : "border-gray-200"}`} />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  value={priceDisplay}
+                  onChange={(e) => setEditingPrice((prev) => ({ ...prev, [priceInputKey]: e.target.value }))}
+                  onBlur={(e) => {
+                    const raw = e.target.value.trim();
+                    const parsed = raw !== "" ? parsePriceInput(raw) : slots5[i]?.price ?? 0;
+                    updateTierPrice(r, i, parsed);
+                    setEditingPrice((prev) => {
+                      const next = { ...prev };
+                      delete next[priceInputKey];
+                      return next;
+                    });
+                  }}
+                  className={`w-20 rounded border px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : "border-gray-200"}`}
+                />
               )}
             </React.Fragment>
           );
@@ -557,6 +772,8 @@ function AtacadoPageContent() {
       setTotal(data.total ?? 0);
       setTotalItems(data.totalItems ?? 0);
       setEdits({});
+      setEditingMinQty({});
+      setEditingPrice({});
     }
     setLoadingRows(false);
   }, [accountId, page, pageSize, filtersApplied]);
@@ -603,6 +820,17 @@ function AtacadoPageContent() {
     return () => document.removeEventListener("mousedown", close);
   }, [bulkActionsMenuOpen]);
 
+  useEffect(() => {
+    if (!optionsMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (optionsMenuRef.current && !optionsMenuRef.current.contains(e.target as Node)) {
+        setOptionsMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [optionsMenuOpen]);
+
   const handleFilterSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     setFiltersApplied({
@@ -615,7 +843,7 @@ function AtacadoPageContent() {
       hideVariations: draftHideVariations,
     });
     setPage(1);
-    setFilterPanelOpen(false);
+    setFiltersModalOpen(false);
   }, [draftMlb, draftMlbu, draftTitle, draftSku, draftVariation, draftFilterExtra, draftHideVariations]);
 
   const clearFilters = useCallback(() => {
@@ -636,25 +864,17 @@ function AtacadoPageContent() {
       hideVariations: false,
     });
     setPage(1);
+    setFiltersModalOpen(false);
   }, []);
 
-  const showFilterResetButton =
+  const showFilterResetButton = Boolean(
     draftMlb ||
     draftMlbu ||
     draftTitle ||
     draftSku ||
     draftVariation ||
     draftFilterExtra ||
-    draftHideVariations;
-
-  const filterPanelHasActiveDot = Boolean(
-    filtersApplied.mlb ||
-      filtersApplied.mlbu ||
-      filtersApplied.title ||
-      filtersApplied.sku ||
-      filtersApplied.variation ||
-      filtersApplied.filterExtra ||
-      filtersApplied.hideVariations
+    draftHideVariations
   );
 
   useEffect(() => {
@@ -666,7 +886,7 @@ function AtacadoPageContent() {
 
   const getEditState = (r: AtacadoRow): RowEditState => {
     const key = rowKey(r);
-    return edits[key] ?? { tiers: r.tiers, status: "saved" };
+    return edits[key] ?? defaultRowEditState(r);
   };
 
   const parsePriceInput = (raw: string): number => {
@@ -688,26 +908,66 @@ function AtacadoPageContent() {
     return parseFloat(cleaned) || 0;
   };
 
-  const updateTier = (r: AtacadoRow, tierIdx: number, field: "min_qty" | "price", value: string | number) => {
-    const key = rowKey(r);
+  const commitMinQtyBlur = (r: AtacadoRow, tierIdx: number, raw: string) => {
+    const rk = rowKey(r);
+    const draftKey = `${rk}-${tierIdx}`;
+    setEditingMinQty((prev) => {
+      const next = { ...prev };
+      delete next[draftKey];
+      return next;
+    });
+
+    const trimmed = raw.trim();
     const cur = getEditState(r);
-    const tiers5 = ensureTiers5(cur.tiers);
-    const newTiers: (Tier | null)[] = [...tiers5];
-    if (newTiers[tierIdx] == null) {
-      newTiers[tierIdx] = { min_qty: 2, price: 0 };
+    let slots = [...padSlots5(cur.slots)];
+
+    if (trimmed === "") {
+      slots[tierIdx] = null;
+      if (!minQtyStrictlyOrderedInSlots(slots)) {
+        setMessage({
+          type: "error",
+          text: "Não é possível deixar esta coluna vazia sem quebrar a ordem das quantidades (cada «Qt. Atac.» preenchida deve ser maior que a da esquerda).",
+        });
+        return;
+      }
+      setEdits((prev) => ({ ...prev, [rk]: { slots, status: "edited" } }));
+      return;
     }
-    const t = { ...newTiers[tierIdx]! };
-    if (field === "min_qty") {
-      t.min_qty = typeof value === "string" ? parseInt(value, 10) || 0 : value;
-    } else {
-      t.price = typeof value === "string" ? parsePriceInput(value) : value;
+
+    const parsed = parseInt(trimmed, 10);
+    if (Number.isNaN(parsed) || !Number.isInteger(parsed) || parsed < 2) {
+      setMessage({ type: "error", text: "Quantidade mínima deve ser um inteiro ≥ 2." });
+      return;
     }
-    newTiers[tierIdx] = t;
-    const toKeep = newTiers.filter((x): x is Tier => x != null && x.min_qty >= 2);
-    const sorted = [...toKeep].sort((a, b) => a.min_qty - b.min_qty);
+
+    if (slots[tierIdx] == null) {
+      slots[tierIdx] = { min_qty: 2, price: 0 };
+    }
+    slots[tierIdx] = { ...slots[tierIdx]!, min_qty: parsed };
+
+    if (!minQtyStrictlyOrderedInSlots(slots)) {
+      setMessage({
+        type: "error",
+        text: "Cada «Qt. Atac.» tem de ser maior que todas à esquerda (ex.: se a coluna 2 é 5, a coluna 3 só aceita > 5).",
+      });
+      return;
+    }
+
+    setEdits((prev) => ({ ...prev, [rk]: { slots, status: "edited" } }));
+  };
+
+  const updateTierPrice = (r: AtacadoRow, tierIdx: number, value: string | number) => {
+    const rk = rowKey(r);
+    const cur = getEditState(r);
+    const slots = [...padSlots5(cur.slots)];
+    if (slots[tierIdx] == null) {
+      slots[tierIdx] = { min_qty: 2, price: 0 };
+    }
+    const price = typeof value === "string" ? parsePriceInput(value) : value;
+    slots[tierIdx] = { ...slots[tierIdx]!, price };
     setEdits((prev) => ({
       ...prev,
-      [key]: { tiers: sorted, status: "edited" },
+      [rk]: { slots, status: "edited" },
     }));
   };
 
@@ -721,20 +981,26 @@ function AtacadoPageContent() {
       setMessage({ type: "error", text: "Nenhuma linha nesta página." });
       return false;
     }
+    const skipHolder = { current: 0 };
     setEdits((prev) => {
+      let skipped = 0;
       const next = { ...prev };
       for (const r of rows) {
         const key = rowKey(r);
-        const cur = next[key] ?? { tiers: r.tiers, status: "saved" as RowStatus };
-        const tiers5 = ensureTiers5(cur.tiers);
-        const slots: (Tier | null)[] = [...tiers5];
+        const cur = next[key] ?? defaultRowEditState(r);
+        const slots = [...padSlots5(cur.slots)];
         if (slots[bulkTierIdx] == null) {
           slots[bulkTierIdx] = { min_qty: minQty, price: 0 };
         } else {
           slots[bulkTierIdx] = { ...slots[bulkTierIdx]!, min_qty: minQty };
         }
-        next[key] = { tiers: tiersFromSlots(slots), status: "edited" };
+        if (!minQtyStrictlyOrderedInSlots(slots)) {
+          skipped++;
+          continue;
+        }
+        next[key] = { slots, status: "edited" };
       }
+      skipHolder.current = skipped;
       return next;
     });
     setEditingPrice((ep) => {
@@ -744,9 +1010,21 @@ function AtacadoPageContent() {
       }
       return n;
     });
+    setEditingMinQty((ep) => {
+      const n = { ...ep };
+      for (const r of rows) {
+        delete n[`${rowKey(r)}-${bulkTierIdx}`];
+      }
+      return n;
+    });
     setMessage({
       type: "success",
-      text: `Quantidade mínima ${minQty} aplicada em Atacado ${bulkTierIdx + 1} em ${rows.length} linha(s). Faixas novas podem ficar sem preço válido até você preencher ou aplicar o desconto em massa no preço.`,
+      text:
+        `Quantidade mínima ${minQty} aplicada em Qt. Atac. ${bulkTierIdx + 1} em ${rows.length - skipHolder.current} linha(s).` +
+        (skipHolder.current > 0
+          ? ` ${skipHolder.current} linha(s) ignoradas: a quantidade não pode ser ≤ faixas à esquerda ou ≥ faixas à direita.`
+          : "") +
+        " Faixas novas podem ficar sem preço válido até você preencher ou aplicar o desconto em massa no preço.",
     });
     return true;
   }, [rows, bulkMinQtyStr, bulkTierIdx]);
@@ -818,15 +1096,14 @@ function AtacadoPageContent() {
         const factor = 1 - pct / 100;
         const newPrice = Math.round(base * factor * 100) / 100;
         const key = rowKey(r);
-        const cur = next[key] ?? { tiers: r.tiers, status: "saved" as RowStatus };
-        const tiers5 = ensureTiers5(cur.tiers);
-        const slots: (Tier | null)[] = [...tiers5];
+        const cur = next[key] ?? defaultRowEditState(r);
+        const slots = [...padSlots5(cur.slots)];
         if (slots[bulkTierIdx] == null) {
           slots[bulkTierIdx] = { min_qty: 2, price: newPrice };
         } else {
           slots[bulkTierIdx] = { ...slots[bulkTierIdx]!, price: newPrice };
         }
-        next[key] = { tiers: tiersFromSlots(slots), status: "edited" };
+        next[key] = { slots, status: "edited" };
       }
       return next;
     });
@@ -894,11 +1171,21 @@ function AtacadoPageContent() {
     setEdits((prev) => {
       const next = { ...prev };
       for (const r of rows) {
-        next[rowKey(r)] = { tiers: [], status: "edited" };
+        next[rowKey(r)] = { slots: Array(ATACADO_SLOT_COUNT).fill(null) as (Tier | null)[], status: "edited" };
       }
       return next;
     });
     setEditingPrice((ep) => {
+      const n = { ...ep };
+      for (const r of rows) {
+        const k = rowKey(r);
+        for (let i = 0; i < 5; i++) {
+          delete n[`${k}-${i}`];
+        }
+      }
+      return n;
+    });
+    setEditingMinQty((ep) => {
       const n = { ...ep };
       for (const r of rows) {
         const k = rowKey(r);
@@ -916,6 +1203,20 @@ function AtacadoPageContent() {
 
   const revertRow = (r: AtacadoRow) => {
     const key = rowKey(r);
+    setEditingMinQty((prev) => {
+      const next = { ...prev };
+      for (let i = 0; i < ATACADO_SLOT_COUNT; i++) {
+        delete next[`${key}-${i}`];
+      }
+      return next;
+    });
+    setEditingPrice((prev) => {
+      const next = { ...prev };
+      for (let i = 0; i < ATACADO_SLOT_COUNT; i++) {
+        delete next[`${key}-${i}`];
+      }
+      return next;
+    });
     setEdits((prev) => {
       const next = { ...prev };
       delete next[key];
@@ -924,24 +1225,29 @@ function AtacadoPageContent() {
   };
 
   const validateRow = (r: AtacadoRow): string | null => {
-    const cur = getEditState(r);
-    const t = cur.tiers;
-    if (t.length === 0) return null;
-    const minQtys = new Set<number>();
-    for (let i = 0; i < t.length; i++) {
-      if (t[i].min_qty < 2 || !Number.isInteger(t[i].min_qty)) return `Atacado ${i + 1}: quantidade mínima deve ser inteiro >= 2`;
-      if (t[i].price <= 0) return `Atacado ${i + 1}: preço deve ser > 0`;
-      if (minQtys.has(t[i].min_qty)) return "Quantidades mínimas duplicadas";
-      minQtys.add(t[i].min_qty);
+    const slots = padSlots5(getEditState(r).slots);
+    let hasAny = false;
+    for (let i = 0; i < ATACADO_SLOT_COUNT; i++) {
+      const t = slots[i];
+      if (t == null) continue;
+      hasAny = true;
+      if (t.min_qty < 2 || !Number.isInteger(t.min_qty)) {
+        return `Qt. Atac. ${i + 1}: quantidade mínima deve ser inteiro ≥ 2`;
+      }
+      if (t.price <= 0) {
+        return `R$ Atac. ${i + 1}: preço deve ser > 0`;
+      }
     }
-    const sorted = [...t].sort((a, b) => a.min_qty - b.min_qty);
-    if (JSON.stringify(t) !== JSON.stringify(sorted)) return "Atacado: faixas devem estar em ordem crescente por quantidade mínima";
+    if (!hasAny) return null;
+    if (!minQtyStrictlyOrderedInSlots(slots)) {
+      return "Faixas: cada «Qt. Atac.» tem de ser maior que todas à esquerda (sem repetir nem diminuir).";
+    }
     return null;
   };
 
   const saveRow = async (r: AtacadoRow) => {
     const cur = getEditState(r);
-    const normalized = normalizeTiers(cur.tiers);
+    const normalized = normalizeTiers(nonNullTiersInSlotOrder(cur.slots));
     const tierErrs = validateTiers(normalized);
     if (tierErrs.length > 0) {
       const key = rowKey(r);
@@ -1008,7 +1314,7 @@ function AtacadoPageContent() {
     const valid: { r: AtacadoRow; tiers: Tier[] }[] = [];
     const invalid: { r: AtacadoRow; err: string }[] = [];
     for (const r of toSave) {
-      const normalized = normalizeTiers(getEditState(r).tiers);
+      const normalized = normalizeTiers(nonNullTiersInSlotOrder(getEditState(r).slots));
       const tierErrs = validateTiers(normalized);
       if (tierErrs.length > 0) {
         invalid.push({ r, err: tierErrs.join(" ") });
@@ -1313,8 +1619,9 @@ function AtacadoPageContent() {
   })();
 
   return (
-    <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
-      <SmartLoaderOverlay
+    <div className="adminty-atacado-page space-y-5">
+      <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+        <SmartLoaderOverlay
         open={smartLoaderOpen}
         messages={loadingRows ? [...atacadoLoaderMessages] : applyJob != null ? [...applyLoaderMessages] : [...atacadoLoaderMessages]}
         determinatePercent={applyDeterminatePercent}
@@ -1371,124 +1678,165 @@ function AtacadoPageContent() {
           </>
         )}
       </SmartLoaderOverlay>
-      <div className="flex w-full min-h-0 gap-4">
-        <aside
-          className={`flex shrink-0 flex-col self-start rounded-r-lg border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 shadow-sm transition-[width] duration-200 ease-out ${
-            filterPanelOpen ? "w-[280px]" : "w-10"
-          }`}
-        >
-          {filterPanelOpen ? (
-            <div className="flex max-h-[min(85vh,48rem)] flex-col gap-3 overflow-y-auto p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Filtros</span>
-                <button
-                  type="button"
-                  onClick={() => setFilterPanelOpen(false)}
-                  className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-                  title="Fechar"
-                >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <form onSubmit={handleFilterSubmit} className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">MLB</span>
-                  <input
-                    type="text"
-                    value={draftMlb}
-                    onChange={(e) => setDraftMlb(e.target.value)}
-                    placeholder="ex: MLB1234567890"
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">MLBU</span>
-                  <input
-                    type="text"
-                    value={draftMlbu}
-                    onChange={(e) => setDraftMlbu(e.target.value)}
-                    placeholder="ex: MLBU…"
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Título</span>
-                  <input
-                    type="text"
-                    value={draftTitle}
-                    onChange={(e) => setDraftTitle(e.target.value)}
-                    placeholder="Buscar no título…"
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">SKU</span>
-                  <input
-                    type="text"
-                    value={draftSku}
-                    onChange={(e) => setDraftSku(e.target.value)}
-                    placeholder="Filtrar por SKU…"
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Variação</span>
-                  <select
-                    value={draftVariation}
-                    onChange={(e) => setDraftVariation(e.target.value as "" | "com" | "sem")}
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                  >
-                    <option value="">Todas</option>
-                    <option value="com">Com variação</option>
-                    <option value="sem">Sem variação</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Refino</span>
-                  <select
-                    value={draftFilterExtra}
-                    onChange={(e) => setDraftFilterExtra(e.target.value)}
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                  >
-                    <option value="">Nenhum</option>
-                    <option value="mlbu">Só MLBU</option>
-                    <option value="com_familia">Com família</option>
-                    <option value="com_rascunho">Com rascunho</option>
-                    <option value="sem_rascunho">Sem rascunho</option>
-                    <option value="price_high">Preço alto (ref.)</option>
-                  </select>
-                </div>
-                <label className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={draftHideVariations}
-                    onChange={(e) => setDraftHideVariations(e.target.checked)}
-                    className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
-                  />
-                  <span className="text-xs text-slate-700 dark:text-slate-200">Só anúncios (ocultar variações)</span>
-                </label>
-                <div className="flex flex-col gap-2 pt-1">
+
+        <div className="border-b border-slate-200 bg-white px-3 pt-3">
+          <div className="flex flex-wrap items-end gap-1">
+            <button
+              type="button"
+              onClick={() => setAtacadoTab("lista")}
+              className={
+                atacadoTab === "lista"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+              }
+            >
+              Atacado
+            </button>
+            <button
+              type="button"
+              onClick={() => setAtacadoTab("como-funciona")}
+              className={
+                atacadoTab === "como-funciona"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+              }
+            >
+              Como funciona?
+            </button>
+          </div>
+        </div>
+
+        {atacadoTab === "como-funciona" && (
+          <div className="max-h-[min(70vh,720px)] overflow-y-auto border-b border-slate-100 bg-white px-4 py-4 dark:bg-slate-900/20">
+            <AtacadoHelpContent />
+          </div>
+        )}
+
+        {atacadoTab === "lista" && (
+        <>
+        <div className="border-b border-slate-100 px-3 py-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={saveAll}
+              disabled={saving || editedCount === 0}
+              className="btn btn-primary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? "Salvando…" : "Salvar alterações"}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={onImportFileChange}
+            />
+            <button
+              type="button"
+              onClick={openImportCsv}
+              disabled={importLoading}
+              className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {importLoading ? "Processando…" : "Importar CSV"}
+            </button>
+            <button
+              type="button"
+              onClick={exportCsv}
+              disabled={importLoading || !accountId}
+              className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Exportar CSV
+            </button>
+            <button
+              type="button"
+              onClick={startApply}
+              disabled={applyLoading || saving || !accountId}
+              className="btn btn-success btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {applyLoading ? (editedCount > 0 ? "Salvando e aplicando…" : "Aplicando…") : "Aplicar no Mercado Livre"}
+            </button>
+            <div className="btn-dropdown relative" ref={bulkActionsRef}>
+              <button
+                type="button"
+                onClick={() => setBulkActionsMenuOpen((o) => !o)}
+                disabled={loadingRows || rows.length === 0}
+                className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Ações em massa
+                <svg className="h-3.5 w-3.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {bulkActionsMenuOpen && (
+                <div className="btn-dropdown-menu left-0 min-w-[14rem]" role="menu">
                   <button
-                    type="submit"
-                    className="w-full rounded bg-primary py-2 text-xs font-semibold text-white hover:bg-primary-dark"
+                    type="button"
+                    role="menuitem"
+                    className="btn-dropdown-item"
+                    onClick={() => {
+                      setBulkActionsMenuOpen(false);
+                      setBulkMinQtyModalOpen(true);
+                    }}
                   >
-                    Aplicar filtros
+                    Editar quantidade mínima…
                   </button>
-                  {showFilterResetButton && (
-                    <button
-                      type="button"
-                      onClick={() => clearFilters()}
-                      className="w-full rounded border border-slate-300 bg-white py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/50"
-                    >
-                      Limpar filtros
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="btn-dropdown-item"
+                    onClick={() => {
+                      setBulkActionsMenuOpen(false);
+                      setBulkDiscountModalOpen(true);
+                    }}
+                  >
+                    Preço com desconto %…
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="btn-dropdown-item text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                    onClick={() => {
+                      setBulkActionsMenuOpen(false);
+                      clearAllAtacadoOnPage();
+                    }}
+                  >
+                    Limpar todas as colunas de atacado…
+                  </button>
                 </div>
-              </form>
+              )}
             </div>
-          ) : (
+            {editedCount > 0 && (
+              <span className="text-xs font-medium text-amber-700">{editedCount} linha(s) alterada(s)</span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px] text-slate-600">
+            <span className="font-semibold text-slate-700">Filtros:</span>
+            {appliedAtacadoFilterLabels.length > 0 ? (
+              appliedAtacadoFilterLabels.map((label, idx) => (
+                <span
+                  key={`${idx}-${label}`}
+                  className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                >
+                  {label}
+                </span>
+              ))
+            ) : (
+              <span className="text-slate-500">Nenhum filtro aplicado</span>
+            )}
+            {appliedAtacadoFilterLabels.length > 0 && (
+              <button
+                type="button"
+                onClick={() => clearFilters()}
+                className="text-[11px] font-semibold text-[#0d6efd] hover:underline"
+              >
+                Limpar
+              </button>
+            )}
+          </div>
+          <div className="btn-dropdown relative flex items-center gap-1" ref={optionsMenuRef}>
             <button
               type="button"
               onClick={() => {
@@ -1499,146 +1847,60 @@ function AtacadoPageContent() {
                 setDraftVariation(filtersApplied.variation);
                 setDraftFilterExtra(filtersApplied.filterExtra);
                 setDraftHideVariations(filtersApplied.hideVariations);
-                setFilterPanelOpen(true);
+                setFiltersModalOpen(true);
               }}
-              className="flex w-full flex-col items-center gap-0.5 py-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50 dark:hover:text-slate-200"
+              className="btn btn-icon btn-sm btn-outline-secondary"
               title="Abrir filtros"
+              aria-label="Abrir filtros"
             >
-              <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
-                />
-              </svg>
-              {filterPanelHasActiveDot && (
-                <span className="rounded-full bg-primary h-1.5 w-1.5" title="Filtros ativos" />
-              )}
+              <FilterIcon />
             </button>
-          )}
-        </aside>
-
-        <main className="min-w-0 flex-1">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-50 sm:text-xl">Editor de Preço de Atacado</h1>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
-            Defina faixas de quantidade e preços de atacado para seus anúncios.
-          </p>
-        </div>
-      </div>
-
-      {message && (
-        <div
-          className={`mb-4 rounded p-3 ${
-            message.type === "success" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
-
-      {/* Ações */}
-      <div className="mb-4 flex flex-wrap items-center gap-4 rounded-app bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
-        <button
-          type="button"
-          onClick={saveAll}
-          disabled={saving || editedCount === 0}
-          className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {saving ? "Salvando…" : "Salvar alterações"}
-        </button>
-        <button
-          type="button"
-          onClick={exportCsv}
-          className="rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50"
-        >
-          Exportar CSV
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv"
-          className="hidden"
-          onChange={onImportFileChange}
-        />
-        <button
-          type="button"
-          onClick={openImportCsv}
-          disabled={importLoading}
-          className="rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {importLoading ? "Processando…" : "Importar CSV"}
-        </button>
-        <button
-          type="button"
-          onClick={startApply}
-          disabled={applyLoading || saving || !accountId}
-          className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {applyLoading ? (editedCount > 0 ? "Salvando e aplicando…" : "Aplicando…") : "Aplicar Preços no Mercado Livre"}
-        </button>
-        <div className="relative" ref={bulkActionsRef}>
-          <button
-            type="button"
-            onClick={() => setBulkActionsMenuOpen((o) => !o)}
-            disabled={loadingRows || rows.length === 0}
-            className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700/50"
-          >
-            Ações em massa
-            <svg className="h-3.5 w-3.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {bulkActionsMenuOpen && (
-            <div
-              className="absolute left-0 top-full z-50 mt-1 min-w-[14rem] rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-800"
-              role="menu"
+            <button
+              type="button"
+              onClick={() => setOptionsMenuOpen((open) => !open)}
+              className="btn btn-icon btn-sm btn-outline-secondary"
+              title="Opções"
+              aria-label="Opções"
+              aria-expanded={optionsMenuOpen}
             >
-              <button
-                type="button"
-                role="menuitem"
-                className="block w-full px-3 py-2 text-left text-xs text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-700/50"
-                onClick={() => {
-                  setBulkActionsMenuOpen(false);
-                  setBulkMinQtyModalOpen(true);
-                }}
-              >
-                Editar quantidade mínima…
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="block w-full px-3 py-2 text-left text-xs text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-700/50"
-                onClick={() => {
-                  setBulkActionsMenuOpen(false);
-                  setBulkDiscountModalOpen(true);
-                }}
-              >
-                Preço com desconto %…
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="block w-full px-3 py-2 text-left text-xs text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                onClick={() => {
-                  setBulkActionsMenuOpen(false);
-                  clearAllAtacadoOnPage();
-                }}
-              >
-                Limpar todas as colunas de atacado…
-              </button>
-            </div>
-          )}
+              <KebabMenuIcon />
+            </button>
+            {optionsMenuOpen && (
+              <div className="btn-dropdown-menu right-0 top-9 z-20 w-48">
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportCsv();
+                    setOptionsMenuOpen(false);
+                  }}
+                  className="btn-dropdown-item"
+                >
+                  Exportar CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void loadRows();
+                    setOptionsMenuOpen(false);
+                  }}
+                  className="btn-dropdown-item"
+                >
+                  Atualizar tabela
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-        <span className="text-sm text-fg-muted">
-          Aplicar envia os preços de atacado salvos para o Mercado Livre. Alterações não salvas serão salvas automaticamente ao clicar.
-        </span>
-        {editedCount > 0 && (
-        <span className="text-xs font-medium text-amber-700">{editedCount} linha(s) alterada(s)</span>
+
+        {message && (
+          <div
+            className={`mx-3 mt-3 rounded p-3 ${
+              message.type === "success" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+            }`}
+          >
+            {message.text}
+          </div>
         )}
-      </div>
 
       {bulkMinQtyModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -1678,9 +1940,8 @@ function AtacadoPageContent() {
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-200">Quantidade mínima</label>
                 <input
-                  type="number"
-                  min={2}
-                  step={1}
+                  type="text"
+                  autoComplete="off"
                   value={bulkMinQtyStr}
                   onChange={(e) => setBulkMinQtyStr(e.target.value)}
                   className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
@@ -2006,11 +2267,11 @@ function AtacadoPageContent() {
         </p>
       ) : (
         <>
-          <div className="pricing-table-with-sticky">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-slate-600 dark:text-slate-300">
+          <div className="pricing-table-with-sticky adminty-table-card">
+            <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
+              <p className="text-xs text-slate-600 dark:text-slate-300">
                 <span className="font-medium text-slate-800 dark:text-slate-100">{rows.length}</span>
-                {" linhas filtradas de "}
+                {" linhas na página · total "}
                 <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
                 {totalItems > 0 && total !== totalItems && (
                   <>
@@ -2020,9 +2281,9 @@ function AtacadoPageContent() {
                   </>
                 )}
               </p>
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-                  <span>Linhas por página</span>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  Linhas
                   <select
                     value={pageSize}
                     onChange={(e) => {
@@ -2030,27 +2291,27 @@ function AtacadoPageContent() {
                       setPageSize(value);
                       setPage(1);
                     }}
-                    className="rounded border border-slate-200 bg-white px-2 py-1.5 text-slate-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                    className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 shadow-sm focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                    aria-label="Linhas por página"
                   >
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                    <option value={200}>200</option>
-                    <option value={500}>500</option>
-                    <option value={1000}>1000</option>
+                    {[10, 20, 25, 50, 100, 250, 500, 750, 1000].map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 {totalPages > 1 && (
                   <>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                      Página {page} de {totalPages}
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Página {page}/{totalPages}
                     </span>
-                    <div className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 px-1.5 py-1 text-xs ring-1 ring-slate-200 dark:bg-slate-700 dark:ring-slate-600">
+                    <div className="inline-flex items-center gap-px rounded border border-slate-200 bg-white p-px text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-800">
                       <button
                         type="button"
                         onClick={() => setPage(1)}
                         disabled={page === 1}
-                        className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
                         title="Primeira página"
                       >
                         «
@@ -2059,18 +2320,18 @@ function AtacadoPageContent() {
                         type="button"
                         onClick={() => setPage((p) => Math.max(1, p - 1))}
                         disabled={page <= 1}
-                        className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
                       >
                         Anterior
                       </button>
-                      <span className="min-w-[2ch] px-1.5 py-1 text-center font-semibold text-slate-800 dark:text-slate-100">
+                      <span className="min-w-[2ch] px-1.5 py-0.5 text-center font-semibold text-slate-800 dark:text-slate-100">
                         {page}
                       </span>
                       <button
                         type="button"
                         onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                         disabled={page >= totalPages}
-                        className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
                       >
                         Próxima
                       </button>
@@ -2078,7 +2339,7 @@ function AtacadoPageContent() {
                         type="button"
                         onClick={() => setPage(totalPages)}
                         disabled={page === totalPages}
-                        className="rounded-full px-2 py-1 font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded px-1.5 py-0.5 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-700"
                         title="Última página"
                       >
                         »
@@ -2090,86 +2351,46 @@ function AtacadoPageContent() {
             </div>
             <AppTable
               maxHeight="70vh"
-              tableClassName="table-fixed w-max min-w-[max(100%,max-content)]"
+              className="[&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none"
+              tableClassName="table-fixed"
+              tableStyle={{ width: ATACADO_TABLE_TOTAL_WIDTH_PX, minWidth: ATACADO_TABLE_TOTAL_WIDTH_PX }}
             >
               <colgroup>
                 {ATACADO_COLUMNS.map((c, i) => (
                   <col key={i} style={{ width: c.minWidth }} />
                 ))}
               </colgroup>
-              <thead className="bg-slate-50">
+              <thead ref={atacadoTheadRef} className="sticky top-0 z-10">
                 <tr>
-                  {renderPinnedHeaderCell(
-                    0,
-                    "whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                    "MLB"
-                  )}
-                  {renderPinnedHeaderCell(
-                    1,
-                    "whitespace-nowrap p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                    "MLBU",
-                    { title: "Código User Product (MLBU)" }
-                  )}
-                  {renderPinnedHeaderCell(
-                    2,
-                    "p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                    "Título"
-                  )}
-                  {renderPinnedHeaderCell(
-                    3,
-                    "p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                    "Variação",
-                    { title: "Indica se o anúncio possui variações" }
-                  )}
-                  {renderPinnedHeaderCell(
-                    4,
-                    "p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                    "SKU",
-                    {
-                      title:
-                        "SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.",
-                    }
-                  )}
-                  {renderPinnedHeaderCell(
-                    5,
-                    "p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                    "Preço R$"
-                  )}
-                  {renderPinnedHeaderCell(
-                    6,
-                    "p-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                    "Promoção R$",
-                    { title: "Valor salvo na calculadora (Preços / planned_prices)" }
-                  )}
+                  {renderAtacadoColumnHeader(0, "MLB", "whitespace-nowrap")}
+                  {renderAtacadoColumnHeader(1, "MLBU", "whitespace-nowrap", {
+                    title: "Código User Product (MLBU)",
+                  })}
+                  {renderAtacadoColumnHeader(2, "Título")}
+                  {renderAtacadoColumnHeader(3, "Variação", "", {
+                    title: "Indica se o anúncio possui variações",
+                  })}
+                  {renderAtacadoColumnHeader(4, "SKU", "", {
+                    title:
+                      "SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.",
+                  })}
+                  {renderAtacadoColumnHeader(5, "Preço R$", "tabular-nums")}
+                  {renderAtacadoColumnHeader(6, "Promoção R$", "tabular-nums", {
+                    title: "Valor salvo na calculadora (Preços / planned_prices)",
+                  })}
                   {[1, 2, 3, 4, 5].map((n) => {
                     const t = n - 1;
                     const minIdx = 7 + t * 2;
                     const priceIdx = 8 + t * 2;
                     return (
                       <React.Fragment key={n}>
-                        {renderPinnedHeaderCell(
-                          minIdx,
-                          "whitespace-nowrap p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                          <>Atacado {n} · mín.</>
-                        )}
-                        {renderPinnedHeaderCell(
-                          priceIdx,
-                          "whitespace-nowrap p-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                          <>Atacado {n} · R$</>
-                        )}
+                        {renderAtacadoColumnHeader(minIdx, <>Qt. Atac. {n}</>, "whitespace-nowrap")}
+                        {renderAtacadoColumnHeader(priceIdx, <>R$ Atac. {n}</>, "whitespace-nowrap")}
                       </React.Fragment>
                     );
                   })}
-                  {renderPinnedHeaderCell(
-                    17,
-                    "p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                    "Status"
-                  )}
-                  {renderPinnedHeaderCell(
-                    18,
-                    "p-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300",
-                    "Ações"
-                  )}
+                  {renderAtacadoColumnHeader(17, "Status")}
+                  {renderAtacadoColumnHeader(18, "Ações")}
                 </tr>
               </thead>
               <tbody>
@@ -2179,6 +2400,10 @@ function AtacadoPageContent() {
           </div>
         </>
       )}
+        </>
+        )}
+
+      </div>
 
       {receivableRowKey && (() => {
         const r = rows.find((x) => rowKey(x) === receivableRowKey);
@@ -2187,7 +2412,7 @@ function AtacadoPageContent() {
         const scenarios: { label: string; unitPrice: number }[] = [];
         const basePrice = r.current_price != null ? Number(r.current_price) : 0;
         if (basePrice > 0) scenarios.push({ label: "Base", unitPrice: basePrice });
-        (cur.tiers ?? []).forEach((t, i) => {
+        padSlots5(cur.slots).forEach((t, i) => {
           if (t && typeof t.min_qty === "number" && typeof t.price === "number" && t.price > 0) {
             scenarios.push({ label: `Atacado ${i + 1} (${t.min_qty}+)`, unitPrice: t.price });
           }
@@ -2221,9 +2446,155 @@ function AtacadoPageContent() {
         );
       })()}
 
-        </main>
-      </div>
+      {filtersModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setFiltersModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Filtros de atacado"
+        >
+          <div
+            className="w-full max-w-lg overflow-hidden rounded border border-slate-200 bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-800">Filtros</h2>
+                <p className="text-xs text-slate-500">Refine as linhas exibidas na tabela de atacado.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFiltersModalOpen(false)}
+                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                aria-label="Fechar filtros"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleFilterSubmit} className="flex max-h-[min(85vh,48rem)] flex-col gap-3 overflow-y-auto p-4">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">MLB</span>
+                <input
+                  type="text"
+                  value={draftMlb}
+                  onChange={(e) => setDraftMlb(e.target.value)}
+                  placeholder="ex: MLB1234567890"
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">MLBU</span>
+                <input
+                  type="text"
+                  value={draftMlbu}
+                  onChange={(e) => setDraftMlbu(e.target.value)}
+                  placeholder="ex: MLBU…"
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Título</span>
+                <input
+                  type="text"
+                  value={draftTitle}
+                  onChange={(e) => setDraftTitle(e.target.value)}
+                  placeholder="Buscar no título…"
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">SKU</span>
+                <input
+                  type="text"
+                  value={draftSku}
+                  onChange={(e) => setDraftSku(e.target.value)}
+                  placeholder="Filtrar por SKU…"
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Variação</span>
+                <select
+                  value={draftVariation}
+                  onChange={(e) => setDraftVariation(e.target.value as "" | "com" | "sem")}
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                >
+                  <option value="">Todas</option>
+                  <option value="com">Com variação</option>
+                  <option value="sem">Sem variação</option>
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Refino</span>
+                <select
+                  value={draftFilterExtra}
+                  onChange={(e) => setDraftFilterExtra(e.target.value)}
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                >
+                  <option value="">Nenhum</option>
+                  <option value="mlbu">Só MLBU</option>
+                  <option value="com_familia">Com família</option>
+                  <option value="com_rascunho">Com rascunho</option>
+                  <option value="sem_rascunho">Sem rascunho</option>
+                  <option value="price_high">Preço alto (ref.)</option>
+                </select>
+              </div>
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={draftHideVariations}
+                  onChange={(e) => setDraftHideVariations(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-[#0d6efd] focus:ring-[#0d6efd]"
+                />
+                <span className="text-xs text-slate-700">Só anúncios (ocultar variações)</span>
+              </label>
+              <div className="flex flex-col gap-2 border-t border-slate-100 pt-3">
+                <button
+                  type="submit"
+                  className="btn btn-primary w-full text-xs font-semibold"
+                >
+                  Aplicar filtros
+                </button>
+                {showFilterResetButton && (
+                  <button
+                    type="button"
+                    onClick={() => clearFilters()}
+                    className="w-full rounded border border-slate-300 bg-white py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    Limpar filtros
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      <path
+        d="M4 6h16M7 12h10M10 18h4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function KebabMenuIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      <circle cx="12" cy="5" r="1.7" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+      <circle cx="12" cy="19" r="1.7" fill="currentColor" />
+    </svg>
   );
 }
 

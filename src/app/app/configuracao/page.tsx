@@ -339,7 +339,7 @@ function ConfiguracaoContent() {
                 </div>
                 <a
                   href="/api/mercadolivre/auth"
-                  className="inline-flex w-fit items-center gap-2 rounded bg-yellow-400 px-4 py-2 font-medium text-gray-900 hover:bg-yellow-500"
+                  className="btn btn-warning w-fit"
                 >
                   Conectar conta Mercado Livre
                 </a>
@@ -629,7 +629,7 @@ function ConfiguracaoContent() {
                 type="button"
                 onClick={() => void handleDevResetData()}
                 disabled={devResetting}
-                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="btn btn-danger disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {devResetting ? "Limpando…" : "Apagar dados e desconectar Mercado Livre"}
               </button>
@@ -669,7 +669,7 @@ function ConfiguracaoContent() {
               type="button"
               onClick={() => void loadWebhookNotifications()}
               disabled={webhookNotificationsLoading}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-fg-strong hover:bg-gray-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+              className="btn btn-secondary btn-sm disabled:opacity-60"
             >
               {webhookNotificationsLoading ? "Atualizando…" : "Atualizar lista"}
             </button>
