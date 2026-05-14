@@ -36,6 +36,8 @@ interface PricingListing {
   fixed_expenses: number | null;
   account_id: string;
   ml_active_promotions?: string | null;
+  /** % taxa ML (fee/preço) por categoria+tipo, preenchido no refresh do cache após sync */
+  reference_fee_percent?: number | null;
 }
 
 type CalculatedPricing = FullPricingBreakdown;
@@ -250,7 +252,8 @@ const PRICING_COLUMNS: { label: string; minWidth: number }[] = [
   { label: "Promoção", minWidth: 100 },
   { label: "Vai Receber", minWidth: 95 },
   { label: "Lucro", minWidth: 95 },
-  { label: "Taxa ML", minWidth: 72 },
+  /** Valor R$ + % sobre Promoção (ou referência), estilo Lucro */
+  { label: "Taxa ML", minWidth: 82 },
   { label: "Frete", minWidth: 72 },
   { label: "Imposto", minWidth: 80 },
   { label: "Taxa Extra", minWidth: 88 },
@@ -524,115 +527,57 @@ function MarginInput({
   );
 }
 
-async function fetchCalculatedPricingAtPrice(
-  listing: ListingWithPricing,
-  price: number,
-  isMercadoLider: boolean
-): Promise<CalculatedPricing | null> {
-  if (!listing.listing_type_id || !listing.category_id || !Number.isFinite(price) || price <= 0) return null;
-  try {
-    const res = await fetch("/api/pricing/calculate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        items: [
-          {
-            item_id: listing.item_id,
-            variation_id: listing.variation_id,
-            price,
-            listing_type_id: listing.listing_type_id,
-            category_id: listing.category_id,
-            weight_kg: listing.weight_kg,
-            height_cm: listing.height_cm,
-            width_cm: listing.width_cm,
-            length_cm: listing.length_cm,
-          },
-        ],
-        is_mercado_lider: isMercadoLider,
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const result = data.results?.[0] as { price: number; fee: number; shipping_cost: number } | undefined;
-    if (!result) return null;
-    return computeFullPricingBreakdown(listing.tax_percent, listing.extra_fee_percent, listing.fixed_expenses, result);
-  } catch {
-    return null;
-  }
-}
-
-function achievedNetMarginPercent(
-  listing: Pick<ListingWithPricing, "cost_price">,
-  price: number,
-  calc: CalculatedPricing
-): number {
-  const C = listing.cost_price!;
-  return ((calc.net_amount - C) / price) * 100;
-}
-
-/** Busca binária no preço até a margem líquida (líquido − custo) / preço ≈ alvo. */
-async function solvePriceForTargetNetMarginPercent(
+/** Resolve preço da promoção para margem líquida alvo: iteração com % salvo + refinamento listing_prices no servidor. */
+async function solveMarginViaApi(
   listing: ListingWithPricing,
   targetPct: number,
   isMercadoLider: boolean
 ): Promise<{ price: number; calculated: CalculatedPricing } | null> {
-  if (listing.cost_price == null) return null;
-
-  const marginAtPrice = async (p: number): Promise<number | null> => {
-    const calc = await fetchCalculatedPricingAtPrice(listing, p, isMercadoLider);
-    if (!calc) return null;
-    return achievedNetMarginPercent(listing, p, calc);
-  };
-
-  let low = Math.max(0.01, listing.cost_price * 0.01);
-  let high = Math.max(
-    listing.new_price > 0 ? listing.new_price * 2 : 0,
-    listing.current_price * 2,
-    listing.cost_price * 3,
-    50
-  );
-
-  let mHigh = await marginAtPrice(high);
-  if (mHigh == null) return null;
-  let expand = 0;
-  while (mHigh < targetPct && high < 5_000_000 && expand < 28) {
-    high = Math.min(high * 1.5, 5_000_000);
-    mHigh = await marginAtPrice(high);
-    if (mHigh == null) return null;
-    expand++;
+  if (
+    !listing.listing_type_id ||
+    !listing.category_id ||
+    listing.cost_price == null ||
+    !Number.isFinite(targetPct)
+  ) {
+    return null;
   }
-
-  let mLow = await marginAtPrice(low);
-  if (mLow == null) return null;
-  expand = 0;
-  while (mLow > targetPct && low > 0.01 && expand < 28) {
-    low = Math.max(0.01, low * 0.85);
-    mLow = await marginAtPrice(low);
-    if (mLow == null) return null;
-    expand++;
-  }
-
-  let best: { price: number; calculated: CalculatedPricing } | null = null;
-  let bestErr = Infinity;
-
-  for (let i = 0; i < 28; i++) {
-    const mid = (low + high) / 2;
-    const calc = await fetchCalculatedPricingAtPrice(listing, mid, isMercadoLider);
-    if (!calc) break;
-    const m = achievedNetMarginPercent(listing, mid, calc);
-    const err = Math.abs(m - targetPct);
-    if (err < bestErr) {
-      bestErr = err;
-      best = { price: mid, calculated: calc };
+  try {
+    const res = await fetch("/api/pricing/solve-margin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        item_id: listing.item_id,
+        variation_id: listing.variation_id,
+        listing_type_id: listing.listing_type_id,
+        category_id: listing.category_id,
+        weight_kg: listing.weight_kg,
+        height_cm: listing.height_cm,
+        width_cm: listing.width_cm,
+        length_cm: listing.length_cm,
+        cost_price: listing.cost_price,
+        tax_percent: listing.tax_percent,
+        extra_fee_percent: listing.extra_fee_percent,
+        fixed_expenses: listing.fixed_expenses,
+        target_margin_percent: targetPct,
+        is_mercado_lider: isMercadoLider,
+        current_price: listing.current_price,
+        planned_price: listing.new_price,
+        seed_price: listing.new_price,
+        reference_fee_percent: listing.reference_fee_percent ?? null,
+      }),
+    });
+    const data = (await res.json().catch(() => null)) as {
+      price?: number;
+      calculated?: CalculatedPricing;
+      error?: string;
+    } | null;
+    if (!res.ok || !data?.calculated || data.price == null || !Number.isFinite(Number(data.price))) {
+      return null;
     }
-    if (err < 0.02) {
-      return { price: mid, calculated: calc };
-    }
-    if (m < targetPct) low = mid;
-    else high = mid;
+    return { price: Number(data.price), calculated: data.calculated };
+  } catch {
+    return null;
   }
-
-  return best;
 }
 
 const MAX_PRICING_CALCULATE_BATCH = PRICING_CALCULATE_CLIENT_BATCH_SIZE;
@@ -761,7 +706,11 @@ function PrecosHelpContent() {
               <li><strong>Promoção:</strong> Valor bruto de referência (planned_price); campo editável — usado como base para taxa ML, frete, impostos e Vai receber</li>
               <li><strong>Vai Receber:</strong> valor bruto (Promoção) − taxa ML − frete</li>
               <li><strong>Lucro:</strong> Vai receber − custo − imposto − taxa extra − desp. fixas</li>
-              <li><strong>Taxa ML:</strong> Taxa de comissão do Mercado Livre calculada sobre o preço</li>
+              <li>
+                <strong>Taxa ML:</strong> Comissão do Mercado Livre em R$ sobre a <strong>Promoção</strong>; abaixo do valor,
+                o percentual (taxa ÷ Promoção), no mesmo estilo da coluna Lucro — ou a referência por categoria após sync se
+                ainda não houver cálculo.
+              </li>
               <li><strong>Frete:</strong> Custo de frete (apenas para contas Mercado Líder)</li>
               <li><strong>Imposto:</strong> Valor do imposto calculado sobre o preço (% cadastrado no produto)</li>
               <li><strong>Taxa Extra:</strong> Taxa extra calculada sobre o preço (% cadastrado no produto)</li>
@@ -1007,11 +956,15 @@ function PrecosPageContent() {
             apiItem.calculated_fee != null &&
             apiItem.calculated_shipping_cost != null
           ) {
-            calculated = computeFullPricingBreakdown(item.tax_percent, item.extra_fee_percent, item.fixed_expenses, {
-              price: apiItem.calculated_price,
-              fee: apiItem.calculated_fee,
-              shipping_cost: apiItem.calculated_shipping_cost,
-            });
+            const cp = Number(apiItem.calculated_price);
+            /** Taxa/frete do cache são do último cálculo nesse preço; se planned mudou e calculated_* não foi atualizado, não misturar com a promoção atual. */
+            if (Number.isFinite(cp) && Math.abs(cp - newPrice) < 0.02) {
+              calculated = computeFullPricingBreakdown(item.tax_percent, item.extra_fee_percent, item.fixed_expenses, {
+                price: cp,
+                fee: apiItem.calculated_fee,
+                shipping_cost: apiItem.calculated_shipping_cost,
+              });
+            }
           }
           return {
             ...item,
@@ -1454,11 +1407,7 @@ function PrecosPageContent() {
       );
 
       try {
-        const solved = await solvePriceForTargetNetMarginPercent(
-          listing,
-          targetPct,
-          isMercadoLider
-        );
+        const solved = await solveMarginViaApi(listing, targetPct, isMercadoLider);
         if (!solved) {
           setSaveMessage({
             type: "error",
@@ -1476,9 +1425,6 @@ function PrecosPageContent() {
         }
 
         const p = Math.round(solved.price * 100) / 100;
-        const finalCalc =
-          (await fetchCalculatedPricingAtPrice(listing, p, isMercadoLider)) ??
-          solved.calculated;
 
         setListings((prev) =>
           prev.map((item) =>
@@ -1487,7 +1433,7 @@ function PrecosPageContent() {
                   ...item,
                   new_price: p,
                   dirty: true,
-                  calculated: finalCalc,
+                  calculated: solved.calculated,
                   calculating: false,
                 }
               : item
@@ -1910,15 +1856,13 @@ function PrecosPageContent() {
       for (const l of eligible) {
         const key = listingSelectionKey(l);
         try {
-          const solved = await solvePriceForTargetNetMarginPercent(l, targetPct, isMercadoLider);
+          const solved = await solveMarginViaApi(l, targetPct, isMercadoLider);
           if (!solved) {
             fail++;
             continue;
           }
           const p = Math.round(solved.price * 100) / 100;
-          const finalCalc =
-            (await fetchCalculatedPricingAtPrice(l, p, isMercadoLider)) ?? solved.calculated;
-          updates.set(key, { price: p, calculated: finalCalc });
+          updates.set(key, { price: p, calculated: solved.calculated });
         } catch {
           fail++;
         }
@@ -3363,7 +3307,11 @@ function PrecosPageContent() {
                   title: "Valor bruto (Promoção) − taxa ML − frete",
                 })}
                 {renderPricingColumnHeader(13, "Lucro", { align: "right" })}
-                {renderPricingColumnHeader(14, "Taxa ML", { align: "right" })}
+                {renderPricingColumnHeader(14, "Taxa ML", {
+                  align: "right",
+                  title:
+                    "Comissão ML em R$ sobre a Promoção. Abaixo: mesmo percentual (taxa ÷ Promoção) ou referência por categoria se ainda não calculou.",
+                })}
                 {renderPricingColumnHeader(15, "Frete", { align: "right" })}
                 {renderPricingColumnHeader(16, "Imposto", { align: "right", title: "Imposto sobre o preço" })}
                 {renderPricingColumnHeader(17, "Taxa Extra", { align: "right", title: "Taxa extra sobre o preço" })}
@@ -3384,6 +3332,20 @@ function PrecosPageContent() {
                   profit != null && listing.new_price > 0
                     ? (profit / listing.new_price) * 100
                     : null;
+
+                const mlFeeSharePct =
+                  listing.calculating
+                    ? null
+                    : listing.calculated && listing.calculated.price > 0
+                      ? (listing.calculated.fee / listing.calculated.price) * 100
+                      : listing.reference_fee_percent != null &&
+                          Number.isFinite(Number(listing.reference_fee_percent))
+                        ? Number(listing.reference_fee_percent)
+                        : null;
+                const mlFeeShareIsReference =
+                  !listing.calculating &&
+                  !listing.calculated &&
+                  mlFeeSharePct != null;
 
                 const isSelected = selectedIds.has(listingSelectionKey(listing));
 
@@ -3634,17 +3596,48 @@ function PrecosPageContent() {
                     </td>
                     <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
                       {listing.calculating ? (
-                        <span className="text-fg-muted">…</span>
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="text-fg-muted">…</span>
+                          <span className="text-xs text-fg-muted">…</span>
+                        </div>
                       ) : listing.calculated ? (
-                        <span className="text-amber-700">
-                          R$ {formatBRL(listing.calculated.fee)}
-                        </span>
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="text-amber-700">
+                            R$ {formatBRL(listing.calculated.fee)}
+                          </span>
+                          {mlFeeSharePct != null && (
+                            <span
+                              className={`text-xs tabular-nums ${
+                                mlFeeShareIsReference
+                                  ? "text-slate-400 dark:text-slate-500"
+                                  : "text-amber-600 dark:text-amber-500"
+                              }`}
+                              title={
+                                mlFeeShareIsReference
+                                  ? "Referência por categoria/tipo (última sync)"
+                                  : "Taxa ML ÷ valor da Promoção (último cálculo)"
+                              }
+                            >
+                              {mlFeeSharePct.toFixed(1).replace(".", ",")}%
+                            </span>
+                          )}
+                        </div>
                       ) : !listing.listing_type_id ? (
                         <span className="text-red-400" title="Tipo de anúncio não disponível">
                           N/D
                         </span>
                       ) : (
-                        <span className="text-fg-muted">—</span>
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="text-fg-muted">—</span>
+                          {mlFeeSharePct != null && mlFeeShareIsReference ? (
+                            <span
+                              className="text-xs tabular-nums text-slate-400 dark:text-slate-500"
+                              title="Referência de taxa por categoria/tipo (última sincronização). Calcule ou edite a Promoção para ver o valor em R$."
+                            >
+                              {mlFeeSharePct.toFixed(1).replace(".", ",")}%
+                            </span>
+                          ) : null}
+                        </div>
                       )}
                     </td>
                     <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>

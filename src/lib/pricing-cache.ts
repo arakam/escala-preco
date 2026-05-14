@@ -231,6 +231,8 @@ export interface PricingCacheRow {
   ml_active_promotions: string;
   sort_title: string;
   cache_updated_at: string;
+  /** % taxa ML (fee/preço) da tabela ml_category_fee_reference para categoria+tipo */
+  reference_fee_percent: number | null;
 }
 
 export async function refreshPricingCache(accountId: string): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
@@ -238,7 +240,7 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
 
   const { data: account, error: accountErr } = await supabase
     .from("ml_accounts")
-    .select("id, ml_user_id")
+    .select("id, ml_user_id, site_id")
     .eq("id", accountId)
     .single();
 
@@ -247,6 +249,24 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
   }
 
   const now = new Date().toISOString();
+
+  const siteId = ((account as { site_id?: string | null }).site_id ?? "MLB").trim() || "MLB";
+  const feeRefByCatType = new Map<string, number>();
+  const { data: feeRefRows } = await supabase
+    .from("ml_category_fee_reference")
+    .select("category_id, listing_type_id, fee_percent")
+    .eq("site_id", siteId);
+  for (const fr of feeRefRows ?? []) {
+    feeRefByCatType.set(`${fr.category_id}:${fr.listing_type_id}`, Number(fr.fee_percent));
+  }
+
+  const referenceFeePercent = (categoryId: unknown, listingTypeId: unknown): number | null => {
+    const c = categoryId != null && categoryId !== "" ? String(categoryId) : null;
+    const l = listingTypeId != null && listingTypeId !== "" ? String(listingTypeId) : null;
+    if (!c || !l) return null;
+    const v = feeRefByCatType.get(`${c}:${l}`);
+    return v != null && Number.isFinite(v) ? v : null;
+  };
 
   const itemsSelect = `
     id, account_id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id,
@@ -462,6 +482,7 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
       ml_active_promotions: mlPromoFor(raw.item_id as string),
       sort_title: (title || "").toLowerCase(),
       cache_updated_at: now,
+      reference_fee_percent: referenceFeePercent(raw.category_id, raw.listing_type_id),
     });
   }
 
@@ -502,6 +523,7 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
       ml_active_promotions: mlPromoFor(itemId),
       sort_title: (title || "").toLowerCase(),
       cache_updated_at: now,
+      reference_fee_percent: referenceFeePercent(raw.category_id, raw.listing_type_id),
     });
   }
 
@@ -580,6 +602,7 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
       ml_active_promotions: r.ml_active_promotions,
       sort_title: r.sort_title,
       cache_updated_at: r.cache_updated_at,
+      reference_fee_percent: r.reference_fee_percent,
       ...(saved && {
         calculated_price: saved.calculated_price,
         calculated_fee: saved.calculated_fee,
@@ -613,12 +636,30 @@ export async function refreshPricingCacheByItemId(
 
   const { data: account, error: accountErr } = await supabase
     .from("ml_accounts")
-    .select("id, ml_user_id")
+    .select("id, ml_user_id, site_id")
     .eq("id", accountId)
     .single();
   if (accountErr || !account) return { ok: false, error: "Conta não encontrada" };
 
   const now = new Date().toISOString();
+  const siteId = ((account as { site_id?: string | null }).site_id ?? "MLB").trim() || "MLB";
+
+  const feeRefByCatType = new Map<string, number>();
+  const { data: feeRefRowsSingle } = await supabase
+    .from("ml_category_fee_reference")
+    .select("category_id, listing_type_id, fee_percent")
+    .eq("site_id", siteId);
+  for (const fr of feeRefRowsSingle ?? []) {
+    feeRefByCatType.set(`${fr.category_id}:${fr.listing_type_id}`, Number(fr.fee_percent));
+  }
+  const referenceFeePercentByItem = (categoryId: unknown, listingTypeId: unknown): number | null => {
+    const c = categoryId != null && categoryId !== "" ? String(categoryId) : null;
+    const l = listingTypeId != null && listingTypeId !== "" ? String(listingTypeId) : null;
+    if (!c || !l) return null;
+    const v = feeRefByCatType.get(`${c}:${l}`);
+    return v != null && Number.isFinite(v) ? v : null;
+  };
+
   const itemsSelectWithVarFlag = `
     id, account_id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id, has_variations,
     products:product_id (sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
@@ -722,6 +763,7 @@ export async function refreshPricingCacheByItemId(
       ml_active_promotions: mlPromoText,
       sort_title: (title || "").toLowerCase(),
       cache_updated_at: now,
+      reference_fee_percent: referenceFeePercentByItem(raw.category_id, raw.listing_type_id),
     });
   }
 
@@ -786,6 +828,7 @@ export async function refreshPricingCacheByItemId(
       ml_active_promotions: r.ml_active_promotions,
       sort_title: r.sort_title,
       cache_updated_at: r.cache_updated_at,
+      reference_fee_percent: r.reference_fee_percent,
       ...(saved && {
         calculated_price: saved.calculated_price,
         calculated_fee: saved.calculated_fee,

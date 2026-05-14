@@ -9,6 +9,8 @@ import { useOnboarding } from "@/contexts/onboarding-context";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
 const FROZEN_COLUMNS_STORAGE_KEY = "escalapreco_anuncios_frozen_columns";
+const PAGE_SIZE_STORAGE_KEY = "escalapreco_anuncios_page_size";
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 250, 500, 750, 1000] as const;
 
 /** Rótulos comuns do ML (Brasil); IDs desconhecidos são exibidos como estão. */
 const LISTING_TYPE_LABELS: Record<string, string> = {
@@ -287,6 +289,18 @@ function AnunciosPageContent() {
       }
     } catch {
       setFrozenColumns([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PAGE_SIZE_STORAGE_KEY);
+      const n = raw != null ? parseInt(raw, 10) : NaN;
+      if (Number.isFinite(n) && PAGE_SIZE_OPTIONS.includes(n as (typeof PAGE_SIZE_OPTIONS)[number])) {
+        setPageSize(n);
+      }
+    } catch {
+      // ignore
     }
   }, []);
 
@@ -798,13 +812,19 @@ function AnunciosPageContent() {
                   <select
                     value={pageSize}
                     onChange={(e) => {
-                      setPageSize(Number(e.target.value));
+                      const next = Number(e.target.value);
+                      setPageSize(next);
                       setPage(1);
+                      try {
+                        localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(next));
+                      } catch {
+                        // ignore
+                      }
                     }}
                     className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 shadow-sm focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
                     aria-label="Linhas por página"
                   >
-                    {[10, 20, 50, 100, 250, 500, 750, 1000].map((size) => (
+                    {[...PAGE_SIZE_OPTIONS].map((size) => (
                       <option key={size} value={size}>
                         {size}
                       </option>

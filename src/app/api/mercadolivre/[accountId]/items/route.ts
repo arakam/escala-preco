@@ -1,7 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
+/** Alinhado às opções da tela Anúncios (10…1000). */
+const MAX_PAGE_SIZE = 1000;
+/** Modo família MLBU: range fixo no início da lista; limite menor por desenho da UI. */
+const MAX_PAGE_SIZE_FAMILY = 100;
 
 /**
  * GET /api/mercadolivre/{accountId}/items?search=&status=&listing_type_id=&mlbu=&mlbu_code=&page=&limit=
@@ -43,9 +47,16 @@ export async function GET(
   const listingTypeId = searchParams.get("listing_type_id")?.trim() ?? "";
   const limitParam = searchParams.get("limit");
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
+  const parsedLimit = limitParam != null && limitParam !== "" ? parseInt(limitParam, 10) : NaN;
   const pageSize = familyId
-    ? Math.min(100, Math.max(1, parseInt(limitParam ?? "100", 10) || 100))
-    : PAGE_SIZE;
+    ? Math.min(
+        MAX_PAGE_SIZE_FAMILY,
+        Math.max(1, Number.isFinite(parsedLimit) ? parsedLimit : MAX_PAGE_SIZE_FAMILY)
+      )
+    : Math.min(
+        MAX_PAGE_SIZE,
+        Math.max(1, Number.isFinite(parsedLimit) ? parsedLimit : DEFAULT_PAGE_SIZE)
+      );
   const from = familyId ? 0 : (page - 1) * pageSize;
   const to = from + pageSize - 1;
 

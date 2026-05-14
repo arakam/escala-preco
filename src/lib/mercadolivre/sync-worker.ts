@@ -12,6 +12,7 @@ import { fetchAllItemIds, fetchItemDetail, fetchVariationDetail, getItemPrices, 
 import { getLatestValidAccessToken, getValidAccessToken } from "./refresh";
 import { syncHeartbeatMs, syncLog, syncLogVerbose } from "./sync-log";
 import { createServiceClient } from "@/lib/supabase/service";
+import { upsertCategoryFeeReferenceFromSample } from "@/lib/pricing/ml-category-fee-reference";
 import {
   updateJob,
   addJobLog,
@@ -116,10 +117,10 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     syncLog(jobId, "job iniciado (sync_items)", { accountId });
     const { data: accountData } = await supabase
       .from("ml_accounts")
-      .select("ml_user_id")
+      .select("ml_user_id, site_id")
       .eq("id", accountId)
       .single();
-    const account = accountData as { ml_user_id: number } | null;
+    const account = accountData as { ml_user_id: number; site_id: string | null } | null;
     if (!account) {
       syncLog(jobId, "abortar: conta ML não encontrada no banco", { accountId });
       await updateJob(supabase, jobId, { status: "failed", ended_at: now });
@@ -197,6 +198,8 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     let errors = 0;
 
     let lastProactiveTokenCheck = Date.now();
+    const siteIdFallback = (account.site_id ?? "MLB").trim() || "MLB";
+    const categoryFeeKeysSynced = new Set<string>();
 
     const syncOneItem = async (itemId: string, token: string): Promise<void> => {
       if (syncLogVerbose()) {
@@ -212,6 +215,25 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       });
       if (itemErr) {
         throw itemErr;
+      }
+
+      const siteId = ((item.site_id as string | undefined) ?? siteIdFallback).trim() || siteIdFallback;
+      const samplePrice = Number(row.price) || standardPrice || 0;
+      const cat = row.category_id as string | null | undefined;
+      const lt = row.listing_type_id as string | null | undefined;
+      if (cat && lt && samplePrice > 0) {
+        const feeKey = `${siteId}\0${cat}\0${lt}`;
+        if (!categoryFeeKeysSynced.has(feeKey)) {
+          categoryFeeKeysSynced.add(feeKey);
+          await upsertCategoryFeeReferenceFromSample({
+            supabase,
+            siteId,
+            categoryId: cat,
+            listingTypeId: lt,
+            samplePrice,
+            accessToken: token,
+          });
+        }
       }
 
       const wholesaleTiers = buildWholesaleTiers(pricesResponse);
@@ -399,6 +421,22 @@ export async function syncSingleItem(
       onConflict: "account_id,item_id",
     });
     if (itemErr) throw itemErr;
+
+    const { data: accRow } = await supabase.from("ml_accounts").select("site_id").eq("id", accountId).single();
+    const siteIdFallback = ((accRow?.site_id as string | null | undefined) ?? "MLB").trim() || "MLB";
+    const siteId = ((item.site_id as string | undefined) ?? siteIdFallback).trim() || siteIdFallback;
+    const samplePrice = Number(row.price) || 0;
+    if (row.category_id && row.listing_type_id && samplePrice > 0) {
+      await upsertCategoryFeeReferenceFromSample({
+        supabase,
+        siteId,
+        categoryId: row.category_id as string,
+        listingTypeId: row.listing_type_id as string,
+        samplePrice,
+        accessToken,
+      });
+    }
+
     const wholesaleTiers = buildWholesaleTiers(pricesResponse);
     await (supabase as any)
       .from("ml_items")

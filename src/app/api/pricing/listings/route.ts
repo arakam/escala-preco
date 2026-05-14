@@ -32,6 +32,8 @@ export interface PricingListingRow {
   calculated_fee?: number | null;
   calculated_shipping_cost?: number | null;
   calculated_at?: string | null;
+  /** % taxa ML (fee/preço) por categoria+tipo — iteração rápida de margem */
+  reference_fee_percent?: number | null;
 }
 
 export async function GET(req: NextRequest) {
