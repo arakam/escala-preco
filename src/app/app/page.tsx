@@ -66,7 +66,7 @@ interface InsightRow {
 
 function AppHomeContent() {
   const searchParams = useSearchParams();
-  const { status: onboarding, loading: onboardingLoading } = useOnboarding();
+  const { status: onboarding, loading: onboardingLoading, reload: reloadOnboarding } = useOnboarding();
   const [accounts, setAccounts] = useState<MLAccount[]>([]);
   const [accountId, setAccountId] = useState<string>("");
   const [summary, setSummary] = useState<DashboardSummaryPayload | null>(null);
@@ -101,6 +101,17 @@ function AppHomeContent() {
   useEffect(() => {
     loadAccounts();
   }, [loadAccounts]);
+
+  useEffect(() => {
+    const connected = searchParams.get("connected");
+    if (connected !== "1") return;
+    window.history.replaceState({}, "", "/app");
+    setLoading(true);
+    void loadAccounts().finally(() => {
+      setLoading(false);
+      reloadOnboarding();
+    });
+  }, [searchParams, loadAccounts, reloadOnboarding]);
 
   const persistAccount = useCallback((id: string) => {
     setAccountId(id);

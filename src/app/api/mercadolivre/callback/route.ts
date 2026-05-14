@@ -142,6 +142,9 @@ export async function GET(request: NextRequest) {
     .eq("ml_user_id", mlUserId)
     .maybeSingle();
 
+  /** Primeira vinculação ML deste usuário → Início (onboarding); reconexão da mesma conta ML → Configuração. */
+  const isReconnectingSameMlAccount = !!existing;
+
   let accountId: string;
   if (existing) {
     accountId = existing.id;
@@ -202,7 +205,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const res = NextResponse.redirect(`${appUrl}/app/configuracao?connected=1`, { status: 302 });
+  const successUrl = isReconnectingSameMlAccount
+    ? `${appUrl}/app/configuracao?connected=1`
+    : `${appUrl}/app?connected=1`;
+  const res = NextResponse.redirect(successUrl, { status: 302 });
   res.cookies.delete("ml_oauth_state");
   res.cookies.delete("ml_oauth_code_verifier");
   return res;
