@@ -817,6 +817,8 @@ function PrecosPageContent() {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const [cacheEmpty, setCacheEmpty] = useState(false);
+  /** Há linhas com `product_id` em toda a conta (API); evita aviso “vincule” na página atual quando o filtro é só não vinculados. */
+  const [accountHasLinkedProducts, setAccountHasLinkedProducts] = useState<boolean | null>(null);
   const [refreshingItemId, setRefreshingItemId] = useState<string | null>(null);
   /** Ordenação: "" = padrão; orders_* = por quantidade de vendas (pedidos pagos) nos últimos 30 dias */
   const [sortBy, setSortBy] = useState<"" | "orders_desc" | "orders_asc">("");
@@ -977,6 +979,10 @@ function PrecosPageContent() {
       setTotal(listingsData.total ?? 0);
       setLastUpdatedAt((listingsData as { last_updated_at?: string | null }).last_updated_at ?? null);
       setCacheEmpty((listingsData as { cache_empty?: boolean }).cache_empty ?? false);
+      const rawLinked = (listingsData as { account_has_linked_products?: boolean }).account_has_linked_products;
+      setAccountHasLinkedProducts(
+        typeof rawLinked === "boolean" ? rawLinked : items.some((i) => Boolean(i.product_id))
+      );
     } catch {
       // ignore
     } finally {
@@ -1081,6 +1087,32 @@ function PrecosPageContent() {
   useEffect(() => {
     loadListings();
   }, [loadListings]);
+
+  /** Após “Vincular SKUs” em Produtos, outra aba pode marcar o storage; ao voltar o foco, recarrega a lista. */
+  useEffect(() => {
+    const key = "escalapreco_pricing_listings_stale";
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        if (typeof sessionStorage === "undefined" || !sessionStorage.getItem(key)) return;
+        sessionStorage.removeItem(key);
+        void loadListings();
+      } catch {
+        // ignore
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [loadListings]);
+
+  /** Evita refetch duplicado ao abrir Preços na mesma janela (o efeito de `loadListings` já roda no mount). */
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem("escalapreco_pricing_listings_stale");
+    } catch {
+      // ignore
+    }
+  }, []);
 
   useEffect(() => {
     setPage(1);
@@ -2070,11 +2102,6 @@ function PrecosPageContent() {
     [listings]
   );
 
-  const hasLinkedItems = useMemo(
-    () => listings.some((l) => l.product_id),
-    [listings]
-  );
-
   const itemsWithoutListingType = useMemo(
     () => listings.filter((l) => !l.listing_type_id).length,
     [listings]
@@ -2451,6 +2478,8 @@ function PrecosPageContent() {
     );
   }
 
+  const listingsRefetching = loading && listings.length > 0;
+
   function renderPricingHeaderMenu(colIndex: number, opts?: { sortable?: boolean }) {
     if (headerMenuColumn !== colIndex) return null;
     return (
@@ -2548,23 +2577,34 @@ function PrecosPageContent() {
   const refRefreshing =
     !!refJobId && (refJob?.status === "queued" || refJob?.status === "running");
 
+  const loaderOpen = cacheRefreshing || calculating || refRefreshing || listingsRefetching;
+  const loaderMessages = refRefreshing
+    ? [
+        "Atualizando referências de preço…",
+        "Consultando sugestões no Mercado Livre…",
+        "Gravando referências para a tabela…",
+      ]
+    : listingsRefetching && !cacheRefreshing
+      ? [
+          "Atualizando a lista de preços…",
+          "Buscando vínculos MLB → produto e custos no cache…",
+          "Sincronizando com o que há no servidor…",
+        ]
+      : undefined;
+  const loaderPhase = cacheRefreshing ? "refresh-cache" : calculating ? "calculate" : "default";
+  const loaderFooter =
+    listingsRefetching && !cacheRefreshing && !refRefreshing
+      ? "Os dados da calculadora vêm do cache; após vincular em Produtos, esta atualização mostra os vínculos e custos mais recentes."
+      : undefined;
+
   return (
     <div className="adminty-precos-page space-y-5">
       <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
       <SmartLoaderOverlay
-        open={cacheRefreshing || calculating || refRefreshing}
-        messages={
-          refRefreshing
-            ? [
-                "Atualizando referências de preço…",
-                "Consultando sugestões no Mercado Livre…",
-                "Gravando referências para a tabela…",
-              ]
-            : undefined
-        }
-        phase={
-          cacheRefreshing ? "refresh-cache" : calculating ? "calculate" : "default"
-        }
+        open={loaderOpen}
+        messages={loaderMessages}
+        phase={loaderPhase}
+        footerHint={loaderFooter}
       />
 
       {campaignOpen && (
@@ -3077,7 +3117,10 @@ function PrecosPageContent() {
         </div>
       )}
 
-      {!hasLinkedItems && listings.length > 0 && (
+      {linkFilter === "all" &&
+        accountHasLinkedProducts === false &&
+        listings.length > 0 &&
+        !loading && (
         <div className="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-700">
           Nenhum anúncio vinculado a produtos. Para calcular o lucro, vincule seus
           anúncios aos produtos cadastrados na página{" "}

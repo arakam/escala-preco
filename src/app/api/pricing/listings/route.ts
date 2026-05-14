@@ -89,19 +89,33 @@ export async function GET(req: NextRequest) {
     else if (orderBy === "orders_asc") dataQuery = dataQuery.order("orders_30d", { ascending: true });
     else dataQuery = dataQuery.order("sort_title", { ascending: true });
 
-    const { data: cacheRows, error: cacheErr, count: totalCount } = await dataQuery.range(
-      offset,
-      offset + limit - 1
-    );
-
-    const { data: lastRow } = await serviceSupabase
+    const lastUpdatedPromise = serviceSupabase
       .from("pricing_cache")
       .select("cache_updated_at")
       .eq("account_id", account.id)
       .order("cache_updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    /** Conta global na conta (não só a página) — evita aviso enganoso de “vincule” quando o filtro é “só não vinculados”. */
+    const linkedGlobalCountPromise = serviceSupabase
+      .from("pricing_cache")
+      .select("id", { count: "exact", head: true })
+      .eq("account_id", account.id)
+      .not("product_id", "is", null);
+
+    const [
+      { data: cacheRows, error: cacheErr, count: totalCount },
+      { data: lastRow },
+      { count: linkedRowCount },
+    ] = await Promise.all([
+      dataQuery.range(offset, offset + limit - 1),
+      lastUpdatedPromise,
+      linkedGlobalCountPromise,
+    ]);
+
     const lastUpdatedAt = (lastRow?.cache_updated_at as string) ?? null;
+    const accountHasLinkedProducts = (linkedRowCount ?? 0) > 0;
 
     if (cacheErr) {
       console.error("[pricing/listings] cache error:", cacheErr);
@@ -117,6 +131,7 @@ export async function GET(req: NextRequest) {
           account_id: account.id,
           last_updated_at: null,
           cache_empty: true,
+          account_has_linked_products: false,
         },
         { status: 200 }
       );
@@ -137,6 +152,7 @@ export async function GET(req: NextRequest) {
         account_id: account.id,
         last_updated_at: lastUpdatedAt,
         cache_empty: true,
+        account_has_linked_products: accountHasLinkedProducts,
       });
     }
 
@@ -242,6 +258,7 @@ export async function GET(req: NextRequest) {
       account_id: account.id,
       last_updated_at: lastUpdatedAt,
       cache_empty: false,
+      account_has_linked_products: accountHasLinkedProducts,
     });
   } catch (e) {
     console.error("[Pricing listings] error:", e);

@@ -482,6 +482,14 @@ function ProdutosPageContent() {
           cache_refresh_ok: data.cache_refresh?.ok ?? true,
           cache_refresh_error: data.cache_refresh?.error ?? null,
         });
+        const totalLinked = Number(data.items_linked ?? 0) + Number(data.variations_linked ?? 0);
+        if (totalLinked > 0) {
+          try {
+            sessionStorage.setItem("escalapreco_pricing_listings_stale", "1");
+          } catch {
+            // ignore (modo privado, storage cheio, etc.)
+          }
+        }
         if (viewMode === "stats") {
           loadStats();
         }
