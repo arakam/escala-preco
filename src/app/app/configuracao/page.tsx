@@ -198,7 +198,7 @@ function ConfiguracaoContent() {
   async function handleDevResetData() {
     if (
       !window.confirm(
-        "Ambiente de desenvolvimento: isso apaga todos os produtos cadastrados, desconecta o Mercado Livre e remove anúncios sincronizados deste usuário. Continuar?"
+        "Ambiente de desenvolvimento: isso apaga produtos, custos e parâmetros fiscais, desconecta o Mercado Livre e remove do banco anúncios, jobs, caches (preços e promoções), webhooks e demais dados da conta neste usuário. Continuar?"
       )
     ) {
       return;
@@ -622,8 +622,12 @@ function ConfiguracaoContent() {
               </h2>
               <p className="mb-3 text-sm text-rose-800 dark:text-rose-200/90">
                 Visível apenas com <code className="rounded bg-rose-100 px-1 text-xs dark:bg-rose-900/60">npm run dev</code>.
-                Remove a integração Mercado Livre (tokens e contas), todos os anúncios e jobs sincronizados no banco,
-                rascunhos de atacado, cache de preços e o cadastro de produtos deste usuário.
+                Remove contas e tokens ML, anúncios e variações, jobs e logs de sync, referências e preços planejados,
+                cache da tela de preços (<code className="rounded bg-rose-100 px-1 text-xs dark:bg-rose-900/60">pricing_cache</code>),
+                cache de promoções, notificações de webhook e alertas de promoção, rascunhos de atacado, produtos,
+                custos operacionais e parâmetros fiscais deste usuário. A tabela global de taxa por categoria (
+                <code className="rounded bg-rose-100 px-1 text-xs dark:bg-rose-900/60">ml_category_fee_reference</code>) não é
+                apagada.
               </p>
               <button
                 type="button"
