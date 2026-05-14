@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 const PAGE_SIZE = 20;
 
 /**
- * GET /api/mercadolivre/{accountId}/items?search=&page=
+ * GET /api/mercadolivre/{accountId}/items?search=&status=&listing_type_id=&mlbu=&mlbu_code=&page=&limit=
  * Lista itens sincronizados do banco para a conta (do usuário logado).
  */
 export async function GET(
@@ -40,6 +40,7 @@ export async function GET(
   const mlbuOnly = searchParams.get("mlbu") === "1" || searchParams.get("mlbu") === "true";
   const familyId = searchParams.get("family_id")?.trim() ?? "";
   const mlbuCode = searchParams.get("mlbu_code")?.trim() ?? "";
+  const listingTypeId = searchParams.get("listing_type_id")?.trim() ?? "";
   const limitParam = searchParams.get("limit");
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
   const pageSize = familyId
@@ -50,7 +51,7 @@ export async function GET(
 
   let query = supabase
     .from("ml_items")
-    .select("item_id, title, status, price, has_variations, thumbnail, permalink, updated_at, wholesale_prices_json, user_product_id, family_id, family_name", { count: "exact" })
+    .select("item_id, title, status, price, has_variations, thumbnail, permalink, updated_at, wholesale_prices_json, user_product_id, family_id, family_name, listing_type_id, category_id", { count: "exact" })
     .eq("account_id", accountId)
     .order("updated_at", { ascending: false })
     .range(from, to);
@@ -69,6 +70,9 @@ export async function GET(
   }
   if (mlbuCode) {
     query = query.ilike("user_product_id", `%${mlbuCode}%`);
+  }
+  if (listingTypeId) {
+    query = query.eq("listing_type_id", listingTypeId);
   }
 
   const { data: items, error, count } = await query;

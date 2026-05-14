@@ -10,11 +10,33 @@ import { useOnboarding } from "@/contexts/onboarding-context";
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
 const FROZEN_COLUMNS_STORAGE_KEY = "escalapreco_anuncios_frozen_columns";
 
+/** Rótulos comuns do ML (Brasil); IDs desconhecidos são exibidos como estão. */
+const LISTING_TYPE_LABELS: Record<string, string> = {
+  gold_special: "Clássico",
+  gold_pro: "Premium",
+  gold_premium: "Premium",
+  gold: "Ouro",
+  silver: "Prata",
+  bronze: "Bronze",
+  free: "Gratuito",
+};
+
+function formatListingTypeLabel(id: string | null | undefined): string {
+  if (!id) return "";
+  return LISTING_TYPE_LABELS[id] ?? id;
+}
+
+/** Opções do filtro (ordenadas pelo rótulo em português). */
+const LISTING_TYPE_FILTER_IDS = Object.keys(LISTING_TYPE_LABELS).sort((a, b) =>
+  formatListingTypeLabel(a).localeCompare(formatListingTypeLabel(b), "pt-BR")
+);
+
 const COLUMN_ORDER: ColumnKey[] = [
   "image",
   "item_id",
   "title",
-  "model",
+  "listing_type",
+  "category",
   "status",
   "price",
   "wholesale_amount_0",
@@ -36,7 +58,8 @@ const COLUMN_WIDTHS: Record<ColumnKey, number> = {
   image: 64,
   item_id: 120,
   title: 280,
-  model: 190,
+  listing_type: 120,
+  category: 140,
   status: 100,
   price: 100,
   wholesale_amount_0: 96,
@@ -74,9 +97,8 @@ interface ItemRow {
   permalink: string | null;
   updated_at: string;
   wholesale_prices_json?: WholesaleTier[] | null;
-  user_product_id?: string | null;
-  family_id?: string | null;
-  family_name?: string | null;
+  listing_type_id?: string | null;
+  category_id?: string | null;
 }
 
 interface JobState {
@@ -88,7 +110,14 @@ interface JobState {
   errors: number;
 }
 
-type SortField = "item_id" | "title" | "status" | "price" | "updated_at";
+type SortField =
+  | "item_id"
+  | "title"
+  | "listing_type_id"
+  | "category_id"
+  | "status"
+  | "price"
+  | "updated_at";
 type ColumnKey = string;
 
 function AnunciosHelpContent() {
@@ -100,9 +129,8 @@ function AnunciosHelpContent() {
           <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Objetivo</h3>
           <p>
             Esta tela mostra os <strong>anúncios do Mercado Livre</strong> já sincronizados no seu banco de dados para a
-            conta selecionada. Aqui você consulta dados, copia MLB, acompanha famílias (User Product), vê preços e
-            faixas de atacado vindas do cache e dispara novas importações quando precisar atualizar tudo ou só um
-            anúncio.
+            conta selecionada. Aqui você consulta dados, copia MLB, vê tipo de publicação e categoria, preços e faixas
+            de atacado vindas do cache e dispara novas importações quando precisar atualizar tudo ou só um anúncio.
           </p>
         </section>
         <section>
@@ -129,11 +157,12 @@ function AnunciosHelpContent() {
           <ul className="list-inside list-disc space-y-1">
             <li>
               A linha <strong>Filtros:</strong> resume o que está aplicado em chips. <strong>Limpar</strong> zera busca,
-              status, MLBU e o filtro “só com MLBU”.
+              status, tipo de anúncio, MLBU e o filtro “só com MLBU”.
             </li>
             <li>
               O ícone de <strong>funil</strong> abre o modal de filtros: texto livre (título, MLB ou nome de família),
-              status do anúncio, código MLBU e opção de listar apenas anúncios que possuem MLBU cadastrado no ML.
+              status do anúncio, <strong>tipo de anúncio</strong> (publicação no ML), código MLBU e opção de listar
+              apenas anúncios que possuem MLBU cadastrado no ML.
             </li>
             <li>
               O menu <strong>⋮ Opções</strong> permite <strong>exportar a página atual</strong> (CSV com as linhas
@@ -154,8 +183,13 @@ function AnunciosHelpContent() {
               <strong>MLB</strong> — clique na célula para copiar o código do anúncio.
             </li>
             <li>
-              <strong>Modelo / Família</strong> — mostra MLBU (User Product), nome de família quando existir e o link{" "}
-              <strong>Ver família</strong>, que abre um modal com os itens daquela família no ML.
+              <strong>Tipo de anúncio</strong> — tipo de publicação no Mercado Livre (ex.: Clássico, Premium), conforme
+              o <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">listing_type_id</code> sincronizado.
+            </li>
+            <li>
+              <strong>Categoria</strong> — identificador da categoria no ML (
+              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">category_id</code>
+              ), por exemplo MLB1051.
             </li>
             <li>
               Colunas de <strong>atacado</strong> (preço R$ e quantidade mínima por faixa) são exibidas como leitura a
@@ -193,12 +227,10 @@ function AnunciosPageContent() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [listingTypeFilter, setListingTypeFilter] = useState("");
   const [mlbuOnly, setMlbuOnly] = useState(false);
   const [mlbuCodeInput, setMlbuCodeInput] = useState("");
-  const [familyModal, setFamilyModal] = useState<{ familyId: string; familyName: string } | null>(null);
   const [anunciosTab, setAnunciosTab] = useState<"lista" | "como-funciona">("lista");
-  const [familyItems, setFamilyItems] = useState<ItemRow[]>([]);
-  const [familyItemsLoading, setFamilyItemsLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [job, setJob] = useState<JobState | null>(null);
   const [singleMlb, setSingleMlb] = useState("");
@@ -269,6 +301,7 @@ function AnunciosPageContent() {
     const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
     if (search) params.set("search", search);
     if (statusFilter) params.set("status", statusFilter);
+    if (listingTypeFilter) params.set("listing_type_id", listingTypeFilter);
     if (mlbuOnly) params.set("mlbu", "1");
     if (mlbuCodeInput.trim()) params.set("mlbu_code", mlbuCodeInput.trim());
     const res = await fetch(`/api/mercadolivre/${account.id}/items?${params}`);
@@ -278,24 +311,11 @@ function AnunciosPageContent() {
       setTotal(data.total ?? 0);
     }
     setItemsLoading(false);
-  }, [account, page, pageSize, search, statusFilter, mlbuOnly, mlbuCodeInput]);
+  }, [account, page, pageSize, search, statusFilter, listingTypeFilter, mlbuOnly, mlbuCodeInput]);
 
   useEffect(() => {
     if (account) loadItems();
   }, [account, loadItems]);
-
-  useEffect(() => {
-    if (!familyModal || !account?.id) {
-      setFamilyItems([]);
-      return;
-    }
-    setFamilyItemsLoading(true);
-    fetch(`/api/mercadolivre/${account.id}/items?family_id=${encodeURIComponent(familyModal.familyId)}&limit=100`)
-      .then((res) => (res.ok ? res.json() : { items: [] }))
-      .then((data) => setFamilyItems(data.items ?? []))
-      .catch(() => setFamilyItems([]))
-      .finally(() => setFamilyItemsLoading(false));
-  }, [familyModal, account?.id]);
 
   const pollJob = useCallback(async () => {
     if (!account || !job?.id) return;
@@ -398,29 +418,33 @@ function AnunciosPageContent() {
         }`
       );
     }
+    if (listingTypeFilter) {
+      filters.push(`Tipo: ${formatListingTypeLabel(listingTypeFilter)}`);
+    }
     if (mlbuOnly) filters.push("Somente MLBU");
     if (mlbuCodeInput.trim()) filters.push(`Cód. MLBU: ${mlbuCodeInput.trim()}`);
     return filters;
-  }, [mlbuCodeInput, mlbuOnly, search, statusFilter]);
+  }, [listingTypeFilter, mlbuCodeInput, mlbuOnly, search, statusFilter]);
 
   function clearFilters() {
     setSearch("");
     setSearchInput("");
     setStatusFilter("");
+    setListingTypeFilter("");
     setMlbuOnly(false);
     setMlbuCodeInput("");
     setPage(1);
   }
 
   function exportCurrentRows() {
-    const headers = ["MLB", "Título", "Status", "Preço", "MLBU", "Família", "Atualizado"];
+    const headers = ["MLB", "Título", "Tipo de anúncio", "Categoria", "Status", "Preço", "Atualizado"];
     const rows = sortedItems.map((item) => [
       item.item_id,
       item.title ?? "",
+      formatListingTypeLabel(item.listing_type_id) || (item.listing_type_id ?? ""),
+      item.category_id ?? "",
       item.status ?? "",
       item.price != null ? Number(item.price).toFixed(2) : "",
-      item.user_product_id ?? "",
-      item.family_name ?? "",
       item.updated_at ? new Date(item.updated_at).toLocaleString() : "",
     ]);
     const csv = [headers, ...rows]
@@ -843,7 +867,8 @@ function AnunciosPageContent() {
                   {renderColumnHeader("image", "Imagem")}
                   {renderColumnHeader("item_id", "MLB", "item_id")}
                   {renderColumnHeader("title", "Título", "title")}
-                  {renderColumnHeader("model", "Modelo / Família")}
+                  {renderColumnHeader("listing_type", "Tipo de anúncio", "listing_type_id")}
+                  {renderColumnHeader("category", "Categoria", "category_id")}
                   {renderColumnHeader("status", "Status", "status")}
                   {renderColumnHeader("price", "Preço R$", "price", "whitespace-nowrap")}
                   {renderColumnHeader("wholesale_amount_0", "R$ Atac. 1", undefined, "whitespace-nowrap")}
@@ -905,42 +930,29 @@ function AnunciosPageContent() {
                         {item.title ?? "—"}
                       </span>
                     </td>
-                    <td className={frozenCellClass("model", "p-2")} style={frozenCellStyle("model")}>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {item.user_product_id && (
-                          <span
-                            className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 ring-1 ring-indigo-100"
-                            title="User Product (MLBU)"
-                          >
-                            MLBU
-                          </span>
-                        )}
-                        {item.user_product_id && (
-                          <span className="font-mono text-xs text-gray-600 dark:text-slate-300" title="Código MLBU">
-                            {item.user_product_id}
-                          </span>
-                        )}
-                        {item.family_name && (
-                          <span
-                            className="inline-flex max-w-[120px] items-center truncate rounded-full bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700 ring-1 ring-slate-100"
-                            title={`Família: ${item.family_name}`}
-                          >
-                            {item.family_name}
-                          </span>
-                        )}
-                        {item.family_id && (
-                          <button
-                            type="button"
-                            onClick={() => setFamilyModal({ familyId: item.family_id!, familyName: item.family_name ?? "" })}
-                            className="text-[11px] font-medium text-[#018589] underline-offset-2 hover:underline"
-                          >
-                            Ver família
-                          </button>
-                        )}
-                        {!item.user_product_id && !item.family_name && (
-                          <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
-                        )}
-                      </div>
+                    <td
+                      className={frozenCellClass("listing_type", "p-2")}
+                      style={frozenCellStyle("listing_type")}
+                      title={item.listing_type_id ?? ""}
+                    >
+                      {item.listing_type_id ? (
+                        <span className="text-xs font-medium text-slate-800 dark:text-slate-100">
+                          {formatListingTypeLabel(item.listing_type_id)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
+                      )}
+                    </td>
+                    <td
+                      className={frozenCellClass("category", "max-w-[140px] p-2")}
+                      style={frozenCellStyle("category")}
+                      title={item.category_id ?? ""}
+                    >
+                      {item.category_id ? (
+                        <span className="font-mono text-xs text-slate-700 dark:text-slate-200">{item.category_id}</span>
+                      ) : (
+                        <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
+                      )}
                     </td>
                     <td className={frozenCellClass("status", "p-2")} style={frozenCellStyle("status")}>
                       <span
@@ -1079,7 +1091,10 @@ function AnunciosPageContent() {
                   </label>
                   <select
                     value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
+                    onChange={(e) => {
+                      setStatusFilter(e.target.value);
+                      setPage(1);
+                    }}
                     className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
                   >
                     <option value="">Todos os status</option>
@@ -1090,6 +1105,28 @@ function AnunciosPageContent() {
                 </div>
 
                 <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Tipo de anúncio
+                  </label>
+                  <select
+                    value={listingTypeFilter}
+                    onChange={(e) => {
+                      setListingTypeFilter(e.target.value);
+                      setPage(1);
+                    }}
+                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  >
+                    <option value="">Todos os tipos</option>
+                    {LISTING_TYPE_FILTER_IDS.map((id) => (
+                      <option key={id} value={id}>
+                        {formatListingTypeLabel(id)}
+                        {LISTING_TYPE_LABELS[id] ? ` (${id})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2">
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Cód. MLBU
                   </label>
@@ -1133,63 +1170,6 @@ function AnunciosPageContent() {
         </div>
       )}
 
-      {/* Modal: itens da família */}
-      {familyModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setFamilyModal(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Itens da família"
-        >
-          <div
-            className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded border border-slate-200 bg-white shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              className="flex items-center justify-between border-b border-slate-200 px-4 py-3"
-              style={{ borderLeft: "4px solid #01a9ac" }}
-            >
-              <h2 className="text-base font-semibold text-slate-800">
-                Família: {familyModal.familyName || familyModal.familyId}
-              </h2>
-              <button type="button" onClick={() => setFamilyModal(null)} className="btn btn-secondary btn-sm">
-                Fechar
-              </button>
-            </div>
-            <div className="max-h-[60vh] overflow-auto p-4">
-              {familyItemsLoading ? (
-                <p className="text-gray-500">Carregando itens da família…</p>
-              ) : familyItems.length === 0 ? (
-                <p className="text-gray-500">Nenhum item encontrado nesta família.</p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
-                      <th className="p-2 font-medium">MLB</th>
-                      <th className="p-2 font-medium">Título</th>
-                      <th className="p-2 font-medium">Preço R$</th>
-                      <th className="p-2 font-medium">Cód. MLBU</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {familyItems.map((it) => (
-                      <tr key={it.item_id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="font-mono p-2">{it.item_id}</td>
-                        <td className="max-w-[280px] truncate p-2" title={it.title ?? ""}>
-                          {it.title ?? "—"}
-                        </td>
-                        <td className="p-2">{it.price != null ? Number(it.price).toFixed(2) : "—"}</td>
-                        <td className="font-mono text-gray-600 p-2">{it.user_product_id ?? "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
