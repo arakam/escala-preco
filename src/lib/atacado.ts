@@ -131,6 +131,31 @@ export function parseTiers(raw: unknown): Tier[] | null {
 }
 
 /**
+ * Converte `ml_items.wholesale_prices_json` da sync (GET /items/{id}/prices):
+ * `{ min_purchase_unit, amount }[]` → tiers do editor / `wholesale_drafts`.
+ * Retorna null se não houver faixas válidas segundo as regras do app (ex.: quantidade mínima menor que 2).
+ */
+export function tiersFromMlWholesaleJson(raw: unknown): Tier[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const mapped: Tier[] = [];
+  for (const el of raw) {
+    if (el == null || typeof el !== "object") continue;
+    const o = el as Record<string, unknown>;
+    const minRaw = o.min_purchase_unit ?? o.min_qty;
+    const priceRaw = o.amount ?? o.price;
+    const min_qty = typeof minRaw === "number" ? minRaw : Number(minRaw);
+    const price = typeof priceRaw === "number" ? priceRaw : Number(priceRaw);
+    if (!Number.isFinite(min_qty) || !Number.isFinite(price)) continue;
+    if (!Number.isInteger(min_qty)) continue;
+    mapped.push({ min_qty, price });
+  }
+  const normalized = normalizeTiers(mapped);
+  if (normalized.length === 0) return null;
+  const errs = validateTiers(normalized);
+  return errs.length === 0 ? normalized : null;
+}
+
+/**
  * Normaliza tiers: remove vazios, ordena, garante formato.
  */
 export function normalizeTiers(tiers: Tier[]): Tier[] {

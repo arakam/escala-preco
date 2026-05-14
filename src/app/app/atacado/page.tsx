@@ -298,6 +298,15 @@ function AtacadoHelpContent() {
           </p>
         </section>
         <section>
+          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Carregar a partir dos anúncios</h3>
+          <p>
+            O botão <strong>Carregar dos Anúncios</strong> copia para rascunho as faixas já salvas na última{" "}
+            <strong>sincronização</strong> (o mesmo dado que você vê na tela Anúncios), apenas nas linhas que ainda não
+            têm rascunho com faixas. Para forçar a substituição de rascunhos existentes, use{" "}
+            <strong>Substituir pelos Anúncios</strong> (com confirmação).
+          </p>
+        </section>
+        <section>
           <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Filtros e opções</h3>
           <ul className="list-inside list-disc space-y-1">
             <li>
@@ -309,10 +318,10 @@ function AtacadoHelpContent() {
               opção de ocultar variações).
             </li>
             <li>
-              <strong>Importar CSV</strong> e <strong>Exportar CSV</strong> ficam lado a lado na barra superior — o
-              arquivo exportado segue o mesmo modelo para editar e voltar a importar. O menu <strong>⋮</strong>{" "}
-              continua a oferecer <strong>Exportar CSV</strong> e <strong>Atualizar tabela</strong> (recarrega do
-              servidor com os mesmos filtros).
+              <strong>Carregar dos Anúncios</strong>, <strong>Importar CSV</strong> e <strong>Exportar CSV</strong>{" "}
+              ficam na barra superior — o arquivo exportado segue o mesmo modelo para editar e voltar a importar. O
+              menu <strong>⋮</strong> continua a oferecer <strong>Exportar CSV</strong> e{" "}
+              <strong>Atualizar tabela</strong> (recarrega do servidor com os mesmos filtros).
             </li>
           </ul>
         </section>
@@ -394,6 +403,7 @@ function AtacadoPageContent() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importConfirming, setImportConfirming] = useState(false);
+  const [seedFromMlLoading, setSeedFromMlLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [applyJobId, setApplyJobId] = useState<string | null>(null);
@@ -1418,6 +1428,62 @@ function AtacadoPageContent() {
     fileInputRef.current?.click();
   };
 
+  const seedDraftsFromMlCache = async (mode: "fill_empty" | "overwrite") => {
+    if (!accountId || seedFromMlLoading) return;
+    const confirmed =
+      mode === "fill_empty"
+        ? window.confirm(
+            "Copiar para rascunho as faixas de atacado já salvas nos seus anúncios (última sincronização)?\n\n" +
+              "Só serão preenchidas linhas que ainda não têm rascunho com faixas. Sincronize na tela Anúncios antes se precisar de dados mais recentes."
+          )
+        : window.confirm(
+            "Substituir os rascunhos pelas faixas que estão hoje nos anúncios (última sincronização)?\n\n" +
+              "Todas as linhas com atacado sincronizado terão o rascunho sobrescrito, inclusive as que você já editou."
+          );
+    if (!confirmed) return;
+    setSeedFromMlLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/atacado/seed-from-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId, mode }),
+      });
+      let data: {
+        error?: string;
+        message?: string;
+        seeded_count?: number;
+        skipped_has_draft?: number;
+        skipped_no_ml_data?: number;
+        skipped_invalid?: number;
+      } = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = {};
+      }
+      if (!res.ok) {
+        setMessage({ type: "error", text: data.error ?? "Erro ao carregar a partir dos anúncios." });
+        return;
+      }
+      if (data.message) {
+        setMessage({ type: "success", text: data.message });
+      } else {
+        const bits: string[] = [`${data.seeded_count ?? 0} linha(s) de rascunho criada(s) ou atualizada(s).`];
+        if ((data.skipped_has_draft ?? 0) > 0) bits.push(`${data.skipped_has_draft} ignorada(s) (já tinham rascunho).`);
+        if ((data.skipped_no_ml_data ?? 0) > 0)
+          bits.push(`${data.skipped_no_ml_data} anúncio(s) sem atacado na última sincronização.`);
+        if ((data.skipped_invalid ?? 0) > 0) bits.push(`${data.skipped_invalid} ignorada(s) na validação.`);
+        setMessage({ type: "success", text: bits.join(" ") });
+      }
+      await loadRows(true);
+    } catch {
+      setMessage({ type: "error", text: "Erro de conexão." });
+    } finally {
+      setSeedFromMlLoading(false);
+    }
+  };
+
   const onImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1734,15 +1800,33 @@ function AtacadoPageContent() {
             <button
               type="button"
               onClick={openImportCsv}
-              disabled={importLoading}
+              disabled={importLoading || seedFromMlLoading}
               className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
             >
               {importLoading ? "Processando…" : "Importar CSV"}
             </button>
             <button
               type="button"
+              onClick={() => seedDraftsFromMlCache("fill_empty")}
+              disabled={importLoading || seedFromMlLoading || !accountId}
+              className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+              title="Usa os dados da última sincronização da tela Anúncios. Só preenche linhas sem rascunho com faixas."
+            >
+              {seedFromMlLoading ? "Carregando…" : "Carregar dos Anúncios"}
+            </button>
+            <button
+              type="button"
+              onClick={() => seedDraftsFromMlCache("overwrite")}
+              disabled={importLoading || seedFromMlLoading || !accountId}
+              className="btn btn-secondary btn-sm border-amber-300 text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-700 dark:text-amber-100 dark:hover:bg-amber-950/40"
+              title="Sobrescreve os rascunhos pelas faixas já salvas nos anúncios (última sincronização)."
+            >
+              {seedFromMlLoading ? "Aguarde…" : "Substituir pelos Anúncios"}
+            </button>
+            <button
+              type="button"
               onClick={exportCsv}
-              disabled={importLoading || !accountId}
+              disabled={importLoading || seedFromMlLoading || !accountId}
               className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
             >
               Exportar CSV
