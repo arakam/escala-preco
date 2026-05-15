@@ -983,8 +983,8 @@ function PrecosPageContent() {
 
     try {
       const [listingsRes, plannedRes] = await Promise.all([
-        fetch(`/api/pricing/listings?${params}`),
-        fetch("/api/pricing/planned-prices"),
+        fetch(`/api/pricing/listings?${params}`, { cache: "no-store" }),
+        fetch("/api/pricing/planned-prices", { cache: "no-store" }),
       ]);
 
       const listingsData = listingsRes.ok ? await listingsRes.json() : { listings: [], total: 0 };
@@ -1156,10 +1156,27 @@ function PrecosPageContent() {
   }, [loadReputation]);
 
   useEffect(() => {
-    loadListings();
+    let cancelled = false;
+    const key = "escalapreco_pricing_listings_stale";
+    void (async () => {
+      await loadListings();
+      if (cancelled) return;
+      /** Após “Vincular SKUs”, Produtos grava esta flag: o 1º GET pode ainda refletir cache antigo; o 2º alinha vínculos. */
+      try {
+        if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(key)) {
+          sessionStorage.removeItem(key);
+          await loadListings();
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [loadListings]);
 
-  /** Após “Vincular SKUs” em Produtos, outra aba pode marcar o storage; ao voltar o foco, recarrega a lista. */
+  /** Após “Vincular SKUs” em Produtos, outra aba pode marcar o storage; ao voltar o foco à aba, recarrega a lista. */
   useEffect(() => {
     const key = "escalapreco_pricing_listings_stale";
     const onVis = () => {
@@ -1175,15 +1192,6 @@ function PrecosPageContent() {
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [loadListings]);
-
-  /** Evita refetch duplicado ao abrir Preços na mesma janela (o efeito de `loadListings` já roda no mount). */
-  useEffect(() => {
-    try {
-      sessionStorage.removeItem("escalapreco_pricing_listings_stale");
-    } catch {
-      // ignore
-    }
-  }, []);
 
   useEffect(() => {
     setPage(1);
