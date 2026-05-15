@@ -527,11 +527,12 @@ function MarginInput({
   );
 }
 
-/** Resolve preço da promoção para margem líquida alvo: iteração com % salvo + refinamento listing_prices no servidor. */
+/** Resolve preço da promoção para margem líquida alvo: iteração com % salvo; refinamento listing_prices no servidor salvo se `skipRefine`. */
 async function solveMarginViaApi(
   listing: ListingWithPricing,
   targetPct: number,
-  isMercadoLider: boolean
+  isMercadoLider: boolean,
+  options?: { skipRefine?: boolean }
 ): Promise<{ price: number; calculated: CalculatedPricing } | null> {
   if (
     !listing.listing_type_id ||
@@ -564,6 +565,7 @@ async function solveMarginViaApi(
         planned_price: listing.new_price,
         seed_price: listing.new_price,
         reference_fee_percent: listing.reference_fee_percent ?? null,
+        skip_refine: options?.skipRefine === true,
       }),
     });
     const data = (await res.json().catch(() => null)) as {
@@ -615,6 +617,32 @@ function findPricingResultForListing(
 function listingSelectionKey(l: Pick<PricingListing, "id" | "item_id" | "variation_id">): string {
   if (l.id) return l.id;
   return `${l.item_id}:${l.variation_id ?? "n"}`;
+}
+
+/** Paralelismo limitado para /api/pricing/solve-margin (cada chamada pode ir ao ML no refinamento). */
+const BULK_SOLVE_MARGIN_CONCURRENCY = 4;
+
+async function runConcurrentPool<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+  onEachComplete?: () => void
+): Promise<void> {
+  if (items.length === 0) return;
+  const n = Math.max(1, Math.min(concurrency, items.length));
+  let nextIndex = 0;
+  const runner = async () => {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      try {
+        await worker(items[i]);
+      } finally {
+        onEachComplete?.();
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: n }, () => runner()));
 }
 
 /**
@@ -868,6 +896,10 @@ function PrecosPageContent() {
   const [bulkMarginModalOpen, setBulkMarginModalOpen] = useState(false);
   const [bulkMarginPercentInput, setBulkMarginPercentInput] = useState("");
   const bulkMarginBusyRef = useRef(false);
+  /** Progresso no overlay durante "Definir margem líquida" em massa (ex.: "Processando 12 de 40 anúncios"). */
+  const [bulkMarginLoaderProgress, setBulkMarginLoaderProgress] = useState<{ done: number; total: number } | null>(
+    null
+  );
   const bulkRestoreOriginalBusyRef = useRef(false);
   const campaignMessageDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1882,23 +1914,32 @@ function PrecosPageContent() {
     );
 
     setCalculating(true);
+    setBulkMarginLoaderProgress({ done: 0, total: eligible.length });
     try {
       const updates = new Map<string, { price: number; calculated: CalculatedPricing }>();
-      let fail = 0;
-      for (const l of eligible) {
-        const key = listingSelectionKey(l);
-        try {
-          const solved = await solveMarginViaApi(l, targetPct, isMercadoLider);
-          if (!solved) {
-            fail++;
-            continue;
+      await runConcurrentPool(
+        eligible,
+        BULK_SOLVE_MARGIN_CONCURRENCY,
+        async (l) => {
+          const key = listingSelectionKey(l);
+          try {
+            const solved = await solveMarginViaApi(l, targetPct, isMercadoLider, { skipRefine: true });
+            if (!solved) return;
+            const p = Math.round(solved.price * 100) / 100;
+            updates.set(key, { price: p, calculated: solved.calculated });
+          } catch {
+            /* sem solução ou erro de rede — não entra em updates */
           }
-          const p = Math.round(solved.price * 100) / 100;
-          updates.set(key, { price: p, calculated: solved.calculated });
-        } catch {
-          fail++;
+        },
+        () => {
+          setBulkMarginLoaderProgress((prev) => {
+            const total = prev?.total ?? eligible.length;
+            const done = (prev?.done ?? 0) + 1;
+            return { done, total };
+          });
         }
-      }
+      );
+      const fail = eligible.length - updates.size;
 
       setListings((prev) =>
         prev.map((item) => {
@@ -1918,6 +1959,9 @@ function PrecosPageContent() {
         })
       );
 
+      setBulkMarginLoaderProgress(null);
+      setCalculating(false);
+
       const toPersistMargin = eligible
         .filter((l) => updates.has(listingSelectionKey(l)))
         .map((l) => {
@@ -1934,7 +1978,7 @@ function PrecosPageContent() {
       const skippedNoData = selected.length - eligible.length;
       const ok = updates.size;
       const pctLabel = targetPct.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
-      let msg = `Margem líquida alvo ${pctLabel}% aplicada em ${ok} anúncio(s).`;
+      let msg = `Margem líquida alvo ${pctLabel}% aplicada em ${ok} anúncio(s) (modo rápido: taxa de referência + frete em tabela).`;
       if (fail > 0) msg += ` ${fail} sem solução ou com erro.`;
       if (skippedNoData > 0) {
         msg += ` ${skippedNoData} ignorado(s) (sem custo ou tipo de anúncio).`;
@@ -1959,6 +2003,7 @@ function PrecosPageContent() {
       );
     } finally {
       bulkMarginBusyRef.current = false;
+      setBulkMarginLoaderProgress(null);
       setCalculating(false);
     }
   }, [bulkMarginPercentInput, listings, selectedIds, isMercadoLider, persistPlannedPrices]);
@@ -2578,24 +2623,35 @@ function PrecosPageContent() {
     !!refJobId && (refJob?.status === "queued" || refJob?.status === "running");
 
   const loaderOpen = cacheRefreshing || calculating || refRefreshing || listingsRefetching;
-  const loaderMessages = refRefreshing
-    ? [
-        "Atualizando referências de preço…",
-        "Consultando sugestões no Mercado Livre…",
-        "Gravando referências para a tabela…",
-      ]
-    : listingsRefetching && !cacheRefreshing
+
+  const bulkMarginLoaderActive = bulkMarginLoaderProgress != null && calculating;
+
+  const loaderMessages = bulkMarginLoaderActive
+    ? [`Processando ${bulkMarginLoaderProgress.done} de ${bulkMarginLoaderProgress.total} anúncios`]
+    : refRefreshing
       ? [
-          "Atualizando a lista de preços…",
-          "Buscando vínculos MLB → produto e custos no cache…",
-          "Sincronizando com o que há no servidor…",
+          "Atualizando referências de preço…",
+          "Consultando sugestões no Mercado Livre…",
+          "Gravando referências para a tabela…",
         ]
-      : undefined;
+      : listingsRefetching && !cacheRefreshing
+        ? [
+            "Atualizando a lista de preços…",
+            "Buscando vínculos MLB → produto e custos no cache…",
+            "Sincronizando com o que há no servidor…",
+          ]
+        : undefined;
   const loaderPhase = cacheRefreshing ? "refresh-cache" : calculating ? "calculate" : "default";
+  const loaderDeterminatePercent =
+    bulkMarginLoaderActive && bulkMarginLoaderProgress.total > 0
+      ? (bulkMarginLoaderProgress.done / bulkMarginLoaderProgress.total) * 100
+      : null;
   const loaderFooter =
-    listingsRefetching && !cacheRefreshing && !refRefreshing
-      ? "Os dados da calculadora vêm do cache; após vincular em Produtos, esta atualização mostra os vínculos e custos mais recentes."
-      : undefined;
+    bulkMarginLoaderActive
+      ? ""
+      : listingsRefetching && !cacheRefreshing && !refRefreshing
+        ? "Os dados da calculadora vêm do cache; após vincular em Produtos, esta atualização mostra os vínculos e custos mais recentes."
+        : undefined;
 
   return (
     <div className="adminty-precos-page space-y-5">
@@ -2604,6 +2660,7 @@ function PrecosPageContent() {
         open={loaderOpen}
         messages={loaderMessages}
         phase={loaderPhase}
+        determinatePercent={loaderDeterminatePercent}
         footerHint={loaderFooter}
       />
 
@@ -2735,7 +2792,7 @@ function PrecosPageContent() {
           <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
             <h2 className="mb-2 text-lg font-semibold">Margem nos selecionados</h2>
             <p className="mb-4 text-xs text-fg-muted">
-              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço de promoção) em todos os anúncios marcados que tenham custo e tipo de listagem. Pode levar um tempo — há vários cálculos por item.
+              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço de promoção) em todos os anúncios marcados que tenham custo e tipo de listagem. Usa modo rápido: taxa de referência + frete em tabela, sem refinamento listing_prices por item (mais rápido; confira depois com &quot;Calcular&quot; se quiser alinhar ao ML). Vários itens em paralelo (até {BULK_SOLVE_MARGIN_CONCURRENCY} por vez).
             </p>
             <form
               className="space-y-4"
@@ -2959,7 +3016,7 @@ function PrecosPageContent() {
                   }}
                   disabled={calculating}
                   className="btn-dropdown-item"
-                  title="Informe a margem líquida desejada (%); a promoção de cada selecionado será recalculada"
+                  title="Margem em massa em modo rápido (sem refinamento ML por item). Informe o % desejado."
                 >
                   Definir margem líquida (%)…
                 </button>

@@ -5,7 +5,11 @@ import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { createServiceClient } from "@/lib/supabase/service";
 import { fetchSaleFee } from "@/lib/mercadolivre/fees";
 import { calculateFullPricing } from "@/lib/pricing/full-net";
-import type { MlShippingCostRangeRow } from "@/lib/pricing/ml-shipping-cost-table";
+import {
+  getEffectiveWeightKg,
+  getShippingCostFromRanges,
+  type MlShippingCostRangeRow,
+} from "@/lib/pricing/ml-shipping-cost-table";
 import { upsertCategoryFeeReferenceFromSample } from "@/lib/pricing/ml-category-fee-reference";
 import {
   refinePriceWithTrueMlFees,
@@ -36,6 +40,11 @@ interface SolveMarginBody {
   seed_price?: number | null;
   /** Opcional: % já conhecido no cliente (coluna reference_fee_percent do cache) */
   reference_fee_percent?: number | null;
+  /**
+   * Quando true (ex.: margem em massa), não chama refinePriceWithTrueMlFees — usa taxa % referência + frete tabela.
+   * Mais rápido; margem/taxa podem divergir um pouco do listing_prices real.
+   */
+  skip_refine?: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -194,29 +203,47 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Não foi possível estimar preço pela margem (modelo linear)." }, { status: 422 });
   }
 
-  const ctx = {
-    siteId,
-    accessToken,
-    isMercadoLider,
-    supabaseAdmin: adminSupabase,
-  };
-
   const roundedLinear = Math.round(linear * 100) / 100;
-  const refined = await refinePriceWithTrueMlFees(listing, targetPct, roundedLinear, ctx);
+  const skipRefine = body.skip_refine === true;
 
-  if (!refined) {
-    return NextResponse.json({ error: "Falha ao refinar preço com listing_prices." }, { status: 502 });
+  let finalPrice: number;
+  let feeOut: number;
+  let shippingOut: number;
+
+  if (skipRefine) {
+    const wKg = getEffectiveWeightKg(
+      listing.weight_kg,
+      listing.height_cm,
+      listing.width_cm,
+      listing.length_cm
+    );
+    shippingOut = getShippingCostFromRanges(ranges, isMercadoLider, wKg, roundedLinear);
+    feeOut = Math.round(((roundedLinear * feePercent) / 100) * 100) / 100;
+    finalPrice = roundedLinear;
+  } else {
+    const ctx = {
+      siteId,
+      accessToken,
+      isMercadoLider,
+      supabaseAdmin: adminSupabase,
+    };
+    const refined = await refinePriceWithTrueMlFees(listing, targetPct, roundedLinear, ctx);
+    if (!refined) {
+      return NextResponse.json({ error: "Falha ao refinar preço com listing_prices." }, { status: 502 });
+    }
+    finalPrice = Math.round(refined.price * 100) / 100;
+    feeOut = refined.fee;
+    shippingOut = refined.shipping_cost;
   }
 
-  const finalPrice = Math.round(refined.price * 100) / 100;
   const calculated = calculateFullPricing(
     listing.tax_percent,
     listing.extra_fee_percent,
     listing.fixed_expenses,
     {
       price: finalPrice,
-      fee: refined.fee,
-      shipping_cost: refined.shipping_cost,
+      fee: feeOut,
+      shipping_cost: shippingOut,
     }
   );
 
@@ -228,8 +255,8 @@ export async function POST(req: NextRequest) {
     .from("pricing_cache")
     .update({
       calculated_price: finalPrice,
-      calculated_fee: refined.fee,
-      calculated_shipping_cost: refined.shipping_cost,
+      calculated_fee: feeOut,
+      calculated_shipping_cost: shippingOut,
       calculated_at: now,
     })
     .eq("account_id", account.id)
@@ -240,5 +267,6 @@ export async function POST(req: NextRequest) {
     price: finalPrice,
     calculated,
     reference_fee_percent_used: feePercent,
+    skip_refine: skipRefine,
   });
 }

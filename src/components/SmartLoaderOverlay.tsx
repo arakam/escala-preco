@@ -150,7 +150,9 @@ export function SmartLoaderOverlay({
             style={{ width: `${Math.min(100, progress)}%` }}
           />
         </div>
-        <p className="mt-4 text-center text-xs text-fg-muted">{footerHint}</p>
+        {footerHint ? (
+          <p className="mt-4 text-center text-xs text-fg-muted">{footerHint}</p>
+        ) : null}
         {children != null && (
           <div className="mt-4 w-full min-w-0 border-t border-stroke pt-4 dark:border-slate-600">
             {children}
