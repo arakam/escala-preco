@@ -19,10 +19,16 @@ interface CalculateRequest {
     length_cm?: number | null;
     /** Subsídio ML na taxa (R$), ex. SMART: original_price × meli_percentage / 100 */
     meli_fee_subsidy?: number | null;
+    /** % taxa ML (fee/preço) do cache; usado com linear_fees */
+    reference_fee_percent?: number | null;
   }[];
   is_mercado_lider?: boolean;
   /** default true; false = só simula (ex.: tela Promoções) sem gravar calculated_* no pricing_cache */
   persist?: boolean;
+  /**
+   * Taxa linear (% referência × preço) + frete em tabela, sem listing_prices por item (ex.: desconto em massa).
+   */
+  linear_fees?: boolean;
 }
 
 interface CalculatedItem {
@@ -111,6 +117,7 @@ export async function POST(req: NextRequest) {
   const siteId = account.site_id || "MLB";
   const isMercadoLider = body.is_mercado_lider ?? false;
   const persist = body.persist !== false;
+  const linearFees = body.linear_fees === true;
 
   console.log("[Pricing calculate] is_mercado_lider:", isMercadoLider);
 
@@ -119,6 +126,7 @@ export async function POST(req: NextRequest) {
     accessToken,
     isMercadoLider,
     supabaseAdmin: adminSupabase,
+    useLinearFees: linearFees,
   });
 
   const results: CalculatedItem[] = feeResults.map((r) => {

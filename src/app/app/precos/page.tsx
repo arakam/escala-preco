@@ -594,6 +594,7 @@ type PricingCalculatePayloadItem = {
   height_cm?: number | null;
   width_cm?: number | null;
   length_cm?: number | null;
+  reference_fee_percent?: number | null;
 };
 
 type PricingCalculateResultRow = {
@@ -645,12 +646,35 @@ async function runConcurrentPool<T>(
   await Promise.all(Array.from({ length: n }, () => runner()));
 }
 
+/** Progresso em lote (desconto em massa): `flightEnd` = último índice do lote HTTP em curso (mensagem "X a Y"). */
+type BulkDiscountLoaderProgress = { done: number; total: number; flightEnd?: number };
+
+function bulkDiscountLoaderMessage(p: BulkDiscountLoaderProgress): string {
+  const { done, total, flightEnd } = p;
+  if (flightEnd != null && flightEnd > done && total > 0) {
+    return `Processando ${done + 1} a ${flightEnd} de ${total} anúncios`;
+  }
+  return `Processando ${done} de ${total} anúncios`;
+}
+
+function bulkDiscountLoaderDeterminatePercent(p: BulkDiscountLoaderProgress): number {
+  const { done, total, flightEnd } = p;
+  if (total <= 0) return 0;
+  if (flightEnd != null && flightEnd > done) {
+    const span = flightEnd - done;
+    return Math.min(100, ((done + span * 0.35) / total) * 100);
+  }
+  return Math.min(100, (done / total) * 100);
+}
+
 /**
  * Envia o cálculo em lotes de até 100 itens (limite da API), em sequência, e concatena resultados.
  */
 async function fetchPricingCalculateBatches(
   items: PricingCalculatePayloadItem[],
-  isMercadoLider: boolean
+  isMercadoLider: boolean,
+  onProgress?: (doneCount: number, totalCount: number, flightEnd?: number | null) => void,
+  options?: { linearFees?: boolean }
 ): Promise<{
   results: PricingCalculateResultRow[];
   errors: { item_id: string; variation_id: number | null; error: string }[];
@@ -661,9 +685,13 @@ async function fetchPricingCalculateBatches(
   if (!Number.isFinite(step) || step < 1) {
     throw new Error("PRICING_CALCULATE_CLIENT_BATCH_SIZE inválido");
   }
+  const totalCount = items.length;
+  let doneCount = 0;
   for (let i = 0; i < items.length; i += step) {
     const batch = items.slice(i, i + step);
     if (batch.length === 0) continue;
+    const flightEnd = Math.min(doneCount + batch.length, totalCount);
+    onProgress?.(doneCount, totalCount, flightEnd > doneCount ? flightEnd : null);
     try {
       const res = await fetch("/api/pricing/calculate", {
         method: "POST",
@@ -671,6 +699,7 @@ async function fetchPricingCalculateBatches(
         body: JSON.stringify({
           items: batch,
           is_mercado_lider: isMercadoLider,
+          linear_fees: options?.linearFees === true,
         }),
       });
       if (!res.ok) {
@@ -688,6 +717,8 @@ async function fetchPricingCalculateBatches(
             error: detail,
           });
         }
+        doneCount += batch.length;
+        onProgress?.(doneCount, totalCount, null);
         continue;
       }
       const data = (await res.json()) as {
@@ -705,6 +736,8 @@ async function fetchPricingCalculateBatches(
         });
       }
     }
+    doneCount += batch.length;
+    onProgress?.(doneCount, totalCount, null);
   }
   return { results, errors };
 }
@@ -898,6 +931,10 @@ function PrecosPageContent() {
   const bulkMarginBusyRef = useRef(false);
   /** Progresso no overlay durante "Definir margem líquida" em massa (ex.: "Processando 12 de 40 anúncios"). */
   const [bulkMarginLoaderProgress, setBulkMarginLoaderProgress] = useState<{ done: number; total: number } | null>(
+    null
+  );
+  /** Progresso no overlay durante desconto em massa (recalcular via /api/pricing/calculate em lotes). */
+  const [bulkDiscountLoaderProgress, setBulkDiscountLoaderProgress] = useState<BulkDiscountLoaderProgress | null>(
     null
   );
   const bulkRestoreOriginalBusyRef = useRef(false);
@@ -1682,6 +1719,8 @@ function PrecosPageContent() {
       priceByKey.set(listingSelectionKey(l), promotionPriceForDiscountPercent(l.current_price, targetDiscountPct));
     }
 
+    setBulkDiscountModalOpen(false);
+
     bulkDiscountBusyRef.current = true;
     setListings((prev) =>
       prev.map((item) => {
@@ -1692,6 +1731,11 @@ function PrecosPageContent() {
       })
     );
 
+    setBulkDiscountLoaderProgress({
+      done: 0,
+      total: eligible.length,
+      flightEnd: Math.min(MAX_PRICING_CALCULATE_BATCH, eligible.length),
+    });
     setCalculating(true);
     try {
       const itemsToCalculate = eligible.map((item) => ({
@@ -1704,9 +1748,20 @@ function PrecosPageContent() {
         height_cm: item.height_cm,
         width_cm: item.width_cm,
         length_cm: item.length_cm,
+        reference_fee_percent: item.reference_fee_percent ?? null,
       }));
 
-      const { results, errors } = await fetchPricingCalculateBatches(itemsToCalculate, isMercadoLider);
+      const { results, errors } = await fetchPricingCalculateBatches(
+        itemsToCalculate,
+        isMercadoLider,
+        (done, total, flightEnd) =>
+          setBulkDiscountLoaderProgress({
+            done,
+            total,
+            flightEnd: flightEnd == null || flightEnd <= done ? undefined : flightEnd,
+          }),
+        { linearFees: true }
+      );
 
       setListings((prev) =>
         prev.map((listing) => {
@@ -1727,6 +1782,10 @@ function PrecosPageContent() {
         })
       );
 
+      setBulkDiscountLoaderProgress(null);
+      setCalculating(false);
+      bulkDiscountBusyRef.current = false;
+
       const toPersist = eligible.map((l) => ({
         item_id: l.item_id,
         variation_id: l.variation_id,
@@ -1737,7 +1796,7 @@ function PrecosPageContent() {
 
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
-      let msg = `Promoção ajustada para desconto de ${targetDiscountPct}% em ${eligible.length} anúncio(s).`;
+      let msg = `Promoção ajustada para desconto de ${targetDiscountPct}% em ${eligible.length} anúncio(s) (taxa por referência, sem listing_prices por item).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); ajuste manual ou use Calcular Todos.`;
       if (pres.ok) msg += " Alterações salvas automaticamente.";
@@ -1754,15 +1813,13 @@ function PrecosPageContent() {
       return false;
     } finally {
       bulkDiscountBusyRef.current = false;
+      setBulkDiscountLoaderProgress(null);
       setCalculating(false);
     }
   }, [bulkDiscountPercentInput, listings, selectedIds, isMercadoLider, persistPlannedPrices]);
 
   const handleBulkDiscountConfirm = useCallback(async () => {
-    const ok = await handleBulkApplyDiscountPercent();
-    if (ok) {
-      setBulkDiscountModalOpen(false);
-    }
+    await handleBulkApplyDiscountPercent();
   }, [handleBulkApplyDiscountPercent]);
 
   /** Promoção = preço do anúncio no ML (coluna Preço), com recálculo em lote. */
@@ -1818,9 +1875,15 @@ function PrecosPageContent() {
         height_cm: item.height_cm,
         width_cm: item.width_cm,
         length_cm: item.length_cm,
+        reference_fee_percent: item.reference_fee_percent ?? null,
       }));
 
-      const { results, errors } = await fetchPricingCalculateBatches(itemsToCalculate, isMercadoLider);
+      const { results, errors } = await fetchPricingCalculateBatches(
+        itemsToCalculate,
+        isMercadoLider,
+        undefined,
+        { linearFees: true }
+      );
 
       setListings((prev) =>
         prev.map((listing) => {
@@ -1841,6 +1904,9 @@ function PrecosPageContent() {
         })
       );
 
+      setCalculating(false);
+      bulkRestoreOriginalBusyRef.current = false;
+
       const toPersistRestore = eligible.map((l) => ({
         item_id: l.item_id,
         variation_id: l.variation_id,
@@ -1851,7 +1917,7 @@ function PrecosPageContent() {
 
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
-      let msg = `Promoção restaurada para o preço do ML em ${eligible.length} anúncio(s).`;
+      let msg = `Promoção restaurada para o preço do ML em ${eligible.length} anúncio(s) (taxa por referência).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem preço ou dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); use Calcular Todos se precisar.`;
       if (presRestore.ok) msg += " Alterações salvas automaticamente.";
@@ -2625,10 +2691,14 @@ function PrecosPageContent() {
   const loaderOpen = cacheRefreshing || calculating || refRefreshing || listingsRefetching;
 
   const bulkMarginLoaderActive = bulkMarginLoaderProgress != null && calculating;
+  const bulkDiscountLoaderActive = bulkDiscountLoaderProgress != null && calculating;
+  const bulkProgressLoaderActive = bulkMarginLoaderActive || bulkDiscountLoaderActive;
 
   const loaderMessages = bulkMarginLoaderActive
     ? [`Processando ${bulkMarginLoaderProgress.done} de ${bulkMarginLoaderProgress.total} anúncios`]
-    : refRefreshing
+    : bulkDiscountLoaderActive
+      ? [bulkDiscountLoaderMessage(bulkDiscountLoaderProgress)]
+      : refRefreshing
       ? [
           "Atualizando referências de preço…",
           "Consultando sugestões no Mercado Livre…",
@@ -2642,12 +2712,18 @@ function PrecosPageContent() {
           ]
         : undefined;
   const loaderPhase = cacheRefreshing ? "refresh-cache" : calculating ? "calculate" : "default";
-  const loaderDeterminatePercent =
-    bulkMarginLoaderActive && bulkMarginLoaderProgress.total > 0
-      ? (bulkMarginLoaderProgress.done / bulkMarginLoaderProgress.total) * 100
-      : null;
+  const loaderDeterminatePercent = (() => {
+    if (bulkDiscountLoaderActive && bulkDiscountLoaderProgress != null) {
+      const p = bulkDiscountLoaderProgress;
+      if (!calculating || p.total <= 0) return null;
+      return bulkDiscountLoaderDeterminatePercent(p);
+    }
+    const p = bulkMarginLoaderActive ? bulkMarginLoaderProgress : null;
+    if (p == null || !calculating || p.total <= 0) return null;
+    return (p.done / p.total) * 100;
+  })();
   const loaderFooter =
-    bulkMarginLoaderActive
+    bulkProgressLoaderActive
       ? ""
       : listingsRefetching && !cacheRefreshing && !refRefreshing
         ? "Os dados da calculadora vêm do cache; após vincular em Produtos, esta atualização mostra os vínculos e custos mais recentes."
@@ -2740,7 +2816,7 @@ function PrecosPageContent() {
           <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
             <h2 className="mb-2 text-lg font-semibold">Desconto em massa (selecionados)</h2>
             <p className="mb-4 text-xs text-fg-muted">
-              Defina o desconto de promoção para os itens selecionados. Mínimo {ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}% (regra ML) e máximo {ML_MAX_CAMPAIGN_DISCOUNT_PERCENT}% para modalidades configuráveis pelo seller (LIGHTNING, DOD, SELLER_CAMPAIGN, DEAL e PRICE_DISCOUNT).
+              Defina o desconto de promoção para os itens selecionados. Mínimo {ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}% (regra ML) e máximo {ML_MAX_CAMPAIGN_DISCOUNT_PERCENT}% para modalidades configuráveis pelo seller (LIGHTNING, DOD, SELLER_CAMPAIGN, DEAL e PRICE_DISCOUNT). Ao aplicar, o modal fecha e a taxa é estimada pela referência do cache (sem listing_prices por item); use &quot;Calcular Todos&quot; se quiser alinhar ao ML.
             </p>
             <form
               className="space-y-4"
