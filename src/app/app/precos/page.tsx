@@ -646,10 +646,10 @@ async function runConcurrentPool<T>(
   await Promise.all(Array.from({ length: n }, () => runner()));
 }
 
-/** Progresso em lote (desconto em massa): `flightEnd` = último índice do lote HTTP em curso (mensagem "X a Y"). */
-type BulkDiscountLoaderProgress = { done: number; total: number; flightEnd?: number };
+/** Progresso em lote (desconto/restaurar ML): `flightEnd` = último índice do lote HTTP em curso. */
+type BulkBatchLoaderProgress = { done: number; total: number; flightEnd?: number };
 
-function bulkDiscountLoaderMessage(p: BulkDiscountLoaderProgress): string {
+function bulkBatchLoaderMessage(p: BulkBatchLoaderProgress): string {
   const { done, total, flightEnd } = p;
   if (flightEnd != null && flightEnd > done && total > 0) {
     return `Processando ${done + 1} a ${flightEnd} de ${total} anúncios`;
@@ -657,7 +657,7 @@ function bulkDiscountLoaderMessage(p: BulkDiscountLoaderProgress): string {
   return `Processando ${done} de ${total} anúncios`;
 }
 
-function bulkDiscountLoaderDeterminatePercent(p: BulkDiscountLoaderProgress): number {
+function bulkBatchLoaderDeterminatePercent(p: BulkBatchLoaderProgress): number {
   const { done, total, flightEnd } = p;
   if (total <= 0) return 0;
   if (flightEnd != null && flightEnd > done) {
@@ -934,9 +934,11 @@ function PrecosPageContent() {
     null
   );
   /** Progresso no overlay durante desconto em massa (recalcular via /api/pricing/calculate em lotes). */
-  const [bulkDiscountLoaderProgress, setBulkDiscountLoaderProgress] = useState<BulkDiscountLoaderProgress | null>(
+  const [bulkDiscountLoaderProgress, setBulkDiscountLoaderProgress] = useState<BulkBatchLoaderProgress | null>(
     null
   );
+  /** Progresso no overlay ao restaurar promoção = preço ML em massa. */
+  const [bulkRestoreLoaderProgress, setBulkRestoreLoaderProgress] = useState<BulkBatchLoaderProgress | null>(null);
   const bulkRestoreOriginalBusyRef = useRef(false);
   const campaignMessageDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1863,6 +1865,11 @@ function PrecosPageContent() {
       })
     );
 
+    setBulkRestoreLoaderProgress({
+      done: 0,
+      total: eligible.length,
+      flightEnd: Math.min(MAX_PRICING_CALCULATE_BATCH, eligible.length),
+    });
     setCalculating(true);
     try {
       const itemsToCalculate = eligible.map((item) => ({
@@ -1881,7 +1888,12 @@ function PrecosPageContent() {
       const { results, errors } = await fetchPricingCalculateBatches(
         itemsToCalculate,
         isMercadoLider,
-        undefined,
+        (done, total, flightEnd) =>
+          setBulkRestoreLoaderProgress({
+            done,
+            total,
+            flightEnd: flightEnd == null || flightEnd <= done ? undefined : flightEnd,
+          }),
         { linearFees: true }
       );
 
@@ -1904,6 +1916,7 @@ function PrecosPageContent() {
         })
       );
 
+      setBulkRestoreLoaderProgress(null);
       setCalculating(false);
       bulkRestoreOriginalBusyRef.current = false;
 
@@ -1917,7 +1930,7 @@ function PrecosPageContent() {
 
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
-      let msg = `Promoção restaurada para o preço do ML em ${eligible.length} anúncio(s) (taxa por referência).`;
+      let msg = `Promoção restaurada para o preço do ML em ${eligible.length} anúncio(s) (taxa por referência, sem listing_prices por item).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem preço ou dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); use Calcular Todos se precisar.`;
       if (presRestore.ok) msg += " Alterações salvas automaticamente.";
@@ -1932,6 +1945,7 @@ function PrecosPageContent() {
       setTimeout(() => setSaveMessage(null), 6000);
     } finally {
       bulkRestoreOriginalBusyRef.current = false;
+      setBulkRestoreLoaderProgress(null);
       setCalculating(false);
     }
   }, [listings, selectedIds, isMercadoLider, persistPlannedPrices]);
@@ -2692,31 +2706,40 @@ function PrecosPageContent() {
 
   const bulkMarginLoaderActive = bulkMarginLoaderProgress != null && calculating;
   const bulkDiscountLoaderActive = bulkDiscountLoaderProgress != null && calculating;
-  const bulkProgressLoaderActive = bulkMarginLoaderActive || bulkDiscountLoaderActive;
+  const bulkRestoreLoaderActive = bulkRestoreLoaderProgress != null && calculating;
+  const bulkProgressLoaderActive =
+    bulkMarginLoaderActive || bulkDiscountLoaderActive || bulkRestoreLoaderActive;
 
   const loaderMessages = bulkMarginLoaderActive
     ? [`Processando ${bulkMarginLoaderProgress.done} de ${bulkMarginLoaderProgress.total} anúncios`]
     : bulkDiscountLoaderActive
-      ? [bulkDiscountLoaderMessage(bulkDiscountLoaderProgress)]
-      : refRefreshing
-      ? [
-          "Atualizando referências de preço…",
-          "Consultando sugestões no Mercado Livre…",
-          "Gravando referências para a tabela…",
-        ]
-      : listingsRefetching && !cacheRefreshing
-        ? [
-            "Atualizando a lista de preços…",
-            "Buscando vínculos MLB → produto e custos no cache…",
-            "Sincronizando com o que há no servidor…",
-          ]
-        : undefined;
+      ? [bulkBatchLoaderMessage(bulkDiscountLoaderProgress)]
+      : bulkRestoreLoaderActive
+        ? [bulkBatchLoaderMessage(bulkRestoreLoaderProgress)]
+        : refRefreshing
+          ? [
+              "Atualizando referências de preço…",
+              "Consultando sugestões no Mercado Livre…",
+              "Gravando referências para a tabela…",
+            ]
+          : listingsRefetching && !cacheRefreshing
+            ? [
+                "Atualizando a lista de preços…",
+                "Buscando vínculos MLB → produto e custos no cache…",
+                "Sincronizando com o que há no servidor…",
+              ]
+            : undefined;
   const loaderPhase = cacheRefreshing ? "refresh-cache" : calculating ? "calculate" : "default";
   const loaderDeterminatePercent = (() => {
     if (bulkDiscountLoaderActive && bulkDiscountLoaderProgress != null) {
       const p = bulkDiscountLoaderProgress;
       if (!calculating || p.total <= 0) return null;
-      return bulkDiscountLoaderDeterminatePercent(p);
+      return bulkBatchLoaderDeterminatePercent(p);
+    }
+    if (bulkRestoreLoaderActive && bulkRestoreLoaderProgress != null) {
+      const p = bulkRestoreLoaderProgress;
+      if (!calculating || p.total <= 0) return null;
+      return bulkBatchLoaderDeterminatePercent(p);
     }
     const p = bulkMarginLoaderActive ? bulkMarginLoaderProgress : null;
     if (p == null || !calculating || p.total <= 0) return null;
