@@ -136,15 +136,26 @@ export function solvePriceWithLinearSaleFeePercent(
   return Number.isFinite(best) && best > 0 ? best : null;
 }
 
-/** Tolerância (p.p.) para aceitar sem mais chamadas ML — chute linear + 1 listing_prices costuma bastar. */
 const REFINE_GOOD_ENOUGH_PP = 0.08;
-/** Tolerância final na busca binária estreita. */
-const REFINE_BISECT_PP = 0.045;
-const MAX_BISECT_STEPS = 12;
+const MAX_STABILIZE_PASSES = 3;
+
+function listingToFeeInput(listing: SolveMarginListingInput, price: number): PricingFeeInputItem {
+  return {
+    item_id: listing.item_id,
+    variation_id: listing.variation_id,
+    listing_type_id: listing.listing_type_id,
+    category_id: listing.category_id,
+    weight_kg: listing.weight_kg,
+    height_cm: listing.height_cm,
+    width_cm: listing.width_cm,
+    length_cm: listing.length_cm,
+    price,
+  };
+}
 
 /**
- * Ajusta o preço com taxa real (listing_prices) + frete tabela.
- * O chute `seedPrice` já vem da fase linear (próximo do correto): intervalo estreito + poucas iterações.
+ * Ajusta preço com taxa real (listing_prices) + frete por faixa.
+ * No máximo 3 passadas: ML no preço → re-solve local com % observado → repete se frete/faixa mudou.
  */
 export async function refinePriceWithTrueMlFees(
   listing: SolveMarginListingInput,
@@ -155,12 +166,37 @@ export async function refinePriceWithTrueMlFees(
     accessToken: string;
     isMercadoLider: boolean;
     supabaseAdmin: SupabaseClient;
-  }
+  },
+  shippingRanges?: MlShippingCostRangeRow[]
 ): Promise<{ price: number; fee: number; shipping_cost: number } | null> {
   if (!Number.isFinite(seedPrice) || seedPrice <= 0) return null;
 
-  const marginFromRow = (row: { price: number; fee: number; shipping_cost: number }) =>
-    achievedNetMarginPercent(
+  let ranges = shippingRanges;
+  if (!ranges) {
+    const { data } = await ctx.supabaseAdmin
+      .from("ml_shipping_cost_ranges")
+      .select("*")
+      .order("weight_min_kg", { ascending: true });
+    ranges = (data ?? []) as MlShippingCostRangeRow[];
+  }
+
+  const wKg = getEffectiveWeightKg(
+    listing.weight_kg,
+    listing.height_cm,
+    listing.width_cm,
+    listing.length_cm
+  );
+
+  let price = Math.round(seedPrice * 100) / 100;
+  let last: { price: number; fee: number; shipping_cost: number } | null = null;
+
+  for (let pass = 0; pass < MAX_STABILIZE_PASSES; pass++) {
+    const { results } = await computeItemsFees([listingToFeeInput(listing, price)], ctx);
+    const row = results[0];
+    if (!row) return last;
+
+    last = { price: row.price, fee: row.fee, shipping_cost: row.shipping_cost };
+    const margin = achievedNetMarginPercent(
       listing.cost_price,
       row.price,
       row.fee,
@@ -169,87 +205,38 @@ export async function refinePriceWithTrueMlFees(
       listing.extra_fee_percent,
       listing.fixed_expenses
     );
-
-  const runOne = async (price: number) => {
-    const p = Math.round(price * 100) / 100;
-    const item: PricingFeeInputItem = {
-      item_id: listing.item_id,
-      variation_id: listing.variation_id,
-      listing_type_id: listing.listing_type_id,
-      category_id: listing.category_id,
-      weight_kg: listing.weight_kg,
-      height_cm: listing.height_cm,
-      width_cm: listing.width_cm,
-      length_cm: listing.length_cm,
-      price: p,
-    };
-    const { results } = await computeItemsFees([item], ctx);
-    return results[0] ?? null;
-  };
-
-  const seed = Math.round(seedPrice * 100) / 100;
-  const first = await runOne(seed);
-  if (!first) return null;
-
-  let m0 = marginFromRow(first);
-  if (Math.abs(m0 - targetPct) <= REFINE_GOOD_ENOUGH_PP) {
-    return { price: first.price, fee: first.fee, shipping_cost: first.shipping_cost };
-  }
-
-  /** Ampliar janela em torno do seed até [mLo, mHi] englobar o alvo (poucas tentativas, 2 chamadas ML por tentativa). */
-  let span = 0.025;
-  const maxSpan = 0.42;
-
-  for (let widen = 0; widen < 9 && span <= maxSpan + 1e-9; widen++) {
-    const loP = Math.max(0.01, seed * (1 - span));
-    const hiP = Math.min(5_000_000, Math.max(seed * (1 + span), loP + 0.02));
-    const rLo = await runOne(loP);
-    const rHi = await runOne(hiP);
-    if (!rLo || !rHi) return { price: first.price, fee: first.fee, shipping_cost: first.shipping_cost };
-
-    const mLo = marginFromRow(rLo);
-    const mHi = marginFromRow(rHi);
-    const mn = Math.min(mLo, mHi);
-    const mx = Math.max(mLo, mHi);
-
-    if (targetPct < mn - 1e-6 || targetPct > mx + 1e-6) {
-      span = Math.min(maxSpan, span * 1.65);
-      continue;
+    if (Math.abs(margin - targetPct) <= REFINE_GOOD_ENOUGH_PP) {
+      return last;
     }
 
-    const increasing = mLo < mHi;
-    let lowP = loP;
-    let highP = hiP;
-    let best = Math.abs(mLo - targetPct) <= Math.abs(mHi - targetPct) ? rLo : rHi;
-    let bestErr = Math.min(Math.abs(mLo - targetPct), Math.abs(mHi - targetPct));
-
-    for (let i = 0; i < MAX_BISECT_STEPS; i++) {
-      const mid = (lowP + highP) / 2;
-      const rm = await runOne(mid);
-      if (!rm) break;
-      const mm = marginFromRow(rm);
-      const err = Math.abs(mm - targetPct);
-      if (err < bestErr) {
-        bestErr = err;
-        best = rm;
-      }
-      if (err < REFINE_BISECT_PP) {
-        return { price: rm.price, fee: rm.fee, shipping_cost: rm.shipping_cost };
-      }
-
-      if (increasing) {
-        if (mm < targetPct) lowP = mid;
-        else highP = mid;
-      } else {
-        if (mm < targetPct) highP = mid;
-        else lowP = mid;
-      }
-
-      if (highP - lowP < 0.015) break;
+    if (pass >= MAX_STABILIZE_PASSES - 1) {
+      return last;
     }
 
-    return { price: best.price, fee: best.fee, shipping_cost: best.shipping_cost };
+    const effectiveFeePct = row.price > 0 ? (row.fee / row.price) * 100 : 0;
+    const next = solvePriceWithLinearSaleFeePercent(
+      listing,
+      targetPct,
+      effectiveFeePct,
+      ctx.isMercadoLider,
+      ranges,
+      { planned_price: row.price }
+    );
+
+    if (next == null || !Number.isFinite(next) || next <= 0) {
+      return last;
+    }
+
+    const roundedNext = Math.round(next * 100) / 100;
+    const nextShipping = getShippingCostFromRanges(ranges, ctx.isMercadoLider, wKg, roundedNext);
+    const shippingUnchanged = Math.abs(nextShipping - row.shipping_cost) < 0.01;
+    const priceUnchanged = Math.abs(roundedNext - price) < 0.02;
+
+    price = roundedNext;
+    if (shippingUnchanged && priceUnchanged) {
+      return last;
+    }
   }
 
-  return { price: first.price, fee: first.fee, shipping_cost: first.shipping_cost };
+  return last;
 }

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { fetchSaleFee } from "@/lib/mercadolivre/fees";
+import { fetchSaleFeesParallel } from "@/lib/mercadolivre/fees";
+import { loadPricingRulesSnapshot, type PricingRulesSnapshot } from "@/lib/pricing/pricing-rules-cache";
 import {
   getEffectiveWeightKg,
   getShippingCostFromRanges,
@@ -32,8 +33,66 @@ export type PricingFeeResultRow = {
 
 export { getEffectiveWeightKg } from "@/lib/pricing/ml-shipping-cost-table";
 
+function applyMeliSubsidy(feeBase: number, subsidyRaw: number | null | undefined): number {
+  let fee = feeBase;
+  if (subsidyRaw != null && Number.isFinite(Number(subsidyRaw)) && Number(subsidyRaw) > 0) {
+    const subsidy = Math.round(Number(subsidyRaw) * 100) / 100;
+    fee = Math.max(0, Math.round((fee - subsidy) * 100) / 100);
+  }
+  return fee;
+}
+
+function resolveReferenceFeePercent(
+  item: PricingFeeInputItem,
+  refByCatType: Map<string, number>
+): number | null {
+  const fromItem = item.reference_fee_percent != null ? Number(item.reference_fee_percent) : NaN;
+  if (Number.isFinite(fromItem) && fromItem >= 0) return fromItem;
+  const fromMap = refByCatType.get(`${item.category_id}:${item.listing_type_id}`);
+  if (fromMap != null && Number.isFinite(fromMap) && fromMap >= 0) return fromMap;
+  return null;
+}
+
+function computeLinearFeeRow(
+  item: PricingFeeInputItem,
+  price: number,
+  variationId: number | null,
+  effectiveWeightKg: number | null,
+  ranges: MlShippingCostRangeRow[],
+  isMercadoLider: boolean,
+  refByCatType: Map<string, number>
+): { row: PricingFeeResultRow | null; error?: string } {
+  const feePct = resolveReferenceFeePercent(item, refByCatType);
+  if (feePct == null) {
+    return {
+      row: null,
+      error: "Sem taxa de referência para categoria/tipo; sincronize os anúncios.",
+    };
+  }
+  const feeBase = Math.round(((price * feePct) / 100) * 100) / 100;
+  const fee = applyMeliSubsidy(feeBase, item.meli_fee_subsidy);
+  const shippingCost = getShippingCostFromRanges(ranges, isMercadoLider, effectiveWeightKg, price);
+  return {
+    row: {
+      item_id: item.item_id,
+      variation_id: variationId,
+      price,
+      fee,
+      shipping_cost: shippingCost,
+    },
+  };
+}
+
+type MlFeeWorkItem = {
+  item: PricingFeeInputItem;
+  price: number;
+  variationId: number | null;
+  effectiveWeightKg: number | null;
+};
+
 /**
  * Taxa de venda ML + frete (tabela Líder), na mesma lógica de POST /api/pricing/calculate.
+ * Regras carregadas uma vez; listing_prices em paralelo quando não linear.
  */
 export async function computeItemsFees(
   items: PricingFeeInputItem[],
@@ -44,40 +103,26 @@ export async function computeItemsFees(
     supabaseAdmin: SupabaseClient;
     /**
      * Taxa = preço × % referência + frete em tabela; sem chamadas listing_prices (ex.: desconto em massa).
-     * % vem de `reference_fee_percent` no item ou de `ml_category_fee_reference` (uma leitura por requisição).
      */
     useLinearFees?: boolean;
+    /** Snapshot pré-carregado (evita SELECT duplicado na mesma requisição). */
+    rules?: PricingRulesSnapshot;
   }
 ): Promise<{
   results: PricingFeeResultRow[];
   errors: { item_id: string; variation_id: number | null; error: string }[];
 }> {
-  const { data: shippingRanges, error: shippingError } = await ctx.supabaseAdmin
-    .from("ml_shipping_cost_ranges")
-    .select("*")
-    .order("weight_min_kg", { ascending: true });
+  const rules =
+    ctx.rules ??
+    (await loadPricingRulesSnapshot(ctx.supabaseAdmin, ctx.siteId, {
+      loadFeeReferences: ctx.useLinearFees !== false,
+    }));
 
-  if (shippingError) {
-    console.error("[computeItemsFees] shipping ranges:", shippingError);
-  }
-
-  const ranges = (shippingRanges ?? []) as MlShippingCostRangeRow[];
-
-  let refByCatType = new Map<string, number>();
-  if (ctx.useLinearFees) {
-    const { data: feeRefRows } = await ctx.supabaseAdmin
-      .from("ml_category_fee_reference")
-      .select("category_id, listing_type_id, fee_percent")
-      .eq("site_id", ctx.siteId);
-    for (const fr of feeRefRows ?? []) {
-      const k = `${String(fr.category_id).trim()}:${String(fr.listing_type_id).trim()}`;
-      const v = Number(fr.fee_percent);
-      if (Number.isFinite(v) && v >= 0) refByCatType.set(k, v);
-    }
-  }
+  const { shippingRanges: ranges, feePercentByCatType: refByCatType } = rules;
 
   const results: PricingFeeResultRow[] = [];
   const errors: { item_id: string; variation_id: number | null; error: string }[] = [];
+  const mlWork: MlFeeWorkItem[] = [];
 
   for (const item of items) {
     try {
@@ -113,63 +158,23 @@ export async function computeItemsFees(
       }
 
       if (ctx.useLinearFees) {
-        const fromItem =
-          item.reference_fee_percent != null ? Number(item.reference_fee_percent) : NaN;
-        const fromMap = refByCatType.get(`${item.category_id}:${item.listing_type_id}`);
-        let feePct = Number.isFinite(fromItem) && fromItem >= 0 ? fromItem : NaN;
-        if (!Number.isFinite(feePct) || feePct < 0) {
-          feePct = fromMap != null && Number.isFinite(fromMap) && fromMap >= 0 ? fromMap : NaN;
-        }
-        if (!Number.isFinite(feePct) || feePct < 0) {
-          errors.push({
-            item_id: item.item_id,
-            variation_id: variationId,
-            error: "Sem taxa de referência para categoria/tipo; sincronize os anúncios.",
-          });
-        }
-        const feeBase =
-          Number.isFinite(feePct) && feePct >= 0
-            ? Math.round(((price * feePct) / 100) * 100) / 100
-            : 0;
-        let fee = feeBase;
-        const subsidyRaw = item.meli_fee_subsidy;
-        if (subsidyRaw != null && Number.isFinite(Number(subsidyRaw)) && Number(subsidyRaw) > 0) {
-          const subsidy = Math.round(Number(subsidyRaw) * 100) / 100;
-          fee = Math.max(0, Math.round((fee - subsidy) * 100) / 100);
-        }
-        const shippingCost = getShippingCostFromRanges(ranges, ctx.isMercadoLider, effectiveWeightKg, price);
-        results.push({
-          item_id: item.item_id,
-          variation_id: variationId,
+        const { row, error } = computeLinearFeeRow(
+          item,
           price,
-          fee,
-          shipping_cost: shippingCost,
-        });
+          variationId,
+          effectiveWeightKg,
+          ranges,
+          ctx.isMercadoLider,
+          refByCatType
+        );
+        if (error) {
+          errors.push({ item_id: item.item_id, variation_id: variationId, error });
+        }
+        if (row) results.push(row);
         continue;
       }
 
-      const feeResult = await fetchSaleFee(
-        ctx.accessToken,
-        ctx.siteId,
-        item.listing_type_id,
-        price,
-        item.category_id
-      );
-      let fee = feeResult?.fee ?? 0;
-      const subsidyRaw = item.meli_fee_subsidy;
-      if (subsidyRaw != null && Number.isFinite(Number(subsidyRaw)) && Number(subsidyRaw) > 0) {
-        const subsidy = Math.round(Number(subsidyRaw) * 100) / 100;
-        fee = Math.max(0, Math.round((fee - subsidy) * 100) / 100);
-      }
-      const shippingCost = getShippingCostFromRanges(ranges, ctx.isMercadoLider, effectiveWeightKg, price);
-
-      results.push({
-        item_id: item.item_id,
-        variation_id: variationId,
-        price,
-        fee,
-        shipping_cost: shippingCost,
-      });
+      mlWork.push({ item, price, variationId, effectiveWeightKg });
     } catch (e) {
       console.error(`[computeItemsFees] ${item.item_id}:`, e);
       errors.push({
@@ -185,6 +190,54 @@ export async function computeItemsFees(
         fee: 0,
         shipping_cost: 0,
       });
+    }
+  }
+
+  if (mlWork.length > 0) {
+    const feeResponses = await fetchSaleFeesParallel(
+      ctx.accessToken,
+      ctx.siteId,
+      mlWork.map((w) => ({
+        listing_type_id: w.item.listing_type_id,
+        price: w.price,
+        category_id: w.item.category_id,
+      }))
+    );
+
+    for (let i = 0; i < mlWork.length; i++) {
+      const w = mlWork[i];
+      try {
+        const feeResult = feeResponses[i];
+        let fee = feeResult?.fee ?? 0;
+        fee = applyMeliSubsidy(fee, w.item.meli_fee_subsidy);
+        const shippingCost = getShippingCostFromRanges(
+          ranges,
+          ctx.isMercadoLider,
+          w.effectiveWeightKg,
+          w.price
+        );
+        results.push({
+          item_id: w.item.item_id,
+          variation_id: w.variationId,
+          price: w.price,
+          fee,
+          shipping_cost: shippingCost,
+        });
+      } catch (e) {
+        console.error(`[computeItemsFees] ML ${w.item.item_id}:`, e);
+        errors.push({
+          item_id: w.item.item_id,
+          variation_id: w.variationId,
+          error: "Erro ao calcular",
+        });
+        results.push({
+          item_id: w.item.item_id,
+          variation_id: w.variationId,
+          price: w.price,
+          fee: 0,
+          shipping_cost: 0,
+        });
+      }
     }
   }
 

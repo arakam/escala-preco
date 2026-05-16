@@ -5,6 +5,8 @@ import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { createServiceClient } from "@/lib/supabase/service";
 import { computeItemsFees } from "@/lib/pricing/compute-items-fees";
 import { PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST } from "@/lib/pricing/calculate-limits";
+import { loadPricingRulesSnapshot } from "@/lib/pricing/pricing-rules-cache";
+import { persistCalculatedPricingBatch } from "@/lib/pricing/persist-calculated-batch";
 
 interface CalculateRequest {
   items: {
@@ -119,7 +121,9 @@ export async function POST(req: NextRequest) {
   const persist = body.persist !== false;
   const linearFees = body.linear_fees === true;
 
-  console.log("[Pricing calculate] is_mercado_lider:", isMercadoLider);
+  const rules = await loadPricingRulesSnapshot(adminSupabase, siteId, {
+    loadFeeReferences: linearFees,
+  });
 
   const { results: feeResults, errors } = await computeItemsFees(body.items, {
     siteId,
@@ -127,6 +131,7 @@ export async function POST(req: NextRequest) {
     isMercadoLider,
     supabaseAdmin: adminSupabase,
     useLinearFees: linearFees,
+    rules,
   });
 
   const results: CalculatedItem[] = feeResults.map((r) => {
@@ -142,22 +147,8 @@ export async function POST(req: NextRequest) {
   });
 
   if (persist) {
-    const now = new Date().toISOString();
     const serviceSupabase = createServiceClient();
-    for (const item of results) {
-      const variationId = item.variation_id ?? -1;
-      await serviceSupabase
-        .from("pricing_cache")
-        .update({
-          calculated_price: item.price,
-          calculated_fee: item.fee,
-          calculated_shipping_cost: item.shipping_cost,
-          calculated_at: now,
-        })
-        .eq("account_id", account.id)
-        .eq("item_id", item.item_id)
-        .eq("variation_id", variationId);
-    }
+    await persistCalculatedPricingBatch(serviceSupabase, account.id, results);
   }
 
   return NextResponse.json({

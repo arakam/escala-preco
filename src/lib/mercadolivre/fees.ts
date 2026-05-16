@@ -3,7 +3,12 @@
  * Cache em memória por (site_id, listing_type_id, price) com TTL de 15 min.
  */
 
+import { runWithConcurrency } from "@/lib/mercadolivre/client";
+
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 min
+
+/** Paralelismo ao buscar listing_prices em lote (evita N chamadas sequenciais). */
+export const ML_FEE_FETCH_CONCURRENCY = 20;
 
 type CacheEntry = { fee: number; expiresAt: number };
 
@@ -38,9 +43,7 @@ export async function fetchSaleFee(
   }
 
   const url = `https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/listing_prices?price=${encodeURIComponent(price)}&listing_type_id=${encodeURIComponent(listingTypeId)}&category_id=${encodeURIComponent(categoryId)}`;
-  
-  console.log("[fees] Fetching:", url);
-  
+
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -52,9 +55,7 @@ export async function fetchSaleFee(
   }
 
   const data = await res.json();
-  
-  console.log("[fees] API response:", JSON.stringify(data).substring(0, 500));
-  
+
   let item: ListingPriceResult | undefined;
   
   if (Array.isArray(data)) {
@@ -95,4 +96,26 @@ export async function fetchSaleFee(
   const fee = item.sale_fee_amount;
   feeCache.set(key, { fee, expiresAt: Date.now() + CACHE_TTL_MS });
   return { fee, currency_id: item.currency_id ?? "BRL" };
+}
+
+export type SaleFeeRequest = {
+  listing_type_id: string;
+  price: number;
+  category_id: string;
+};
+
+/**
+ * Busca taxas ML em paralelo (mesma lógica/cache de fetchSaleFee).
+ * Retorna array na mesma ordem de `requests`.
+ */
+export async function fetchSaleFeesParallel(
+  accessToken: string,
+  siteId: string,
+  requests: SaleFeeRequest[],
+  concurrency = ML_FEE_FETCH_CONCURRENCY
+): Promise<({ fee: number; currency_id: string } | null)[]> {
+  if (requests.length === 0) return [];
+  return runWithConcurrency(requests, concurrency, (req) =>
+    fetchSaleFee(accessToken, siteId, req.listing_type_id, req.price, req.category_id)
+  );
 }

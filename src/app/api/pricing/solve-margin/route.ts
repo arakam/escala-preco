@@ -5,12 +5,14 @@ import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { createServiceClient } from "@/lib/supabase/service";
 import { fetchSaleFee } from "@/lib/mercadolivre/fees";
 import { calculateFullPricing } from "@/lib/pricing/full-net";
-import {
-  getEffectiveWeightKg,
-  getShippingCostFromRanges,
-  type MlShippingCostRangeRow,
-} from "@/lib/pricing/ml-shipping-cost-table";
 import { upsertCategoryFeeReferenceFromSample } from "@/lib/pricing/ml-category-fee-reference";
+import { loadPricingRulesSnapshot } from "@/lib/pricing/pricing-rules-cache";
+import { persistCalculatedPricingBatch } from "@/lib/pricing/persist-calculated-batch";
+import {
+  resolveReferenceFeePercent,
+  solveMarginFast,
+  type SolveMarginFastInput,
+} from "@/lib/pricing/solve-margin-fast";
 import {
   refinePriceWithTrueMlFees,
   solvePriceWithLinearSaleFeePercent,
@@ -126,29 +128,19 @@ export async function POST(req: NextRequest) {
     fixed_expenses: body.fixed_expenses ?? null,
   };
 
-  const { data: shippingRanges, error: shipErr } = await adminSupabase
-    .from("ml_shipping_cost_ranges")
-    .select("*")
-    .order("weight_min_kg", { ascending: true });
+  const { shippingRanges: ranges, feePercentByCatType } = await loadPricingRulesSnapshot(
+    adminSupabase,
+    siteId
+  );
 
-  if (shipErr) {
-    console.error("[solve-margin] shipping ranges:", shipErr);
-  }
-  const ranges = (shippingRanges ?? []) as MlShippingCostRangeRow[];
-
-  let feePercent = body.reference_fee_percent != null ? Number(body.reference_fee_percent) : NaN;
-  if (!Number.isFinite(feePercent) || feePercent < 0) {
-    const { data: refRow } = await adminSupabase
-      .from("ml_category_fee_reference")
-      .select("fee_percent")
-      .eq("site_id", siteId)
-      .eq("category_id", body.category_id)
-      .eq("listing_type_id", body.listing_type_id)
-      .maybeSingle();
-    if (refRow?.fee_percent != null) {
-      feePercent = Number(refRow.fee_percent);
-    }
-  }
+  let feePercent: number | null = resolveReferenceFeePercent(
+    {
+      reference_fee_percent: body.reference_fee_percent,
+      category_id: body.category_id,
+      listing_type_id: body.listing_type_id,
+    },
+    feePercentByCatType
+  );
 
   const seed =
     body.seed_price != null && Number.isFinite(Number(body.seed_price)) && Number(body.seed_price) > 0
@@ -159,7 +151,7 @@ export async function POST(req: NextRequest) {
           ? Math.round(Number(body.current_price) * 100) / 100
           : null;
 
-  if (!Number.isFinite(feePercent) || feePercent < 0) {
+  if (feePercent == null || !Number.isFinite(feePercent) || feePercent < 0) {
     if (seed == null) {
       return NextResponse.json(
         {
@@ -187,23 +179,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const linear = solvePriceWithLinearSaleFeePercent(
-    listing,
-    targetPct,
-    feePercent,
-    isMercadoLider,
-    ranges,
-    {
-      planned_price: body.planned_price != null ? Number(body.planned_price) : undefined,
-      current_price: body.current_price != null ? Number(body.current_price) : undefined,
-    }
-  );
-
-  if (linear == null) {
-    return NextResponse.json({ error: "Não foi possível estimar preço pela margem (modelo linear)." }, { status: 422 });
-  }
-
-  const roundedLinear = Math.round(linear * 100) / 100;
   const skipRefine = body.skip_refine === true;
 
   let finalPrice: number;
@@ -211,23 +186,50 @@ export async function POST(req: NextRequest) {
   let shippingOut: number;
 
   if (skipRefine) {
-    const wKg = getEffectiveWeightKg(
-      listing.weight_kg,
-      listing.height_cm,
-      listing.width_cm,
-      listing.length_cm
-    );
-    shippingOut = getShippingCostFromRanges(ranges, isMercadoLider, wKg, roundedLinear);
-    feeOut = Math.round(((roundedLinear * feePercent) / 100) * 100) / 100;
-    finalPrice = roundedLinear;
+    const fastInput: SolveMarginFastInput = {
+      ...listing,
+      reference_fee_percent: feePercent,
+      current_price: body.current_price != null ? Number(body.current_price) : null,
+      planned_price: body.planned_price != null ? Number(body.planned_price) : null,
+    };
+    const fast = solveMarginFast(fastInput, targetPct, feePercent, isMercadoLider, ranges);
+    if (!fast) {
+      return NextResponse.json(
+        { error: "Não foi possível estimar preço pela margem (modelo linear)." },
+        { status: 422 }
+      );
+    }
+    finalPrice = fast.price;
+    feeOut = fast.fee;
+    shippingOut = fast.shipping_cost;
   } else {
+    const linear = solvePriceWithLinearSaleFeePercent(
+      listing,
+      targetPct,
+      feePercent,
+      isMercadoLider,
+      ranges,
+      {
+        planned_price: body.planned_price != null ? Number(body.planned_price) : undefined,
+        current_price: body.current_price != null ? Number(body.current_price) : undefined,
+      }
+    );
+
+    if (linear == null) {
+      return NextResponse.json(
+        { error: "Não foi possível estimar preço pela margem (modelo linear)." },
+        { status: 422 }
+      );
+    }
+
+    const roundedLinear = Math.round(linear * 100) / 100;
     const ctx = {
       siteId,
       accessToken,
       isMercadoLider,
       supabaseAdmin: adminSupabase,
     };
-    const refined = await refinePriceWithTrueMlFees(listing, targetPct, roundedLinear, ctx);
+    const refined = await refinePriceWithTrueMlFees(listing, targetPct, roundedLinear, ctx, ranges);
     if (!refined) {
       return NextResponse.json({ error: "Falha ao refinar preço com listing_prices." }, { status: 502 });
     }
@@ -249,19 +251,18 @@ export async function POST(req: NextRequest) {
 
   /** Alinhar com POST /api/pricing/calculate: sem isso, após mudar margem o planned_price muda mas calculated_* no cache fica do preço antigo e a UI recarrega errada. */
   const serviceSupabase = createServiceClient();
-  const now = new Date().toISOString();
-  const variationIdForCache = body.variation_id == null || body.variation_id === undefined ? -1 : Number(body.variation_id);
-  await serviceSupabase
-    .from("pricing_cache")
-    .update({
-      calculated_price: finalPrice,
-      calculated_fee: feeOut,
-      calculated_shipping_cost: shippingOut,
-      calculated_at: now,
-    })
-    .eq("account_id", account.id)
-    .eq("item_id", listing.item_id)
-    .eq("variation_id", variationIdForCache);
+  await persistCalculatedPricingBatch(serviceSupabase, account.id, [
+    {
+      item_id: listing.item_id,
+      variation_id:
+        body.variation_id == null || body.variation_id === undefined
+          ? null
+          : Number(body.variation_id),
+      price: finalPrice,
+      fee: feeOut,
+      shipping_cost: shippingOut,
+    },
+  ]);
 
   return NextResponse.json({
     price: finalPrice,

@@ -605,13 +605,53 @@ type PricingCalculateResultRow = {
   shipping_cost: number;
 };
 
+function pricingResultKey(itemId: string, variationId: number | null | undefined): string {
+  return `${itemId}:${variationId ?? "n"}`;
+}
+
+function buildPricingResultsMap(
+  results: PricingCalculateResultRow[]
+): Map<string, PricingCalculateResultRow> {
+  const map = new Map<string, PricingCalculateResultRow>();
+  for (const r of results) {
+    map.set(pricingResultKey(r.item_id, r.variation_id), r);
+  }
+  return map;
+}
+
 function findPricingResultForListing(
-  results: PricingCalculateResultRow[],
+  results: PricingCalculateResultRow[] | Map<string, PricingCalculateResultRow>,
   listing: Pick<ListingWithPricing, "item_id" | "variation_id">
 ): PricingCalculateResultRow | undefined {
+  if (results instanceof Map) {
+    return results.get(pricingResultKey(listing.item_id, listing.variation_id));
+  }
   return results.find(
     (r) => r.item_id === listing.item_id && (r.variation_id ?? null) === (listing.variation_id ?? null)
   );
+}
+
+function applyCalculatedResultsToListings(
+  prev: ListingWithPricing[],
+  resultsMap: Map<string, PricingCalculateResultRow>,
+  onlyKeys?: Set<string>
+): ListingWithPricing[] {
+  if (resultsMap.size === 0) return prev;
+  return prev.map((listing) => {
+    const key = listingSelectionKey(listing);
+    if (onlyKeys && !onlyKeys.has(key)) return listing;
+    const result = resultsMap.get(pricingResultKey(listing.item_id, listing.variation_id));
+    if (!result) return listing;
+    return {
+      ...listing,
+      calculated: computeFullPricingBreakdown(
+        listing.tax_percent,
+        listing.extra_fee_percent,
+        listing.fixed_expenses,
+        result
+      ),
+    };
+  });
 }
 
 /** Chave única para checkbox / ações em massa (UUID do cache ou MLB + variação). */
@@ -620,8 +660,82 @@ function listingSelectionKey(l: Pick<PricingListing, "id" | "item_id" | "variati
   return `${l.item_id}:${l.variation_id ?? "n"}`;
 }
 
-/** Paralelismo limitado para /api/pricing/solve-margin (cada chamada pode ir ao ML no refinamento). */
-const BULK_SOLVE_MARGIN_CONCURRENCY = 4;
+/** Uma requisição processa todos os itens no servidor (sem N chamadas HTTP). */
+async function solveMarginBulkViaApi(
+  items: ListingWithPricing[],
+  targetPct: number,
+  isMercadoLider: boolean
+): Promise<{
+  results: Array<{
+    item_id: string;
+    variation_id: number | null;
+    price: number;
+    calculated: CalculatedPricing;
+  }>;
+  errors: Array<{ item_id: string; variation_id: number | null; error: string }>;
+}> {
+  const payload = items
+    .filter((l) => l.cost_price != null && l.listing_type_id && l.category_id)
+    .map((l) => ({
+      item_id: l.item_id,
+      variation_id: l.variation_id,
+      listing_type_id: l.listing_type_id!,
+      category_id: l.category_id!,
+      weight_kg: l.weight_kg,
+      height_cm: l.height_cm,
+      width_cm: l.width_cm,
+      length_cm: l.length_cm,
+      cost_price: l.cost_price!,
+      tax_percent: l.tax_percent,
+      extra_fee_percent: l.extra_fee_percent,
+      fixed_expenses: l.fixed_expenses,
+      reference_fee_percent: l.reference_fee_percent ?? null,
+      current_price: l.current_price,
+      planned_price: l.new_price,
+    }));
+
+  if (payload.length === 0) {
+    return { results: [], errors: [] };
+  }
+
+  const res = await fetch("/api/pricing/solve-margin-bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target_margin_percent: targetPct,
+      is_mercado_lider: isMercadoLider,
+      items: payload,
+    }),
+  });
+
+  const data = (await res.json().catch(() => null)) as {
+    results?: Array<{
+      item_id: string;
+      variation_id: number | null;
+      price: number;
+      calculated: CalculatedPricing;
+    }>;
+    errors?: Array<{ item_id: string; variation_id: number | null; error: string }>;
+    error?: string;
+  } | null;
+
+  if (!res.ok) {
+    const msg = data?.error ?? `HTTP ${res.status}`;
+    return {
+      results: [],
+      errors: payload.map((p) => ({
+        item_id: p.item_id,
+        variation_id: p.variation_id ?? null,
+        error: msg,
+      })),
+    };
+  }
+
+  return {
+    results: data?.results ?? [],
+    errors: data?.errors ?? [],
+  };
+}
 
 async function runConcurrentPool<T>(
   items: T[],
@@ -1201,42 +1315,37 @@ function PrecosPageContent() {
 
   const doCalculate = useCallback(
     async (items: ListingWithPricing[], mercadoLider: boolean) => {
-      const itemsToCalculate = items
-        .filter((item) => item.new_price > 0 && item.listing_type_id && item.category_id)
-        .map((item) => ({
-          item_id: item.item_id,
-          variation_id: item.variation_id,
-          price: item.new_price,
-          listing_type_id: item.listing_type_id!,
-          category_id: item.category_id!,
-          weight_kg: item.weight_kg,
-          height_cm: item.height_cm,
-          width_cm: item.width_cm,
-          length_cm: item.length_cm,
-        }));
+      const eligible = items.filter(
+        (item) => item.new_price > 0 && item.listing_type_id && item.category_id
+      );
+      if (eligible.length === 0) return;
 
-      if (itemsToCalculate.length === 0) return;
+      const allHaveRefFee = eligible.every(
+        (item) =>
+          item.reference_fee_percent != null &&
+          Number.isFinite(Number(item.reference_fee_percent)) &&
+          Number(item.reference_fee_percent) >= 0
+      );
+
+      const itemsToCalculate = eligible.map((item) => ({
+        item_id: item.item_id,
+        variation_id: item.variation_id,
+        price: item.new_price,
+        listing_type_id: item.listing_type_id!,
+        category_id: item.category_id!,
+        weight_kg: item.weight_kg,
+        height_cm: item.height_cm,
+        width_cm: item.width_cm,
+        length_cm: item.length_cm,
+        reference_fee_percent: item.reference_fee_percent ?? null,
+      }));
 
       try {
-        const { results } = await fetchPricingCalculateBatches(itemsToCalculate, mercadoLider);
-
-        setListings((prev) =>
-          prev.map((listing) => {
-            const result = findPricingResultForListing(results, listing);
-            if (result) {
-              return {
-                ...listing,
-                calculated: computeFullPricingBreakdown(
-                  listing.tax_percent,
-                  listing.extra_fee_percent,
-                  listing.fixed_expenses,
-                  result
-                ),
-              };
-            }
-            return listing;
-          })
-        );
+        const { results } = await fetchPricingCalculateBatches(itemsToCalculate, mercadoLider, undefined, {
+          linearFees: allHaveRefFee,
+        });
+        const resultsMap = buildPricingResultsMap(results);
+        setListings((prev) => applyCalculatedResultsToListings(prev, resultsMap));
       } catch {
         // ignore
       }
@@ -1288,6 +1397,7 @@ function PrecosPageContent() {
           height_cm: item.height_cm,
           width_cm: item.width_cm,
           length_cm: item.length_cm,
+          reference_fee_percent: item.reference_fee_percent ?? null,
         }));
 
       if (itemsToCalculate.length === 0) {
@@ -1297,24 +1407,8 @@ function PrecosPageContent() {
 
       try {
         const { results } = await fetchPricingCalculateBatches(itemsToCalculate, isMercadoLider);
-
-        setListings((prev) =>
-          prev.map((listing) => {
-            const result = findPricingResultForListing(results, listing);
-            if (result) {
-              return {
-                ...listing,
-                calculated: computeFullPricingBreakdown(
-                  listing.tax_percent,
-                  listing.extra_fee_percent,
-                  listing.fixed_expenses,
-                  result
-                ),
-              };
-            }
-            return listing;
-          })
-        );
+        const resultsMap = buildPricingResultsMap(results);
+        setListings((prev) => applyCalculatedResultsToListings(prev, resultsMap));
       } catch {
         // ignore
       } finally {
@@ -1773,24 +1867,8 @@ function PrecosPageContent() {
         { linearFees: true }
       );
 
-      setListings((prev) =>
-        prev.map((listing) => {
-          if (!keySet.has(listingSelectionKey(listing))) return listing;
-          const result = findPricingResultForListing(results, listing);
-          if (result) {
-            return {
-              ...listing,
-              calculated: computeFullPricingBreakdown(
-                listing.tax_percent,
-                listing.extra_fee_percent,
-                listing.fixed_expenses,
-                result
-              ),
-            };
-          }
-          return listing;
-        })
-      );
+      const resultsMap = buildPricingResultsMap(results);
+      setListings((prev) => applyCalculatedResultsToListings(prev, resultsMap, keySet));
 
       setBulkDiscountLoaderProgress(null);
       setCalculating(false);
@@ -1905,24 +1983,8 @@ function PrecosPageContent() {
         { linearFees: true }
       );
 
-      setListings((prev) =>
-        prev.map((listing) => {
-          if (!keySet.has(listingSelectionKey(listing))) return listing;
-          const result = findPricingResultForListing(results, listing);
-          if (result) {
-            return {
-              ...listing,
-              calculated: computeFullPricingBreakdown(
-                listing.tax_percent,
-                listing.extra_fee_percent,
-                listing.fixed_expenses,
-                result
-              ),
-            };
-          }
-          return listing;
-        })
-      );
+      const restoreResultsMap = buildPricingResultsMap(results);
+      setListings((prev) => applyCalculatedResultsToListings(prev, restoreResultsMap, keySet));
 
       setBulkRestoreLoaderProgress(null);
       setCalculating(false);
@@ -2005,28 +2067,30 @@ function PrecosPageContent() {
     setBulkMarginLoaderProgress({ done: 0, total: eligible.length });
     try {
       const updates = new Map<string, { price: number; calculated: CalculatedPricing }>();
-      await runConcurrentPool(
+      const { results: bulkResults, errors: bulkErrors } = await solveMarginBulkViaApi(
         eligible,
-        BULK_SOLVE_MARGIN_CONCURRENCY,
-        async (l) => {
-          const key = listingSelectionKey(l);
-          try {
-            const solved = await solveMarginViaApi(l, targetPct, isMercadoLider, { skipRefine: true });
-            if (!solved) return;
-            const p = Math.round(solved.price * 100) / 100;
-            updates.set(key, { price: p, calculated: solved.calculated });
-          } catch {
-            /* sem solução ou erro de rede — não entra em updates */
-          }
-        },
-        () => {
-          setBulkMarginLoaderProgress((prev) => {
-            const total = prev?.total ?? eligible.length;
-            const done = (prev?.done ?? 0) + 1;
-            return { done, total };
-          });
-        }
+        targetPct,
+        isMercadoLider
       );
+
+      const selectionKeyByPricingKey = new Map<string, string>();
+      for (const l of eligible) {
+        selectionKeyByPricingKey.set(
+          pricingResultKey(l.item_id, l.variation_id),
+          listingSelectionKey(l)
+        );
+      }
+      for (const r of bulkResults) {
+        const selKey = selectionKeyByPricingKey.get(pricingResultKey(r.item_id, r.variation_id));
+        if (!selKey) continue;
+        updates.set(selKey, {
+          price: Math.round(r.price * 100) / 100,
+          calculated: r.calculated,
+        });
+      }
+
+      setBulkMarginLoaderProgress({ done: eligible.length, total: eligible.length });
+
       const fail = eligible.length - updates.size;
 
       setListings((prev) =>
@@ -2176,7 +2240,7 @@ function PrecosPageContent() {
     setSearch("");
     setSearchInput("");
     setSkuFilter("");
-    setStatusFilter("active");
+    setStatusFilter("");
     setLinkFilter("all");
     setOnlyWithSales30d(false);
     setSemPromocao(false);
@@ -2899,7 +2963,7 @@ function PrecosPageContent() {
           <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
             <h2 className="mb-2 text-lg font-semibold">Margem nos selecionados</h2>
             <p className="mb-4 text-xs text-fg-muted">
-              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço de promoção) em todos os anúncios marcados que tenham custo e tipo de listagem. Usa modo rápido: taxa de referência + frete em tabela, sem refinamento listing_prices por item (mais rápido; confira depois com &quot;Calcular&quot; se quiser alinhar ao ML). Vários itens em paralelo (até {BULK_SOLVE_MARGIN_CONCURRENCY} por vez).
+              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço de promoção) em todos os anúncios marcados que tenham custo e tipo de listagem. Processamento em lote no servidor (taxa de referência + frete em tabela, até 3 passadas por faixa de frete). Confira depois com &quot;Calcular&quot; se quiser alinhar a taxa exata do ML.
             </p>
             <form
               className="space-y-4"
