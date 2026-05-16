@@ -725,18 +725,7 @@ function PromocoesContent() {
     );
   };
 
-  if (!accountsLoaded) {
-    return (
-      <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
-        <div className="flex flex-col items-center justify-center py-8">
-          <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-[#0d6efd]" />
-          <p className="text-sm text-slate-500">Carregando…</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (accounts.length === 0) {
+  if (accountsLoaded && accounts.length === 0) {
     return (
       <div className="overflow-hidden rounded border border-amber-200 bg-amber-50 p-6 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/30">
         <p className="text-sm text-amber-900 dark:text-amber-200">
@@ -750,10 +739,23 @@ function PromocoesContent() {
     );
   }
 
+  if ((loading || !accountsLoaded) && safeFlatRows.length === 0 && !refreshing) {
+    return (
+      <div className="adminty-promocoes-page space-y-5">
+        <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Carregando…</p>
+        </div>
+      </div>
+    );
+  }
+
+  const promocoesRefetching = loading && safeFlatRows.length > 0;
+  const loaderOpen = refreshing || promocoesRefetching;
+
   return (
     <div className="adminty-promocoes-page space-y-5">
       <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
-        <SmartLoaderOverlay open={loading || refreshing} messages={[...loaderMessages]} />
+        <SmartLoaderOverlay open={loaderOpen} messages={[...loaderMessages]} />
 
         <div className="border-b border-slate-200 bg-white px-3 pt-3">
           <div className="flex flex-wrap items-end gap-1">

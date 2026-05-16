@@ -1644,18 +1644,7 @@ function AtacadoPageContent() {
 
   const totalPages = Math.ceil(total / pageSize) || 1;
 
-  if (!accountsLoaded) {
-    return (
-      <div className="rounded-app bg-white/90 p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800/90 dark:ring-slate-600">
-        <div className="flex flex-col items-center justify-center py-8">
-          <div className="mb-4 h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-primary"></div>
-          <p className="text-sm text-slate-500">Carregando…</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (accounts.length === 0) {
+  if (accountsLoaded && accounts.length === 0) {
     return (
       <div className="rounded-app bg-amber-50 p-4 shadow-sm ring-1 ring-amber-200">
         <p className="text-amber-800">
@@ -1669,6 +1658,17 @@ function AtacadoPageContent() {
     );
   }
 
+  if ((loadingRows || !accountsLoaded) && rows.length === 0) {
+    return (
+      <div className="adminty-atacado-page space-y-5">
+        <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Carregando…</p>
+        </div>
+      </div>
+    );
+  }
+
+  const atacadoRefetching = loadingRows && rows.length > 0;
   const atacadoLoaderMessages = [
     "Carregando anúncios…",
     "Buscando itens e variações no banco…",
@@ -1681,7 +1681,7 @@ function AtacadoPageContent() {
     "Aguarde — volumes grandes podem levar alguns minutos…",
   ] as const;
 
-  const smartLoaderOpen = loadingRows || applyJob != null;
+  const smartLoaderOpen = atacadoRefetching || applyJob != null;
   const applyDeterminatePercent = (() => {
     if (loadingRows || !applyJob) return undefined;
     const { total, processed, status } = applyJob.job;
@@ -1695,7 +1695,7 @@ function AtacadoPageContent() {
       <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
         <SmartLoaderOverlay
         open={smartLoaderOpen}
-        messages={loadingRows ? [...atacadoLoaderMessages] : applyJob != null ? [...applyLoaderMessages] : [...atacadoLoaderMessages]}
+        messages={atacadoRefetching ? [...atacadoLoaderMessages] : applyJob != null ? [...applyLoaderMessages] : [...atacadoLoaderMessages]}
         determinatePercent={applyDeterminatePercent}
         footerHint={
           !loadingRows && applyJob
@@ -2413,7 +2413,9 @@ function AtacadoPageContent() {
         </div>
       )}
 
-      {loadingRows ? null : rows.length === 0 ? (
+      {loadingRows ? (
+        <p className="px-3 py-6 text-sm text-slate-500 dark:text-slate-400">Atualizando lista…</p>
+      ) : rows.length === 0 ? (
         <p className="text-sm text-slate-500">
           Nenhum item encontrado. Sincronize anúncios em{" "}
           <a href="/app/anuncios" className="text-brand-blue hover:underline">
@@ -2757,7 +2759,15 @@ function KebabMenuIcon() {
 export default function AtacadoPage() {
   return (
     <OnboardingGate required="catalog">
-      <Suspense fallback={<div className="p-8 text-center">Carregando...</div>}>
+      <Suspense
+        fallback={
+          <div className="adminty-atacado-page space-y-5">
+            <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+              <p className="text-sm text-slate-500 dark:text-slate-400">Carregando…</p>
+            </div>
+          </div>
+        }
+      >
         <AtacadoPageContent />
       </Suspense>
     </OnboardingGate>
