@@ -9,6 +9,7 @@
  */
 import type { MLItemDetail, MLVariationDetail } from "./client";
 import { fetchAllItemIds, fetchItemDetail, fetchVariationDetail, getItemPrices, getStandardPriceAmount, runWithConcurrency } from "./client";
+import { extractItemDimensions } from "./item-dimensions";
 import { getLatestValidAccessToken, getValidAccessToken } from "./refresh";
 import { syncHeartbeatMs, syncLog, syncLogVerbose } from "./sync-log";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -41,6 +42,8 @@ function looksLikeMlAuthError(e: unknown): boolean {
 function mapItemToRow(accountId: string, item: MLItemDetail) {
   // User Product (MLBU): item não tem array variations; cada item_id é uma "variação". Clássico: has_variations = variations?.length > 0.
   const hasVariations = Array.isArray(item.variations) && item.variations.length > 0;
+  const dims = extractItemDimensions(item);
+  const now = new Date().toISOString();
   return {
     account_id: accountId,
     item_id: item.id,
@@ -62,8 +65,13 @@ function mapItemToRow(accountId: string, item: MLItemDetail) {
     user_product_id: item.user_product_id ?? null,
     family_id: item.family_id ?? null,
     family_name: item.family_name ?? null,
+    weight_kg: dims.weight_kg,
+    height_cm: dims.height_cm,
+    width_cm: dims.width_cm,
+    length_cm: dims.length_cm,
     raw_json: item as unknown as object,
-    updated_at: new Date().toISOString(),
+    synced_at: now,
+    updated_at: now,
   };
 }
 

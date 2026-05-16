@@ -88,11 +88,24 @@ interface MergedListingProductFields {
  * Se o pai já tem produto, usa o pai; senão deriva das variações (menor variation_id com produto).
  * Vários produtos distintos: usa o primeiro para custo/dimensões/impostos (indicativo); SKU pode listar vários.
  */
+function mlListingDimensions(
+  raw: Record<string, unknown>,
+  toNum: (v: unknown) => number | null
+): Pick<MergedListingProductFields, "weight_kg" | "height_cm" | "width_cm" | "length_cm"> {
+  return {
+    weight_kg: toNum(raw.weight_kg),
+    height_cm: toNum(raw.height_cm),
+    width_cm: toNum(raw.width_cm),
+    length_cm: toNum(raw.length_cm),
+  };
+}
+
 function mergeParentListingProductFields(
   parentRaw: Record<string, unknown>,
   variationRows: Record<string, unknown>[],
   toNum: (v: unknown) => number | null
 ): MergedListingProductFields {
+  const mlDims = mlListingDimensions(parentRaw, toNum);
   const parentPid = parentRaw.product_id != null && parentRaw.product_id !== "" ? String(parentRaw.product_id) : null;
   if (parentPid) {
     const prod = parentRaw.products as Record<string, unknown> | Record<string, unknown>[] | null;
@@ -103,10 +116,10 @@ function mergeParentListingProductFields(
       product_id: parentPid,
       sku,
       cost_price: toNum(p?.cost_price),
-      weight_kg: toNum(p?.weight),
-      height_cm: toNum(p?.height),
-      width_cm: toNum(p?.width),
-      length_cm: toNum(p?.length),
+      weight_kg: toNum(p?.weight) ?? mlDims.weight_kg,
+      height_cm: toNum(p?.height) ?? mlDims.height_cm,
+      width_cm: toNum(p?.width) ?? mlDims.width_cm,
+      length_cm: toNum(p?.length) ?? mlDims.length_cm,
       tax_percent: toNum(p?.tax_percent),
       extra_fee_percent: toNum(p?.extra_fee_percent),
       fixed_expenses: toNum(p?.fixed_expenses),
@@ -118,10 +131,7 @@ function mergeParentListingProductFields(
       product_id: null,
       sku: extractSku((parentRaw.raw_json as Record<string, unknown>) || null, null),
       cost_price: null,
-      weight_kg: null,
-      height_cm: null,
-      width_cm: null,
-      length_cm: null,
+      ...mlDims,
       tax_percent: null,
       extra_fee_percent: null,
       fixed_expenses: null,
@@ -167,10 +177,7 @@ function mergeParentListingProductFields(
       product_id: null,
       sku: skuLabel,
       cost_price: null,
-      weight_kg: null,
-      height_cm: null,
-      width_cm: null,
-      length_cm: null,
+      ...mlDims,
       tax_percent: null,
       extra_fee_percent: null,
       fixed_expenses: null,
@@ -270,6 +277,7 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
 
   const itemsSelect = `
     id, account_id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id,
+    weight_kg, height_cm, width_cm, length_cm,
     products:product_id (sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
   `;
   const variationsSelect = `

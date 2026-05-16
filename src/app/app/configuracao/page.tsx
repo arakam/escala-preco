@@ -14,7 +14,24 @@ interface MLAccountRow {
   ml_nickname: string | null;
   site_id: string | null;
   created_at: string;
+  auto_sync_items_webhook?: boolean;
 }
+
+interface SyncSettingsAccount {
+  id: string;
+  ml_user_id: number;
+  ml_nickname: string | null;
+  site_id: string | null;
+  auto_sync_items_webhook: boolean;
+}
+
+/** Subopções da sync automática (UI; ações ainda não implementadas). */
+const AUTO_SYNC_NESTED_OPTIONS = [
+  { id: "produtos_peso_medidas", label: "Atualizar Peso e Medidas em Produtos" },
+  { id: "atacado_valores", label: "Atualizar Valores em Atacado" },
+  { id: "preco_valores", label: "Atualizar Valores em Preço" },
+  { id: "promocao_valores", label: "Atualizar Valores em Promoção" },
+] as const;
 
 interface ShippingCostRange {
   id: number;
@@ -131,10 +148,19 @@ function ConfiguracaoContent() {
   const [loading, setLoading] = useState(true);
   const [shippingLoading, setShippingLoading] = useState(true);
   const [reputationLoading, setReputationLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"ml" | "notificacoes" | "frete" | "aparencia">("ml");
+  const [activeTab, setActiveTab] = useState<
+    "ml" | "sincronizacao" | "notificacoes" | "frete" | "aparencia"
+  >("ml");
   const [webhookNotifications, setWebhookNotifications] = useState<WebhookNotificationRow[]>([]);
   const [webhookNotificationsLoading, setWebhookNotificationsLoading] = useState(false);
   const [webhookNotificationsError, setWebhookNotificationsError] = useState<string | null>(null);
+  const [syncSettings, setSyncSettings] = useState<SyncSettingsAccount[]>([]);
+  const [syncSettingsLoading, setSyncSettingsLoading] = useState(false);
+  const [syncSettingsError, setSyncSettingsError] = useState<string | null>(null);
+  const [syncSettingsSaving, setSyncSettingsSaving] = useState(false);
+  const [autoSyncNestedOptions, setAutoSyncNestedOptions] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(AUTO_SYNC_NESTED_OPTIONS.map((o) => [o.id, false]))
+  );
   const [devResetting, setDevResetting] = useState(false);
   const { theme, setTheme } = useTheme();
   const searchParams = useSearchParams();
@@ -166,6 +192,52 @@ function ConfiguracaoContent() {
     setReputationLoading(false);
   }, []);
 
+  const loadSyncSettings = useCallback(async () => {
+    setSyncSettingsLoading(true);
+    setSyncSettingsError(null);
+    try {
+      const res = await fetch("/api/mercadolivre/sync-settings");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSyncSettingsError((data as { error?: string }).error || "Falha ao carregar sincronização.");
+        setSyncSettings([]);
+        return;
+      }
+      setSyncSettings((data as { accounts?: SyncSettingsAccount[] }).accounts ?? []);
+    } finally {
+      setSyncSettingsLoading(false);
+    }
+  }, []);
+
+  async function handleToggleAutoSync(enabled: boolean) {
+    if (syncSettings.length === 0) return;
+    setSyncSettingsSaving(true);
+    setSyncSettingsError(null);
+    try {
+      const results = await Promise.all(
+        syncSettings.map(async (acc) => {
+          const res = await fetch("/api/mercadolivre/sync-settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account_id: acc.id, auto_sync_items_webhook: enabled }),
+          });
+          const data = await res.json().catch(() => ({}));
+          return { ok: res.ok, data, accId: acc.id };
+        })
+      );
+      const failed = results.find((r) => !r.ok);
+      if (failed) {
+        setSyncSettingsError(
+          (failed.data as { error?: string }).error || "Não foi possível salvar. Tente novamente."
+        );
+        return;
+      }
+      setSyncSettings((prev) => prev.map((a) => ({ ...a, auto_sync_items_webhook: enabled })));
+    } finally {
+      setSyncSettingsSaving(false);
+    }
+  }
+
   const loadWebhookNotifications = useCallback(async () => {
     setWebhookNotificationsLoading(true);
     setWebhookNotificationsError(null);
@@ -188,6 +260,12 @@ function ConfiguracaoContent() {
     loadShippingCosts();
     loadReputation();
   }, [loadAccounts, loadShippingCosts, loadReputation]);
+
+  useEffect(() => {
+    if (activeTab === "sincronizacao") {
+      void loadSyncSettings();
+    }
+  }, [activeTab, loadSyncSettings]);
 
   useEffect(() => {
     if (activeTab === "notificacoes") {
@@ -280,6 +358,17 @@ function ConfiguracaoContent() {
           }`}
         >
           Integrações Mercado Livre
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("sincronizacao")}
+          className={`rounded-t-md px-3 py-2 text-sm font-medium ${
+            activeTab === "sincronizacao"
+              ? "border border-b-white border-gray-200 bg-white text-blue-600 dark:border-slate-700 dark:border-b-slate-900 dark:bg-slate-900 dark:text-blue-400"
+              : "text-gray-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400"
+          }`}
+        >
+          Sincronização
         </button>
         <button
           type="button"
@@ -640,6 +729,79 @@ function ConfiguracaoContent() {
             </section>
           )}
         </>
+      )}
+
+      {activeTab === "sincronizacao" && (
+        <section className="mb-8">
+          {syncSettingsError && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/30">
+              <p className="text-sm text-amber-800 dark:text-amber-200">{syncSettingsError}</p>
+            </div>
+          )}
+
+          {syncSettingsLoading ? (
+            <p className="text-gray-500 dark:text-slate-400">Carregando…</p>
+          ) : syncSettings.length === 0 ? (
+            <p className="text-sm text-gray-600 dark:text-slate-300">
+              Conecte sua conta na aba Integrações para usar esta opção.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {(() => {
+                const autoSyncEnabled = syncSettings.every((a) => a.auto_sync_items_webhook);
+                return (
+                  <>
+                    <label className="flex cursor-pointer items-center gap-3">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        checked={autoSyncEnabled}
+                        disabled={syncSettingsSaving}
+                        onChange={(e) => void handleToggleAutoSync(e.target.checked)}
+                      />
+                      <span className="text-sm font-medium text-fg-strong">
+                        Sincronizar anúncios automaticamente
+                      </span>
+                      {syncSettingsSaving ? (
+                        <span className="text-xs text-gray-500 dark:text-slate-400">Salvando…</span>
+                      ) : null}
+                    </label>
+
+                    <div
+                      className={`ml-3 space-y-2 border-l-2 border-gray-200 pl-4 dark:border-slate-600 ${
+                        autoSyncEnabled ? "" : "opacity-50"
+                      }`}
+                    >
+                      {AUTO_SYNC_NESTED_OPTIONS.map((opt) => (
+                        <label
+                          key={opt.id}
+                          className={`flex items-center gap-3 ${
+                            autoSyncEnabled ? "cursor-pointer" : "cursor-not-allowed"
+                          }`}
+                          title={autoSyncEnabled ? undefined : "Ative a sincronização automática acima"}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
+                            checked={Boolean(autoSyncNestedOptions[opt.id])}
+                            disabled={!autoSyncEnabled}
+                            onChange={(e) =>
+                              setAutoSyncNestedOptions((prev) => ({
+                                ...prev,
+                                [opt.id]: e.target.checked,
+                              }))
+                            }
+                          />
+                          <span className="text-sm text-gray-700 dark:text-slate-200">{opt.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+        </section>
       )}
 
       {activeTab === "notificacoes" && (
