@@ -24,6 +24,7 @@ export async function GET() {
     weight: number | null;
     cost_price: number | null;
     fixed_expenses: number | null;
+    pma: number | null;
   };
 
   const products: ProductExportRow[] = [];
@@ -31,7 +32,7 @@ export async function GET() {
   while (true) {
     const { data: chunk, error } = await supabase
       .from("products")
-      .select("sku, title, description, ean, height, width, length, weight, cost_price, fixed_expenses")
+      .select("sku, title, description, ean, height, width, length, weight, cost_price, fixed_expenses, pma")
       .eq("user_id", user.id)
       .order("sku", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
@@ -46,7 +47,7 @@ export async function GET() {
     from += PAGE_SIZE;
   }
 
-  const headers = ["SKU", "Titulo", "Descricao", "EAN", "Altura", "Largura", "Comprimento", "Peso", "PrecoCusto", "DespFixas"];
+  const headers = ["SKU", "Titulo", "Descricao", "EAN", "Altura", "Largura", "Comprimento", "Peso", "PrecoCusto", "DespFixas", "PMA"];
   
   const escapeCSV = (value: string | number | null | undefined): string => {
     if (value === null || value === undefined) return "";
@@ -68,6 +69,7 @@ export async function GET() {
     escapeCSV(p.weight),
     escapeCSV(p.cost_price),
     escapeCSV(p.fixed_expenses),
+    escapeCSV(p.pma),
   ].join(";"));
 
   const csv = [headers.join(";"), ...rows].join("\n");

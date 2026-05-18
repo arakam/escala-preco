@@ -74,6 +74,7 @@ export async function PUT(
       tax_percent: body.tax_percent ?? null,
       extra_fee_percent: body.extra_fee_percent ?? null,
       fixed_expenses: body.fixed_expenses ?? null,
+      pma: body.pma ?? null,
     })
     .eq("id", id)
     .eq("user_id", user.id)

@@ -39,6 +39,7 @@ export interface Product {
   tax_percent: number | null;
   extra_fee_percent: number | null;
   fixed_expenses: number | null;
+  pma: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -57,6 +58,7 @@ export interface ProductInput {
   tax_percent?: number | null;
   extra_fee_percent?: number | null;
   fixed_expenses?: number | null;
+  pma?: number | null;
 }
 
 export interface ProductListingStats {

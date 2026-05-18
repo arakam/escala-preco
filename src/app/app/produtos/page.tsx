@@ -25,6 +25,7 @@ interface ProductFormData {
   tax_percent: string;
   extra_fee_percent: string;
   fixed_expenses: string;
+  pma: string;
 }
 
 const emptyForm: ProductFormData = {
@@ -40,6 +41,7 @@ const emptyForm: ProductFormData = {
   tax_percent: "",
   extra_fee_percent: "",
   fixed_expenses: "",
+  pma: "",
 };
 
 type ViewMode = "products" | "stats" | "unregistered" | "operational" | "taxes" | "howitworks";
@@ -379,6 +381,7 @@ function ProdutosPageContent() {
       tax_percent: product.tax_percent?.toString() ?? "",
       extra_fee_percent: product.extra_fee_percent?.toString() ?? "",
       fixed_expenses: product.fixed_expenses?.toString() ?? "",
+      pma: product.pma?.toString() ?? "",
     });
     setFormError(null);
     setModalOpen(true);
@@ -414,6 +417,7 @@ function ProdutosPageContent() {
       tax_percent: form.tax_percent ? parseFloat(form.tax_percent.replace(",", ".")) : null,
       extra_fee_percent: form.extra_fee_percent ? parseFloat(form.extra_fee_percent.replace(",", ".")) : null,
       fixed_expenses: form.fixed_expenses ? parseFloat(form.fixed_expenses.replace(",", ".")) : null,
+      pma: form.pma ? parseFloat(form.pma.replace(",", ".")) : null,
     };
 
     try {
@@ -939,6 +943,7 @@ function ProdutosPageContent() {
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Imposto (%)</th>
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Taxa Extra (%)</th>
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Desp. Fixas (R$)</th>
+                  <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">PMA (R$)</th>
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Altura (cm)</th>
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Largura (cm)</th>
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Comprimento (cm)</th>
@@ -970,6 +975,9 @@ function ProdutosPageContent() {
                     </td>
                     <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.fixed_expenses != null ? Number(product.fixed_expenses).toFixed(2) : "—"}
+                    </td>
+                    <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
+                      {product.pma != null ? Number(product.pma).toFixed(2) : "—"}
                     </td>
                     <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">{product.height ?? "—"}</td>
                     <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">{product.width ?? "—"}</td>
@@ -1531,6 +1539,16 @@ function ProdutosPageContent() {
                     className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-fg">PMA (R$)</label>
+                  <input
+                    type="text"
+                    value={form.pma}
+                    onChange={(e) => setForm({ ...form, pma: e.target.value })}
+                    placeholder="0,00"
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
+                  />
+                </div>
               </div>
 
               <div className="mt-6 flex justify-end gap-3">
@@ -1671,7 +1689,7 @@ function ProdutosPageContent() {
             <form onSubmit={handleImport} className="p-4">
               <p className="mb-4 text-sm text-fg">
                 O arquivo CSV deve conter a coluna <strong>SKU</strong> (obrigatório),
-                e opcionalmente: Titulo, Altura, Largura, Comprimento, Peso, PrecoCusto, Imposto, TaxaExtra, DespFixas.
+                e opcionalmente: Titulo, Altura, Largura, Comprimento, Peso, PrecoCusto, Imposto, TaxaExtra, DespFixas, PMA.
               </p>
               <p className="mb-4 text-sm text-fg">
                 Produtos com SKU existente serão atualizados.

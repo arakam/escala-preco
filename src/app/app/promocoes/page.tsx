@@ -129,7 +129,10 @@ function PromocoesHelpContent() {
                 <strong>Campanha ML:</strong> nome amigável do tipo de campanha no ML (código <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">type</code> em seller-promotions).
               </li>
               <li>
-                <strong>Aviso:</strong> destaca webhooks recentes do ML (candidatos/ofertas públicas).
+                <strong>Aviso:</strong> ícone de exclamação quando houve atualização recente do ML (passe o mouse para ver detalhes).
+              </li>
+              <li>
+                <strong>Participar:</strong> marque convites (<em>Possível</em>) e use <strong>Participar na promoção</strong> para aceitar no Mercado Livre (API seller-promotions).
               </li>
               <li>
                 <strong>Taxa ML / Frete:</strong> conforme tabela oficial e Mercado Líder; promoções SMART podem abater subsídio na taxa.
@@ -196,6 +199,54 @@ interface FlatPromoRow {
   profit_percent: number | null;
   campaign_start_at: string | null;
   campaign_finish_at: string | null;
+  /** `id` da promoção no ML (P-MLB…, etc.). */
+  ml_promotion_id: string | null;
+}
+
+function promoRowSelectionKey(r: FlatPromoRow): string {
+  return r.rowKey ?? r.item_id;
+}
+
+function canJoinPromoRow(r: FlatPromoRow): boolean {
+  return (
+    r.promotionKind === "possível" &&
+    Boolean(r.ml_promotion_id?.trim()) &&
+    Boolean(r.promotionType?.trim())
+  );
+}
+
+function formatPromoAlertTooltip(alert: PromoAlert): string {
+  const lines = ["Atualização do Mercado Livre"];
+  lines.push(
+    new Date(alert.created_at).toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      dateStyle: "short",
+      timeStyle: "short",
+    })
+  );
+  if (alert.promotion_type) lines.push(`Tipo: ${alert.promotion_type}`);
+  if (alert.status_label) lines.push(`Status: ${alert.status_label}`);
+  if (alert.topic) lines.push(`Tópico: ${alert.topic}`);
+  if (alert.external_id) lines.push(`ID: ${alert.external_id}`);
+  if (alert.fetch_error) lines.push(`Erro ao resolver: ${alert.fetch_error}`);
+  return lines.join("\n");
+}
+
+function PromoAlertIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden
+    >
+      <path
+        fillRule="evenodd"
+        d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
 }
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -218,7 +269,8 @@ function formatCampaignDatePt(iso: string | null | undefined): string {
 
 /** Larguras mínimas (colgroup + sticky `left`) — mesma ideia da Calculadora de Preços */
 const PROMOCOES_COLUMNS: { minWidth: number }[] = [
-  { minWidth: 120 },
+  { minWidth: 44 },
+  { minWidth: 48 },
   { minWidth: 52 },
   { minWidth: 100 },
   { minWidth: 220 },
@@ -248,16 +300,16 @@ function readPromocoesStickyInitial(): Set<number> {
   if (typeof window === "undefined") return new Set();
   try {
     const raw = localStorage.getItem(PROMOCOES_STICKY_STORAGE_KEY);
-    if (!raw) return new Set([0, 1, 2, 3]);
+    if (!raw) return new Set([0, 1, 2, 3, 4]);
     const arr = JSON.parse(raw) as unknown;
-    if (!Array.isArray(arr)) return new Set([0, 1, 2, 3]);
+    if (!Array.isArray(arr)) return new Set([0, 1, 2, 3, 4]);
     const n = PROMOCOES_COLUMNS.length;
     const nums = arr.filter(
       (x): x is number => typeof x === "number" && Number.isInteger(x) && x >= 0 && x < n
     );
-    return nums.length > 0 ? new Set(nums) : new Set([0, 1, 2, 3]);
+    return nums.length > 0 ? new Set(nums) : new Set([0, 1, 2, 3, 4]);
   } catch {
-    return new Set([0, 1, 2, 3]);
+    return new Set([0, 1, 2, 3, 4]);
   }
 }
 
@@ -301,6 +353,9 @@ function PromocoesContent() {
   const [snapshotInfoOpen, setSnapshotInfoOpen] = useState(false);
   const snapshotInfoRef = useRef<HTMLDivElement>(null);
   const [copiedCell, setCopiedCell] = useState<string | null>(null);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
+  const [joining, setJoining] = useState(false);
+  const [joinFeedback, setJoinFeedback] = useState<string | null>(null);
   const loadPromoGen = useRef(0);
 
   const [stickyColumns, setStickyColumns] = useState<Set<number>>(() => new Set());
@@ -598,6 +653,11 @@ function PromocoesContent() {
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    setSelectedRowKeys(new Set());
+    setJoinFeedback(null);
+  }, [page, accountId, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl]);
+
   const handleFilterSubmit = useCallback(
     (e: FormEvent) => {
       e.preventDefault();
@@ -731,6 +791,90 @@ function PromocoesContent() {
 
   const safeFlatRows = Array.isArray(flatRows) ? flatRows : [];
 
+  const joinableRowsOnPage = useMemo(
+    () => safeFlatRows.filter(canJoinPromoRow),
+    [safeFlatRows]
+  );
+
+  const selectedJoinableCount = useMemo(() => {
+    let n = 0;
+    for (const r of joinableRowsOnPage) {
+      if (selectedRowKeys.has(promoRowSelectionKey(r))) n++;
+    }
+    return n;
+  }, [joinableRowsOnPage, selectedRowKeys]);
+
+  const handleToggleSelectAllJoinable = useCallback(() => {
+    setSelectedRowKeys((prev) => {
+      const allSelected =
+        joinableRowsOnPage.length > 0 &&
+        joinableRowsOnPage.every((r) => prev.has(promoRowSelectionKey(r)));
+      if (allSelected) return new Set();
+      return new Set(joinableRowsOnPage.map(promoRowSelectionKey));
+    });
+  }, [joinableRowsOnPage]);
+
+  const handleToggleRowSelect = useCallback((row: FlatPromoRow) => {
+    if (!canJoinPromoRow(row)) return;
+    const key = promoRowSelectionKey(row);
+    setSelectedRowKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const handleJoinSelected = useCallback(async () => {
+    if (!accountId || selectedJoinableCount === 0) return;
+    const items = joinableRowsOnPage
+      .filter((r) => selectedRowKeys.has(promoRowSelectionKey(r)))
+      .map((r) => ({
+        item_id: r.item_id,
+        promotion_id: r.ml_promotion_id!,
+        promotion_type: r.promotionType!,
+        deal_price: r.promo_price,
+      }));
+
+    setJoining(true);
+    setJoinFeedback(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/mercadolivre/${accountId}/promotions-join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        summary?: { ok?: number; errors?: number; requested?: number };
+        results?: Array<{ item_id: string; status: string; error?: string }>;
+      };
+      if (!res.ok) {
+        setError(data.error || "Erro ao participar das promoções.");
+        return;
+      }
+      const ok = data.summary?.ok ?? 0;
+      const errs = data.summary?.errors ?? 0;
+      if (errs === 0) {
+        setJoinFeedback(
+          ok === 1 ? "1 promoção aceita no Mercado Livre." : `${ok} promoções aceitas no Mercado Livre.`
+        );
+      } else {
+        const firstErr = data.results?.find((r) => r.status === "error");
+        setJoinFeedback(
+          `${ok} aceita(s), ${errs} com erro${firstErr?.error ? `: ${firstErr.error}` : ""}.`
+        );
+      }
+      setSelectedRowKeys(new Set());
+      await loadData();
+    } catch {
+      setError("Erro de conexão ao participar das promoções.");
+    } finally {
+      setJoining(false);
+    }
+  }, [accountId, selectedJoinableCount, joinableRowsOnPage, selectedRowKeys, loadData]);
+
   const snapshotAtFormatted = useMemo(() => {
     if (!snapshotAt) return "";
     return new Date(snapshotAt).toLocaleString("pt-BR", {
@@ -857,9 +1001,22 @@ function PromocoesContent() {
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={() => void refreshFromMl()}
-              disabled={loading || refreshing}
+              onClick={() => void handleJoinSelected()}
+              disabled={loading || refreshing || joining || selectedJoinableCount === 0}
               className="btn btn-primary btn-sm disabled:cursor-not-allowed"
+              title="Aceita convites selecionados no Mercado Livre (promoções tipo Possível)"
+            >
+              {joining
+                ? "Participando…"
+                : selectedJoinableCount > 0
+                  ? `Participar na promoção (${selectedJoinableCount})`
+                  : "Participar na promoção"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void refreshFromMl()}
+              disabled={loading || refreshing || joining}
+              className="btn btn-secondary btn-sm disabled:cursor-not-allowed"
             >
               {refreshing ? "Recarregando…" : "Recarregar Promoções"}
             </button>
@@ -1045,6 +1202,12 @@ function PromocoesContent() {
         </div>
       )}
 
+      {joinFeedback && !error && (
+        <div className="border-b border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
+          {joinFeedback}
+        </div>
+      )}
+
       <div className="pricing-table-with-sticky adminty-table-card">
         <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
           <p className="text-xs text-slate-600 dark:text-slate-300">
@@ -1115,40 +1278,74 @@ function PromocoesContent() {
           </colgroup>
           <thead className="sticky top-0 z-10">
             <tr>
-              {promoStickyTh(0, "Aviso")}
-              {promoStickyTh(1, "Foto")}
-              {promoStickyTh(2, "MLB")}
-              {promoStickyTh(3, "Anúncio", { thClass: "min-w-[12rem]" })}
-              {promoStickyTh(4, "Status")}
-              {promoStickyTh(5, "Preço", { align: "right" })}
-              {promoStickyTh(6, "Preço promoção", { align: "right" })}
-              {promoStickyTh(7, "Custo", { align: "right" })}
-              {promoStickyTh(8, "Tipo")}
-              {promoStickyTh(9, "Campanha ML", {
+              <th
+                data-promocoes-th-menu-root
+                className={`relative p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/90 ${stickyColumns.has(0) ? "sticky-col" : ""}`}
+                style={stickyHeaderStyles[0]}
+                title="Selecionar convites (tipo Possível) para participar"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <input
+                    type="checkbox"
+                    className="rounded border-white/40 bg-white/10"
+                    checked={
+                      joinableRowsOnPage.length > 0 &&
+                      joinableRowsOnPage.every((r) => selectedRowKeys.has(promoRowSelectionKey(r)))
+                    }
+                    disabled={joinableRowsOnPage.length === 0 || joining}
+                    onChange={handleToggleSelectAllJoinable}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label="Selecionar todos os convites desta página"
+                  />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setHeaderMenuColumn((c) => (c === 0 ? null : 0));
+                    }}
+                    className="inline-flex shrink-0 items-center rounded-sm px-0.5 hover:bg-white/10"
+                    aria-expanded={headerMenuColumn === 0}
+                    title="Opções da coluna"
+                  >
+                    <span className="text-[10px] leading-none text-white/65">▾</span>
+                  </button>
+                </div>
+                {renderPromoHeaderMenu(0)}
+              </th>
+              {promoStickyTh(1, "Aviso")}
+              {promoStickyTh(2, "Foto")}
+              {promoStickyTh(3, "MLB")}
+              {promoStickyTh(4, "Anúncio", { thClass: "min-w-[12rem]" })}
+              {promoStickyTh(5, "Status")}
+              {promoStickyTh(6, "Preço", { align: "right" })}
+              {promoStickyTh(7, "Preço promoção", { align: "right" })}
+              {promoStickyTh(8, "Custo", { align: "right" })}
+              {promoStickyTh(9, "Tipo")}
+              {promoStickyTh(10, "Campanha ML", {
                 title: "Tipo de campanha no ML (campo type em seller-promotions)",
                 thClass: "max-w-[14rem]",
               })}
-              {promoStickyTh(10, "Promoção", { thClass: "min-w-[12rem]" })}
-              {promoStickyTh(11, "Vai receber", {
+              {promoStickyTh(11, "Promoção", { thClass: "min-w-[12rem]" })}
+              {promoStickyTh(12, "Vai receber", {
                 align: "right",
                 title: "Preço promoção (bruto) − taxa ML − frete",
               })}
-              {promoStickyTh(12, "Lucro R$", { align: "right" })}
-              {promoStickyTh(13, "Lucro %", { align: "right" })}
-              {promoStickyTh(14, "Taxa ML", { align: "right" })}
-              {promoStickyTh(15, "Frete", { align: "right" })}
-              {promoStickyTh(16, "Imposto", { align: "right" })}
-              {promoStickyTh(17, "Taxa extra", { align: "right" })}
-              {promoStickyTh(18, "Desp. fixas", { align: "right" })}
-              {promoStickyTh(19, "Início campanha", {
+              {promoStickyTh(13, "Lucro R$", { align: "right" })}
+              {promoStickyTh(14, "Lucro %", { align: "right" })}
+              {promoStickyTh(15, "Taxa ML", { align: "right" })}
+              {promoStickyTh(16, "Frete", { align: "right" })}
+              {promoStickyTh(17, "Imposto", { align: "right" })}
+              {promoStickyTh(18, "Taxa extra", { align: "right" })}
+              {promoStickyTh(19, "Desp. fixas", { align: "right" })}
+              {promoStickyTh(20, "Início campanha", {
                 title: "Início da campanha (seller-promotions), horário de São Paulo",
                 thClass: "whitespace-nowrap",
               })}
-              {promoStickyTh(20, "Fim campanha", {
+              {promoStickyTh(21, "Fim campanha", {
                 title: "Fim da campanha (seller-promotions), horário de São Paulo",
                 thClass: "whitespace-nowrap",
               })}
-              {promoStickyTh(21, "ML")}
+              {promoStickyTh(22, "ML")}
             </tr>
           </thead>
         <tbody>
@@ -1168,6 +1365,8 @@ function PromocoesContent() {
                     : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300";
               const tipoLabel =
                 r.promotionKind === "ativa" ? "Ativa" : r.promotionKind === "possível" ? "Possível" : "—";
+              const joinable = canJoinPromoRow(r);
+              const isSelected = selectedRowKeys.has(promoRowSelectionKey(r));
               const cell = (col: number, cls: string) => ({
                 className: `${cls}${stickyColumns.has(col) ? " sticky-col" : ""}`,
                 style: stickyBodyStyles[col],
@@ -1181,32 +1380,34 @@ function PromocoesContent() {
                       : "border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
                   }
                 >
-                  <td {...cell(0, "align-top p-2")}>
+                  <td {...cell(0, "p-2 text-center")}>
+                    {joinable ? (
+                      <input
+                        type="checkbox"
+                        className="rounded border-slate-300"
+                        checked={isSelected}
+                        disabled={joining}
+                        onChange={() => handleToggleRowSelect(r)}
+                        aria-label={`Selecionar ${r.item_id} para participar`}
+                      />
+                    ) : (
+                      <span className="text-fg-muted">—</span>
+                    )}
+                  </td>
+                  <td {...cell(1, "align-top p-2 text-center")}>
                     {alert ? (
                       <span
-                        className="inline-flex max-w-[11rem] flex-col gap-0.5 rounded-app border border-amber-300 bg-amber-100/90 px-2 py-1 text-xs font-medium text-amber-950 dark:border-amber-800 dark:bg-amber-900/40 dark:text-amber-100"
-                        title={`${alert.topic}${alert.fetch_error ? ` · ${alert.fetch_error}` : ""}`}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-200"
+                        title={formatPromoAlertTooltip(alert)}
+                        aria-label="Atualização recente do Mercado Livre"
                       >
-                        <span>Novo do ML</span>
-                        <span className="font-normal text-amber-900/90 dark:text-amber-200/90">
-                          {new Date(alert.created_at).toLocaleString("pt-BR", {
-                            timeZone: "America/Sao_Paulo",
-                            dateStyle: "short",
-                            timeStyle: "short",
-                          })}
-                        </span>
-                        {alert.promotion_type && (
-                          <span className="font-normal opacity-90">{alert.promotion_type}</span>
-                        )}
-                        {alert.fetch_error && (
-                          <span className="text-[10px] text-red-700 dark:text-red-300">Erro ao resolver recurso</span>
-                        )}
+                        <PromoAlertIcon className="h-4 w-4" />
                       </span>
                     ) : (
                       <span className="text-fg-muted">—</span>
                     )}
                   </td>
-                  <td {...cell(1, "p-2")}>
+                  <td {...cell(2, "p-2")}>
                     {r.thumbnail ? (
                       // eslint-disable-next-line @next/next/no-img-element -- URLs dinâmicas do CDN do ML
                       <img
@@ -1218,7 +1419,7 @@ function PromocoesContent() {
                       <span className="text-xs text-slate-400">—</span>
                     )}
                   </td>
-                  <td {...cell(2, "p-2")}>
+                  <td {...cell(3, "p-2")}>
                     <span
                       role="button"
                       tabIndex={0}
@@ -1239,7 +1440,7 @@ function PromocoesContent() {
                       )}
                     </span>
                   </td>
-                  <td {...cell(3, "max-w-[14rem] p-2")} title={r.title ?? ""}>
+                  <td {...cell(4, "max-w-[14rem] p-2")} title={r.title ?? ""}>
                     <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
                       {r.title || "—"}
                     </span>
@@ -1249,39 +1450,39 @@ function PromocoesContent() {
                       </p>
                     )}
                   </td>
-                  <td {...cell(4, "whitespace-nowrap p-2 text-fg")}>{r.status ?? "—"}</td>
-                  <td {...cell(5, "whitespace-nowrap p-2 text-right tabular-nums font-semibold text-fg-strong")}>
+                  <td {...cell(5, "whitespace-nowrap p-2 text-fg")}>{r.status ?? "—"}</td>
+                  <td {...cell(6, "whitespace-nowrap p-2 text-right tabular-nums font-semibold text-fg-strong")}>
                     {formatPrice(r.active_price)}
                   </td>
-                  <td {...cell(6, "whitespace-nowrap p-2 text-right tabular-nums font-medium text-fg-strong")}>
+                  <td {...cell(7, "whitespace-nowrap p-2 text-right tabular-nums font-medium text-fg-strong")}>
                     {formatPrice(r.promo_price)}
                   </td>
                   <td
-                    {...cell(7, "whitespace-nowrap p-2 text-right tabular-nums text-sm text-fg")}
+                    {...cell(8, "whitespace-nowrap p-2 text-right tabular-nums text-sm text-fg")}
                     title="Custo no cache de preços (tela Preços / produto vinculado)"
                   >
                     {formatPrice(r.cost_price)}
                   </td>
-                  <td {...cell(8, "p-2")}>
+                  <td {...cell(9, "p-2")}>
                     <span
                       className={`inline-flex rounded-app px-2 py-0.5 text-xs font-medium ${tipoBadge}`}
                     >
                       {tipoLabel}
                     </span>
                   </td>
-                  <td {...cell(9, "max-w-[14rem] p-2 text-xs text-fg")} title={r.promotionType ?? undefined}>
+                  <td {...cell(10, "max-w-[14rem] p-2 text-xs text-fg")} title={r.promotionType ?? undefined}>
                     <span className="line-clamp-2">{labelForMlPromotionType(r.promotionType)}</span>
                   </td>
-                  <td {...cell(10, "max-w-[24rem] p-2 text-xs leading-snug text-fg")}>
+                  <td {...cell(11, "max-w-[24rem] p-2 text-xs leading-snug text-fg")}>
                     <div className="font-medium text-fg-strong">{r.promotionLabel}</div>
                     {r.value_hint ? (
                       <div className="mt-0.5 text-[11px] text-fg-muted">{r.value_hint}</div>
                     ) : null}
                   </td>
-                  <td {...cell(11, "whitespace-nowrap p-2 text-right text-sm font-semibold text-green-700 dark:text-green-400")}>
+                  <td {...cell(12, "whitespace-nowrap p-2 text-right text-sm font-semibold text-green-700 dark:text-green-400")}>
                     {calc ? formatPrice(calc.vai_receber) : "—"}
                   </td>
-                  <td {...cell(12, "whitespace-nowrap p-2 text-right text-sm tabular-nums")}>
+                  <td {...cell(13, "whitespace-nowrap p-2 text-right text-sm tabular-nums")}>
                     {profit != null ? (
                       <span className={profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
                         {formatPrice(profit)}
@@ -1290,7 +1491,7 @@ function PromocoesContent() {
                       <span className="text-fg-muted">—</span>
                     )}
                   </td>
-                  <td {...cell(13, "whitespace-nowrap p-2 text-right text-sm tabular-nums")}>
+                  <td {...cell(14, "whitespace-nowrap p-2 text-right text-sm tabular-nums")}>
                     {profitPercent != null ? (
                       <span
                         className={
@@ -1304,10 +1505,10 @@ function PromocoesContent() {
                       <span className="text-fg-muted">—</span>
                     )}
                   </td>
-                  <td {...cell(14, "whitespace-nowrap p-2 text-right text-sm text-amber-700 dark:text-amber-300")}>
+                  <td {...cell(15, "whitespace-nowrap p-2 text-right text-sm text-amber-700 dark:text-amber-300")}>
                     {calc ? formatPrice(calc.fee) : "—"}
                   </td>
-                  <td {...cell(15, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(16, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.shipping_cost > 0 ? (
                         <span className="text-red-600 dark:text-red-400">{formatPrice(calc.shipping_cost)}</span>
@@ -1318,7 +1519,7 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(16, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(17, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.tax_amount > 0 ? (
                         <span className="text-orange-600 dark:text-orange-400" title={r.tax_percent ? `${r.tax_percent}%` : undefined}>
@@ -1331,7 +1532,7 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(17, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(18, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.extra_fee_amount > 0 ? (
                         <span
@@ -1347,7 +1548,7 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(18, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(19, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.fixed_expenses_amount > 0 ? (
                         <span className="text-indigo-600 dark:text-indigo-400">{formatPrice(calc.fixed_expenses_amount)}</span>
@@ -1358,13 +1559,13 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(19, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_start_at ?? undefined}>
+                  <td {...cell(20, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_start_at ?? undefined}>
                     {formatCampaignDatePt(r.campaign_start_at)}
                   </td>
-                  <td {...cell(20, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_finish_at ?? undefined}>
+                  <td {...cell(21, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_finish_at ?? undefined}>
                     {formatCampaignDatePt(r.campaign_finish_at)}
                   </td>
-                  <td {...cell(21, "p-2")}>
+                  <td {...cell(22, "p-2")}>
                     {r.permalink ? (
                       <a
                         href={r.permalink}

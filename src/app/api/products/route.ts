@@ -112,6 +112,7 @@ export async function POST(request: NextRequest) {
       tax_percent: body.tax_percent ?? null,
       extra_fee_percent: body.extra_fee_percent ?? null,
       fixed_expenses: body.fixed_expenses ?? null,
+      pma: body.pma ?? null,
     })
     .select()
     .single();
