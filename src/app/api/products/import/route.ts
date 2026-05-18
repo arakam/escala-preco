@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+/** PostgREST/Supabase limita ~1000 linhas por request; importar em lotes. */
+const UPSERT_BATCH_SIZE = 500;
+
+export const maxDuration = 120;
+
 interface ParsedProduct {
   sku: string;
   title: string;
@@ -226,23 +231,42 @@ export async function POST(request: NextRequest) {
     user_id: user.id,
   }));
 
-  const { error } = await supabase.from("products").upsert(productsWithUser, {
-    onConflict: "user_id,sku",
-    ignoreDuplicates: mode === "skip",
-  });
+  let imported = 0;
+  const upsertErrors: string[] = [];
 
-  if (error) {
-    console.error("Erro ao importar produtos:", error);
+  for (let i = 0; i < productsWithUser.length; i += UPSERT_BATCH_SIZE) {
+    const batch = productsWithUser.slice(i, i + UPSERT_BATCH_SIZE);
+    const { error } = await supabase.from("products").upsert(batch, {
+      onConflict: "user_id,sku",
+      ignoreDuplicates: mode === "skip",
+    });
+
+    if (error) {
+      console.error(`[Import] Erro no lote ${i / UPSERT_BATCH_SIZE + 1}:`, error);
+      upsertErrors.push(
+        `Lote ${i / UPSERT_BATCH_SIZE + 1} (linhas ~${i + 2}–${i + batch.length + 1}): ${error.message}`
+      );
+      break;
+    }
+    imported += batch.length;
+  }
+
+  if (imported === 0 && upsertErrors.length > 0) {
     return NextResponse.json(
-      { error: "Erro ao importar produtos", details: error.message },
+      { error: "Erro ao importar produtos", details: upsertErrors },
       { status: 500 }
     );
   }
 
+  const allErrors = [...errors, ...upsertErrors];
+  const partial = imported < deduplicatedProducts.length;
+
   return NextResponse.json({
-    success: true,
-    imported: deduplicatedProducts.length,
+    success: !partial,
+    imported,
+    parsed: deduplicatedProducts.length,
     duplicatesRemoved,
-    errors: errors.length > 0 ? errors : undefined,
+    partial,
+    errors: allErrors.length > 0 ? allErrors : undefined,
   });
 }

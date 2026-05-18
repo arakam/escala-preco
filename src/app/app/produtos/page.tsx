@@ -96,7 +96,13 @@ function ProdutosPageContent() {
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ success: boolean; imported?: number; errors?: string[] } | null>(null);
+  const [importResult, setImportResult] = useState<{
+    success: boolean;
+    imported?: number;
+    parsed?: number;
+    partial?: boolean;
+    errors?: string[];
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [financeLoading, setFinanceLoading] = useState(false);
@@ -533,7 +539,13 @@ function ProdutosPageContent() {
       const data = await res.json();
 
       if (res.ok) {
-        setImportResult({ success: true, imported: data.imported, errors: data.errors });
+        setImportResult({
+          success: data.success !== false,
+          imported: data.imported,
+          parsed: data.parsed,
+          partial: data.partial,
+          errors: data.errors,
+        });
         loadProducts();
         void loadUnregisteredSkus();
         reloadOnboarding();
@@ -1697,8 +1709,19 @@ function ProdutosPageContent() {
                     importResult.success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
                   }`}
                 >
-                  {importResult.success ? (
-                    <p>{importResult.imported} produto(s) importado(s) com sucesso!</p>
+                  {importResult.success && !importResult.partial ? (
+                    <p>
+                      {importResult.imported ?? 0} produto(s) importado(s) com sucesso
+                      {importResult.parsed != null && importResult.parsed !== importResult.imported
+                        ? ` (${importResult.parsed} no arquivo)`
+                        : ""}
+                      .
+                    </p>
+                  ) : importResult.partial ? (
+                    <p>
+                      Importação parcial: {importResult.imported ?? 0} de {importResult.parsed ?? "?"} produto(s).
+                      Veja os avisos abaixo.
+                    </p>
                   ) : (
                     <p>{importResult.errors?.[0] || "Erro ao importar"}</p>
                   )}
