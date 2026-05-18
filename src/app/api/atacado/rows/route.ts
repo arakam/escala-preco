@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { NextRequest, NextResponse } from "next/server";
+import { isAllPageSize } from "@/lib/table-pagination";
 
 const PAGE_SIZE = 50;
 /** Máximo por requisição (alinhado à tela de Preços para regras em massa em catálogos maiores). */
@@ -64,12 +65,16 @@ export async function GET(request: NextRequest) {
   const filterSku = searchParams.get("sku")?.trim() ?? "";
   const filterVariation = searchParams.get("variation") ?? ""; // "com" | "sem" | ""
   const hideVariations = searchParams.get("hide_variations") === "true"; // Mostrar só anúncios, sem expandir variações
-  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
-  const limit = Math.min(
-    MAX_PAGE_LIMIT,
-    Math.max(1, parseInt(searchParams.get("limit") ?? String(PAGE_SIZE), 10) || PAGE_SIZE)
-  );
-  const from = (page - 1) * limit;
+  const limitParam = parseInt(searchParams.get("limit") ?? String(PAGE_SIZE), 10);
+  const showAll = isAllPageSize(limitParam);
+  const page = showAll ? 1 : Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
+  const limit = showAll
+    ? MAX_PAGE_LIMIT
+    : Math.min(
+        MAX_PAGE_LIMIT,
+        Math.max(1, Number.isFinite(limitParam) ? limitParam : PAGE_SIZE)
+      );
+  const from = showAll ? 0 : (page - 1) * limit;
 
   if (!accountId) {
     return NextResponse.json({ error: "accountId obrigatório" }, { status: 400 });
@@ -556,10 +561,12 @@ export async function GET(request: NextRequest) {
 
   const total = filtered.length;
   const totalItems = new Set(filtered.map((r) => r.item_id)).size;
-  const paginated = filtered.slice(from, from + limit);
+  const paginated = showAll
+    ? filtered
+    : filtered.slice(from, from + limit);
 
   return NextResponse.json(
-    { rows: paginated, total, totalItems, page, limit },
+    { rows: paginated, total, totalItems, page, limit: showAll ? 0 : limit },
     { headers: { "Cache-Control": "no-store, max-age=0" } }
   );
 }

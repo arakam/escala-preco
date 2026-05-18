@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
+import { fetchAllViaRange, isAllPageSize } from "@/lib/table-pagination";
 
 const DEFAULT_PAGE_SIZE = 20;
 /** Alinhado às opções da tela Anúncios (10…1000). */
@@ -48,45 +49,60 @@ export async function GET(
   const limitParam = searchParams.get("limit");
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
   const parsedLimit = limitParam != null && limitParam !== "" ? parseInt(limitParam, 10) : NaN;
+  const showAll = !familyId && isAllPageSize(parsedLimit);
   const pageSize = familyId
     ? Math.min(
         MAX_PAGE_SIZE_FAMILY,
         Math.max(1, Number.isFinite(parsedLimit) ? parsedLimit : MAX_PAGE_SIZE_FAMILY)
       )
-    : Math.min(
-        MAX_PAGE_SIZE,
-        Math.max(1, Number.isFinite(parsedLimit) ? parsedLimit : DEFAULT_PAGE_SIZE)
+    : showAll
+      ? 0
+      : Math.min(
+          MAX_PAGE_SIZE,
+          Math.max(1, Number.isFinite(parsedLimit) ? parsedLimit : DEFAULT_PAGE_SIZE)
+        );
+  const from = familyId ? 0 : showAll ? 0 : (page - 1) * pageSize;
+  const to = from + (showAll ? 0 : pageSize - 1);
+
+  const buildBaseQuery = () => {
+    let q = supabase
+      .from("ml_items")
+      .select(
+        "item_id, title, status, price, has_variations, thumbnail, permalink, updated_at, wholesale_prices_json, user_product_id, family_id, family_name, listing_type_id, category_id",
+        { count: "exact" }
+      )
+      .eq("account_id", accountId)
+      .order("updated_at", { ascending: false });
+    if (search) {
+      q = q.or(
+        `title.ilike.%${search}%,item_id.ilike.%${search}%,family_name.ilike.%${search}%,user_product_id.ilike.%${search}%`
       );
-  const from = familyId ? 0 : (page - 1) * pageSize;
-  const to = from + pageSize - 1;
+    }
+    if (statusFilter) q = q.eq("status", statusFilter);
+    if (mlbuOnly) q = q.not("user_product_id", "is", null);
+    if (familyId) q = q.eq("family_id", familyId);
+    if (mlbuCode) q = q.ilike("user_product_id", `%${mlbuCode}%`);
+    if (listingTypeId) q = q.eq("listing_type_id", listingTypeId);
+    return q;
+  };
 
-  let query = supabase
-    .from("ml_items")
-    .select("item_id, title, status, price, has_variations, thumbnail, permalink, updated_at, wholesale_prices_json, user_product_id, family_id, family_name, listing_type_id, category_id", { count: "exact" })
-    .eq("account_id", accountId)
-    .order("updated_at", { ascending: false })
-    .range(from, to);
-
-  if (search) {
-    query = query.or(`title.ilike.%${search}%,item_id.ilike.%${search}%,family_name.ilike.%${search}%,user_product_id.ilike.%${search}%`);
-  }
-  if (statusFilter) {
-    query = query.eq("status", statusFilter);
-  }
-  if (mlbuOnly) {
-    query = query.not("user_product_id", "is", null);
-  }
-  if (familyId) {
-    query = query.eq("family_id", familyId);
-  }
-  if (mlbuCode) {
-    query = query.ilike("user_product_id", `%${mlbuCode}%`);
-  }
-  if (listingTypeId) {
-    query = query.eq("listing_type_id", listingTypeId);
+  if (showAll) {
+    const { rows, total, error } = await fetchAllViaRange((rangeFrom, rangeTo) =>
+      buildBaseQuery().range(rangeFrom, rangeTo)
+    );
+    if (error) {
+      console.error("[items list]", error);
+      return NextResponse.json({ error: "Erro ao listar itens" }, { status: 500 });
+    }
+    return NextResponse.json({
+      items: rows,
+      total,
+      page: 1,
+      page_size: 0,
+    });
   }
 
-  const { data: items, error, count } = await query;
+  const { data: items, error, count } = await buildBaseQuery().range(from, to);
   if (error) {
     console.error("[items list]", error);
     return NextResponse.json({ error: "Erro ao listar itens" }, { status: 500 });

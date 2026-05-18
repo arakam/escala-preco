@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllViaRange, isAllPageSize } from "@/lib/table-pagination";
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -13,20 +14,13 @@ export async function GET(request: NextRequest) {
 
   const searchParams = request.nextUrl.searchParams;
   const search = searchParams.get("search") || "";
-  const page = parseInt(searchParams.get("page") || "1", 10);
-  const limit = parseInt(searchParams.get("limit") || "50", 10);
+  const limitParam = parseInt(searchParams.get("limit") || "50", 10);
+  const showAll = isAllPageSize(limitParam);
+  const page = showAll ? 1 : parseInt(searchParams.get("page") || "1", 10);
+  const limit = showAll ? 0 : limitParam;
   const offset = (page - 1) * limit;
   const sortBy = searchParams.get("sortBy") || "total_listings";
   const sortOrder = searchParams.get("sortOrder") === "asc" ? true : false;
-
-  let query = supabase
-    .from("product_listing_stats")
-    .select("*", { count: "exact" })
-    .eq("user_id", user.id);
-
-  if (search) {
-    query = query.or(`sku.ilike.%${search}%,title.ilike.%${search}%`);
-  }
 
   const validSortColumns = [
     "sku",
@@ -42,9 +36,42 @@ export async function GET(request: NextRequest) {
   ];
 
   const sortColumn = validSortColumns.includes(sortBy) ? sortBy : "total_listings";
-  query = query.order(sortColumn, { ascending: sortOrder });
 
-  const { data: stats, error, count } = await query.range(offset, offset + limit - 1);
+  const buildBaseQuery = () => {
+    let q = supabase
+      .from("product_listing_stats")
+      .select("*", { count: "exact" })
+      .eq("user_id", user.id);
+    if (search) {
+      q = q.or(`sku.ilike.%${search}%,title.ilike.%${search}%`);
+    }
+    return q.order(sortColumn, { ascending: sortOrder });
+  };
+
+  if (showAll) {
+    const { rows, total, error } = await fetchAllViaRange((from, to) =>
+      buildBaseQuery().range(from, to)
+    );
+    if (error) {
+      console.error("Erro ao buscar estatísticas:", error);
+      return NextResponse.json(
+        { error: "Erro ao buscar estatísticas" },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({
+      stats: rows,
+      total,
+      page: 1,
+      limit: 0,
+      totalPages: 1,
+    });
+  }
+
+  const { data: stats, error, count } = await buildBaseQuery().range(
+    offset,
+    offset + limit - 1
+  );
 
   if (error) {
     console.error("Erro ao buscar estatísticas:", error);

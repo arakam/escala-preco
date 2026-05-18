@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
+import { TablePageSizeSelect } from "@/components/TablePageSizeSelect";
 import { OnboardingGate } from "@/components/OnboardingGate";
+import {
+  apiListPage,
+  computeTotalPages,
+  PAGE_SIZE_ALL,
+} from "@/lib/table-pagination";
 import { SingleAnuncioImportBar, SyncImportProgress } from "@/components/SyncImportProgress";
 import { useOnboarding } from "@/contexts/onboarding-context";
 
@@ -296,7 +302,11 @@ function AnunciosPageContent() {
     try {
       const raw = localStorage.getItem(PAGE_SIZE_STORAGE_KEY);
       const n = raw != null ? parseInt(raw, 10) : NaN;
-      if (Number.isFinite(n) && PAGE_SIZE_OPTIONS.includes(n as (typeof PAGE_SIZE_OPTIONS)[number])) {
+      if (
+        Number.isFinite(n) &&
+        (n === PAGE_SIZE_ALL ||
+          PAGE_SIZE_OPTIONS.includes(n as (typeof PAGE_SIZE_OPTIONS)[number]))
+      ) {
         setPageSize(n);
       }
     } catch {
@@ -312,7 +322,10 @@ function AnunciosPageContent() {
   const loadItems = useCallback(async () => {
     if (!account) return;
     setItemsLoading(true);
-    const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
+    const params = new URLSearchParams({
+      page: String(apiListPage(pageSize, page)),
+      limit: String(pageSize),
+    });
     if (search) params.set("search", search);
     if (statusFilter) params.set("status", statusFilter);
     if (listingTypeFilter) params.set("listing_type_id", listingTypeFilter);
@@ -420,7 +433,7 @@ function AnunciosPageContent() {
     setFiltersModalOpen(false);
   }
 
-  const totalPages = Math.ceil(total / pageSize);
+  const totalPages = computeTotalPages(total, pageSize);
 
   const appliedFilters = useMemo(() => {
     const filters: string[] = [];
@@ -807,30 +820,19 @@ function AnunciosPageContent() {
                 <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
               </p>
               <div className="flex items-center gap-2">
-                <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                  Linhas
-                  <select
-                    value={pageSize}
-                    onChange={(e) => {
-                      const next = Number(e.target.value);
-                      setPageSize(next);
-                      setPage(1);
-                      try {
-                        localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(next));
-                      } catch {
-                        // ignore
-                      }
-                    }}
-                    className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 shadow-sm focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                    aria-label="Linhas por página"
-                  >
-                    {[...PAGE_SIZE_OPTIONS].map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <TablePageSizeSelect
+                  value={pageSize}
+                  options={PAGE_SIZE_OPTIONS}
+                  onChange={(next) => {
+                    setPageSize(next);
+                    setPage(1);
+                    try {
+                      localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(next));
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                />
                 {totalPages > 1 && (
                   <>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">Página {page}/{totalPages}</span>

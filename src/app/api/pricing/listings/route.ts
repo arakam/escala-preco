@@ -47,8 +47,12 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url);
-  const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
-  const limit = Math.min(10000, Math.max(1, parseInt(url.searchParams.get("limit") || "50", 10)));
+  const limitParam = parseInt(url.searchParams.get("limit") || "50", 10);
+  const showAll = limitParam === 0;
+  const page = showAll ? 1 : Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
+  const limit = showAll
+    ? 10000
+    : Math.min(10000, Math.max(1, limitParam));
   const search = url.searchParams.get("search")?.trim() || "";
   const statusFilter = url.searchParams.get("status")?.trim() || "";
   /** linked=1 só com produto; linked=0 só sem produto; omitido = todos */

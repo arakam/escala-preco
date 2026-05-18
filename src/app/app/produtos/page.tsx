@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { AppTable } from "@/components/AppTable";
+import { TablePageSizeSelect } from "@/components/TablePageSizeSelect";
 import { OnboardingGate } from "@/components/OnboardingGate";
+import {
+  apiListPage,
+  computeTotalPages,
+  TABLE_PAGE_SIZE_OPTIONS,
+} from "@/lib/table-pagination";
 import { useOnboarding } from "@/contexts/onboarding-context";
 import { Product, ProductInput, ProductListingStats, UnregisteredSku } from "@/lib/db/types";
 
@@ -126,7 +132,10 @@ function ProdutosPageContent() {
 
   const loadProducts = useCallback(async () => {
     setLoading(true);
-    const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
+    const params = new URLSearchParams({
+      page: String(apiListPage(pageSize, page)),
+      limit: String(pageSize),
+    });
     if (search) params.set("search", search);
 
     const res = await fetch(`/api/products?${params}`);
@@ -140,7 +149,10 @@ function ProdutosPageContent() {
 
   const loadStats = useCallback(async () => {
     setLoading(true);
-    const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
+    const params = new URLSearchParams({
+      page: String(apiListPage(pageSize, page)),
+      limit: String(pageSize),
+    });
     if (search) params.set("search", search);
 
     const res = await fetch(`/api/products/stats?${params}`);
@@ -560,7 +572,7 @@ function ProdutosPageContent() {
     }
   }
 
-  const totalPages = Math.ceil(total / pageSize);
+  const totalPages = computeTotalPages(total, pageSize);
 
   return (
     <div className="adminty-produtos-page space-y-5">
@@ -858,24 +870,14 @@ function ProdutosPageContent() {
                 <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                  Linhas
-                  <select
-                    value={pageSize}
-                    onChange={(e) => {
-                      setPageSize(Number(e.target.value));
-                      setPage(1);
-                    }}
-                    className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 shadow-sm focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                    aria-label="Linhas por página"
-                  >
-                    {[10, 20, 25, 50, 100, 250, 500, 750, 1000].map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <TablePageSizeSelect
+                  value={pageSize}
+                  options={TABLE_PAGE_SIZE_OPTIONS}
+                  onChange={(next) => {
+                    setPageSize(next);
+                    setPage(1);
+                  }}
+                />
                 {totalPages > 1 && (
                   <>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -1014,24 +1016,14 @@ function ProdutosPageContent() {
                 <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                  Linhas
-                  <select
-                    value={pageSize}
-                    onChange={(e) => {
-                      setPageSize(Number(e.target.value));
-                      setPage(1);
-                    }}
-                    className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 shadow-sm focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                    aria-label="Linhas por página"
-                  >
-                    {[10, 20, 25, 50, 100, 250, 500, 750, 1000].map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <TablePageSizeSelect
+                  value={pageSize}
+                  options={TABLE_PAGE_SIZE_OPTIONS}
+                  onChange={(next) => {
+                    setPageSize(next);
+                    setPage(1);
+                  }}
+                />
                 {totalPages > 1 && (
                   <>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">

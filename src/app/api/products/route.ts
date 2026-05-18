@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { ProductInput } from "@/lib/db/types";
+import { fetchAllViaRange, isAllPageSize } from "@/lib/table-pagination";
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -14,23 +15,47 @@ export async function GET(request: NextRequest) {
 
   const searchParams = request.nextUrl.searchParams;
   const search = searchParams.get("search") || "";
-  const page = parseInt(searchParams.get("page") || "1", 10);
-  const limit = parseInt(searchParams.get("limit") || "50", 10);
+  const limitParam = parseInt(searchParams.get("limit") || "50", 10);
+  const showAll = isAllPageSize(limitParam);
+  const page = showAll ? 1 : parseInt(searchParams.get("page") || "1", 10);
+  const limit = showAll ? 0 : limitParam;
   const offset = (page - 1) * limit;
 
-  let query = supabase
-    .from("products")
-    .select("*", { count: "exact" })
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+  const buildBaseQuery = () => {
+    let q = supabase
+      .from("products")
+      .select("*", { count: "exact" })
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    if (search) {
+      q = q.or(
+        `sku.ilike.%${search}%,title.ilike.%${search}%,ean.ilike.%${search}%`
+      );
+    }
+    return q;
+  };
 
-  if (search) {
-    query = query.or(
-      `sku.ilike.%${search}%,title.ilike.%${search}%,ean.ilike.%${search}%`
+  if (showAll) {
+    const { rows, total, error } = await fetchAllViaRange((from, to) =>
+      buildBaseQuery().range(from, to)
     );
+    if (error) {
+      console.error("Erro ao buscar produtos:", error);
+      return NextResponse.json({ error: "Erro ao buscar produtos" }, { status: 500 });
+    }
+    return NextResponse.json({
+      products: rows,
+      total,
+      page: 1,
+      limit: 0,
+      totalPages: 1,
+    });
   }
 
-  const { data: products, error, count } = await query.range(offset, offset + limit - 1);
+  const { data: products, error, count } = await buildBaseQuery().range(
+    offset,
+    offset + limit - 1
+  );
 
   if (error) {
     console.error("Erro ao buscar produtos:", error);

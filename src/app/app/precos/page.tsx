@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useState, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { AppTable } from "@/components/AppTable";
+import { TablePageSizeSelect } from "@/components/TablePageSizeSelect";
 import { OnboardingGate } from "@/components/OnboardingGate";
+import {
+  apiListPage,
+  computeTotalPages,
+  isAllPageSize,
+  PRECO_PAGE_SIZE_OPTIONS,
+} from "@/lib/table-pagination";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 import { PRICING_CALCULATE_CLIENT_BATCH_SIZE } from "@/lib/pricing/calculate-limits";
 import { calculateFullPricing as computeFullPricingBreakdown, type FullPricingBreakdown } from "@/lib/pricing/full-net";
@@ -1077,9 +1084,11 @@ function PrecosPageContent() {
   const MAX_CLIENT_SIDE_LOAD = 10000;
   const DEFAULT_CLIENT_SIDE_LOAD = 2000;
   const limitForRequest = clientSideFiltering
-    ? (loadAllResults ? MAX_CLIENT_SIDE_LOAD : DEFAULT_CLIENT_SIDE_LOAD)
+    ? loadAllResults || isAllPageSize(pageSize)
+      ? MAX_CLIENT_SIDE_LOAD
+      : DEFAULT_CLIENT_SIDE_LOAD
     : pageSize;
-  const pageForRequest = clientSideFiltering ? 1 : page;
+  const pageForRequest = clientSideFiltering ? 1 : apiListPage(pageSize, page);
 
   const loadListings = useCallback(async () => {
     setLoading(true);
@@ -2383,8 +2392,8 @@ function PrecosPageContent() {
 
   /** Com filtros que dependem do cliente (lucro ou vendas 30d), paginação no cliente; senão usa total do servidor */
   const totalPages = clientSideFiltering
-    ? Math.max(1, Math.ceil(filteredListings.length / pageSize))
-    : Math.ceil(total / pageSize);
+    ? computeTotalPages(filteredListings.length, pageSize)
+    : computeTotalPages(total, pageSize);
 
   /**
    * Colunas congeladas: `left` = soma dos minWidth das colunas pinadas anteriores (igual ao `<colgroup>`).
@@ -2481,6 +2490,7 @@ function PrecosPageContent() {
   /** Com filtros no cliente (lucro, vendas 30d, sem promoção, fora do mínimo 5% ML), mostra só a fatia da página atual; senão mostra todos da página */
   const sortedListings = useMemo(() => {
     if (!clientSideFiltering) return filteredListings;
+    if (isAllPageSize(pageSize)) return filteredListings;
     const start = (page - 1) * pageSize;
     return filteredListings.slice(start, start + pageSize);
   }, [filteredListings, clientSideFiltering, page, pageSize]);
@@ -3430,26 +3440,14 @@ function PrecosPageContent() {
                   Carregar todos (até 10.000)
                 </button>
               )}
-              <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                Linhas
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setPageSize(value);
-                    setPage(1);
-                  }}
-                  className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 shadow-sm focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                  aria-label="Linhas por página"
-                >
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                  <option value={500}>500</option>
-                  <option value={1000}>1000</option>
-                </select>
-              </label>
+              <TablePageSizeSelect
+                value={pageSize}
+                options={PRECO_PAGE_SIZE_OPTIONS}
+                onChange={(next) => {
+                  setPageSize(next);
+                  setPage(1);
+                }}
+              />
               {totalPages > 1 && (
                 <>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400">Página {page}/{totalPages}</span>

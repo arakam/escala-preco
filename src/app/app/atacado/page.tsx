@@ -3,7 +3,13 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
+import { TablePageSizeSelect } from "@/components/TablePageSizeSelect";
 import { OnboardingGate } from "@/components/OnboardingGate";
+import {
+  apiListPage,
+  computeTotalPages,
+  TABLE_PAGE_SIZE_OPTIONS,
+} from "@/lib/table-pagination";
 import { ReceivableModal } from "@/components/ReceivableModal";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 import { normalizeTiers, validateTiers, type Tier } from "@/lib/atacado";
@@ -770,7 +776,11 @@ function AtacadoPageContent() {
   const loadRows = useCallback(async (forceRefresh = false) => {
     if (!accountId) return;
     setLoadingRows(true);
-    const params = new URLSearchParams({ accountId, page: String(page), limit: String(pageSize) });
+    const params = new URLSearchParams({
+      accountId,
+      page: String(apiListPage(pageSize, page)),
+      limit: String(pageSize),
+    });
     if (filtersApplied.mlb.trim()) params.set("mlb", filtersApplied.mlb.trim());
     if (filtersApplied.mlbu.trim()) params.set("mlbu_code", filtersApplied.mlbu.trim());
     if (filtersApplied.title.trim()) params.set("title", filtersApplied.title.trim());
@@ -1642,7 +1652,7 @@ function AtacadoPageContent() {
     }
   }, [applyJobId, applyJob?.job?.status, fetchApplyJob]);
 
-  const totalPages = Math.ceil(total / pageSize) || 1;
+  const totalPages = computeTotalPages(total, pageSize);
 
   if (accountsLoaded && accounts.length === 0) {
     return (
@@ -2440,25 +2450,14 @@ function AtacadoPageContent() {
                 )}
               </p>
               <div className="flex items-center gap-2">
-                <label className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                  Linhas
-                  <select
-                    value={pageSize}
-                    onChange={(e) => {
-                      const value = Number(e.target.value);
-                      setPageSize(value);
-                      setPage(1);
-                    }}
-                    className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[11px] text-slate-700 shadow-sm focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                    aria-label="Linhas por página"
-                  >
-                    {[10, 20, 25, 50, 100, 250, 500, 750, 1000].map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <TablePageSizeSelect
+                  value={pageSize}
+                  options={TABLE_PAGE_SIZE_OPTIONS}
+                  onChange={(next) => {
+                    setPageSize(next);
+                    setPage(1);
+                  }}
+                />
                 {totalPages > 1 && (
                   <>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">
