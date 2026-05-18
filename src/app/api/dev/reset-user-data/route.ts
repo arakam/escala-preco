@@ -55,6 +55,9 @@ export async function POST() {
     ["promotions_cache_rows", supabase.from("promotions_cache_rows").delete().eq("user_id", user.id)],
     ["ml_webhook_notifications", supabase.from("ml_webhook_notifications").delete().eq("user_id", user.id)],
     ["ml_promotion_webhook_alerts", supabase.from("ml_promotion_webhook_alerts").delete().eq("user_id", user.id)],
+    ["ml_order_items", supabase.from("ml_order_items").delete().eq("user_id", user.id)],
+    ["ml_orders", supabase.from("ml_orders").delete().eq("user_id", user.id)],
+    ["ml_sales_sync_state", supabase.from("ml_sales_sync_state").delete().eq("user_id", user.id)],
   ];
 
   for (const [label, op] of userScoped) {

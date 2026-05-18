@@ -15,6 +15,10 @@ import { computeItemsFees, type PricingFeeInputItem } from "@/lib/pricing/comput
 import { calculateFullPricing } from "@/lib/pricing/full-net";
 import { PRICING_CALCULATE_CLIENT_BATCH_SIZE } from "@/lib/pricing/calculate-limits";
 import {
+  buildMlActivePromotionsMapFromFlatPromoRows,
+  patchPricingCacheMlActivePromotions,
+} from "@/lib/mercadolivre/ml-active-promotions-from-cache";
+import {
   inferPromotionTypeFromAnyLabelText,
   normalizeMlPromotionTypeCode,
 } from "@/lib/mercadolivre/ml-promotion-types";
@@ -1129,6 +1133,19 @@ async function writePromotionsCacheForMlItemPage(ctx: {
     }
   }
 
+  if (itemIds.length > 0) {
+    const promoTextByItem = buildMlActivePromotionsMapFromFlatPromoRows(flat);
+    for (const id of itemIds) {
+      const key = String(id).trim().toUpperCase();
+      if (!promoTextByItem.has(key)) promoTextByItem.set(key, "");
+    }
+    try {
+      await patchPricingCacheMlActivePromotions(adminSupabase, accountId, promoTextByItem);
+    } catch (e) {
+      console.warn("[promotions-cache] sync pricing_cache.ml_active_promotions", e);
+    }
+  }
+
   return { apiRows, total, itemIds };
 }
 
@@ -1144,6 +1161,8 @@ export async function refreshPromotionsCache(params: {
   search: string;
   linkFilter?: PromotionsLinkFilter;
   refreshScope?: "page" | "all";
+  /** Chamado após cada página processada no scope `all` (processed, totalPages). */
+  onProgress?: (processed: number, totalPages: number) => void | Promise<void>;
 }): Promise<{ rows: PromoOverviewFlatApiRow[]; total: number; snapshot_at: string }> {
   const { supabase, accountId, userId } = params;
   const norm = normalizeCacheSearch(params.search);
@@ -1221,6 +1240,7 @@ export async function refreshPromotionsCache(params: {
         deleteItemIdsBeforeInsert: true,
       });
       for (const id of itemIds) keptItemIds.add(id);
+      if (params.onProgress) await params.onProgress(p, pages);
     }
 
     await pruneStalePromotionsCacheRows(supabase, accountId, userId, norm, linkKey, keptItemIds);

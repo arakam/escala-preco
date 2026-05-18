@@ -5,7 +5,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type JobStatus = "queued" | "running" | "success" | "failed" | "partial";
-export type JobType = "sync_items" | "apply_wholesale_prices" | "refresh_price_references";
+export type JobType =
+  | "sync_items"
+  | "apply_wholesale_prices"
+  | "refresh_price_references"
+  | "refresh_promotions_cache";
 
 export interface JobRow {
   id: string;

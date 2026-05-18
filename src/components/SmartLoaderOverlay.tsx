@@ -16,7 +16,7 @@ export type SmartLoaderPhase = "default" | "refresh-cache" | "calculate";
 const REFRESH_CACHE_MESSAGES = [
   "Lendo anúncios e variações do banco…",
   "Montando o cache de preços (MLB, SKU, custos)…",
-  "Carregando preços planejados salvos…",
+  "Carregando preços planejados e promoções ML do cache…",
   "Buscando vendas e pedidos dos últimos 30 dias no ML…",
   "Gravando o cache para a calculadora…",
 ] as const;

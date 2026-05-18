@@ -1,19 +1,23 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
+import { getActiveJob, createJob } from "@/lib/jobs";
+import { runSyncInBackground } from "@/lib/server/after-response";
+import { runRefreshPromotionsCacheJob } from "@/lib/mercadolivre/promotions-cache-worker";
 
 /** Sincronização completa de promoções pode levar vários minutos em contas grandes. */
-export const maxDuration = 300;
+export const maxDuration = 60;
 import {
   PROMOTIONS_OVERVIEW_PAGE_SIZE,
   parsePromotionsLinkFilter,
   parsePromotionsOverviewFilters,
   readPromotionsCache,
-  refreshPromotionsCache,
 } from "@/lib/mercadolivre/promotions-cache";
+
+const JOB_TYPE = "refresh_promotions_cache" as const;
 
 /**
  * GET: lê snapshot salvo em promotions_cache_rows (página + busca).
- * POST: atualiza o snapshot no ML + recalcula taxas e grava no cache.
+ * POST: enfileira job para atualizar snapshot no ML + recalcular taxas e gravar no cache.
  */
 export async function GET(
   request: NextRequest,
@@ -105,27 +109,34 @@ export async function POST(
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
   const linkFilter = parsePromotionsLinkFilter(searchParams.get("linked"));
 
-  try {
-    const { rows, total, snapshot_at } = await refreshPromotionsCache({
-      supabase,
-      accountId,
-      userId: user.id,
-      page,
-      search,
-      linkFilter,
-      refreshScope: "all",
+  const active = await getActiveJob(supabase, accountId, JOB_TYPE);
+  if (active) {
+    return NextResponse.json({
+      job_id: active.id,
+      status: active.status,
+      message: "Recarregamento de promoções já em andamento",
     });
+  }
+
+  try {
+    const { id: jobId } = await createJob(supabase, accountId, JOB_TYPE);
+    runSyncInBackground(() =>
+      runRefreshPromotionsCacheJob(jobId, accountId, {
+        userId: user.id,
+        page,
+        search,
+        linkFilter,
+        refreshScope: "all",
+      })
+    );
 
     return NextResponse.json({
-      rows,
-      total,
-      page,
-      page_size: PROMOTIONS_OVERVIEW_PAGE_SIZE,
-      snapshot_at,
-      cache_hit: true,
+      job_id: jobId,
+      status: "queued",
+      message: "Recarregamento iniciado. Acompanhe o progresso na tela.",
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Erro ao atualizar promoções";
+    const msg = e instanceof Error ? e.message : "Erro ao iniciar atualização de promoções";
     console.error("[promotions-overview] POST", e);
     const status =
       msg.includes("Token") || msg.includes("access token") ? 401 : msg.includes("não encontrada") ? 404 : 500;

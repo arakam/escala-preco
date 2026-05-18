@@ -25,6 +25,7 @@ const admintyUiFont = Open_Sans({
 });
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
+const IS_NEXT_DEV = process.env.NODE_ENV === "development";
 const ADMINTY_SIDEBAR_COLLAPSED_KEY = "escalapreco_adminty_sidebar_collapsed";
 
 interface MLAccount {
@@ -82,6 +83,7 @@ function appPageTitle(pathname: string | null) {
   if (pathname.startsWith("/app/precos")) return "Preço";
   if (pathname.startsWith("/app/promocoes")) return "Promoções";
   if (pathname.startsWith("/app/configuracao")) return "Configuração";
+  if (pathname.startsWith("/app/dev/vendas")) return "Vendas";
   return "Painel";
 }
 
@@ -337,6 +339,17 @@ function AdmintyDashboardShell({
             >
               <AdmintyIconPromo />
               <span className={labelClass}>Promoções</span>
+            </Link>
+          )}
+          {IS_NEXT_DEV && (
+            <Link
+              href="/app/dev/vendas"
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(navItemActive(pathname, "/app/dev/vendas"), false)}
+              title={sidebarCollapsed ? "Vendas" : undefined}
+            >
+              <AdmintyIconCurrency />
+              <span className={labelClass}>Vendas</span>
             </Link>
           )}
           <Link

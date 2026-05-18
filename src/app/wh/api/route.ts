@@ -4,6 +4,7 @@ import {
   resolveAndStorePromotionWebhookAlert,
 } from "@/lib/mercadolivre/promotion-webhook-alerts";
 import { scheduleItemsWebhookSync } from "@/lib/mercadolivre/webhook-items-sync";
+import { processOrdersWebhookSync } from "@/lib/mercadolivre/webhook-orders-sync";
 import { NextRequest, NextResponse } from "next/server";
 
 /**
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
 
   const { data: accounts, error: accErr } = await supabase
     .from("ml_accounts")
-    .select("id, user_id, auto_sync_items_webhook")
+    .select("id, user_id, auto_sync_items_webhook, ml_user_id")
     .eq("ml_user_id", mlUserId);
 
   if (accErr) {
@@ -111,6 +112,12 @@ export async function POST(request: NextRequest) {
   }
 
   scheduleItemsWebhookSync(accounts, topic, resource);
+
+  try {
+    await processOrdersWebhookSync(supabase, accounts, topic, resource);
+  } catch (e) {
+    console.error("[ML webhook] orders sync:", e);
+  }
 
   return NextResponse.json({ ok: true, stored: rows.length });
 }

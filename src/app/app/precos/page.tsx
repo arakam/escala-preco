@@ -102,7 +102,7 @@ function MlActivePromotionsCell({ text }: { text: string | null | undefined }) {
   const title =
     count > 0
       ? lines.join("\n")
-      : "Nenhuma promoção ativa no cache (última atualização). Passe o mouse para ver o detalhe quando houver campanhas.";
+      : "Nenhuma promoção ativa no cache. Atualize em Promoções (Recarregar) e depois o cache de Preços.";
   return (
     <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${className}`} title={title}>
       {label}
@@ -3560,7 +3560,7 @@ function PrecosPageContent() {
                 {renderPricingColumnHeader(7, "Promo ML", {
                   align: "right",
                   title:
-                    "Quantidade de campanhas/promoções ativas no ML. Detalhes no tooltip ao passar o mouse sobre o badge. Atualizado com o cache.",
+                    "Campanhas/promoções ativas (cache de Promoções, sem chamada à API do ML no refresh de Preços). Passe o mouse no badge para detalhes.",
                 })}
                 {renderPricingColumnHeader(8, "Preço", { align: "right" })}
                 {renderPricingColumnHeader(9, "Competitividade", {
@@ -4143,7 +4143,7 @@ function PrecosPageContent() {
               </label>
               <label
                 className="flex cursor-pointer items-center gap-2"
-                title="Exibe apenas anúncios sem campanhas/promoções ativas no Mercado Livre (coluna Promo ML = 0) no último refresh do cache"
+                title="Exibe apenas anúncios sem promoções ativas no cache de Promoções (coluna Promo ML = 0)"
               >
                 <input
                   type="checkbox"

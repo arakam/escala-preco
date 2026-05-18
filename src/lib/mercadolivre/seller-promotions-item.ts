@@ -317,6 +317,16 @@ function formatDisplayRowAsLine(r: SellerPromotionDisplayRow): string {
   return `${r.label} — —`;
 }
 
+/** Texto multilinha para `pricing_cache.ml_active_promotions` a partir do cache de promoções. */
+export function buildMlActivePromotionsStorageTextFromDisplayRows(
+  rows: Pick<SellerPromotionDisplayRow, "label" | "promo_price" | "value_hint">[]
+): string {
+  if (rows.length === 0) return "";
+  return rows
+    .map((r) => formatDisplayRowAsLine(r as SellerPromotionDisplayRow))
+    .join("\n");
+}
+
 /** Uma entrada por promoção, com preço isolado para coluna própria na UI. */
 export function partitionSellerPromotionsRich(raw: unknown): {
   active: SellerPromotionDisplayRow[];

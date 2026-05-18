@@ -290,6 +290,10 @@ function PromocoesContent() {
   const [pageSize, setPageSize] = useState(12);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
+  const [refreshJobProgress, setRefreshJobProgress] = useState<{ processed: number; total: number } | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<PromoAlert[]>([]);
   const [accountsLoaded, setAccountsLoaded] = useState(false);
@@ -514,34 +518,81 @@ function PromocoesContent() {
     }
   }, [accountId, page, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl]);
 
+  const pollRefreshJob = useCallback(
+    async (jobId: string) => {
+      const res = await fetch(`/api/jobs/${jobId}`);
+      if (!res.ok) return;
+      const data = (await res.json().catch(() => ({}))) as {
+        job?: { status?: string; processed?: number; total?: number };
+        logs?: { status?: string; message?: string | null }[];
+      };
+      const job = data.job;
+      if (job?.total != null && job.total > 0) {
+        setRefreshJobProgress({ processed: job.processed ?? 0, total: job.total });
+      }
+      const status = job?.status ?? "";
+      if (["success", "failed", "partial"].includes(status)) {
+        setRefreshJobId(null);
+        setRefreshJobProgress(null);
+        setRefreshing(false);
+        if (status === "success" || status === "partial") {
+          await loadData();
+          return;
+        }
+        const lastErr = [...(data.logs ?? [])].reverse().find((l) => l.status === "error");
+        setError(lastErr?.message?.trim() || "Erro ao atualizar promoções.");
+      }
+    },
+    [loadData]
+  );
+
+  useEffect(() => {
+    if (!refreshJobId) return;
+    void pollRefreshJob(refreshJobId);
+    const interval = setInterval(() => void pollRefreshJob(refreshJobId), 2500);
+    return () => clearInterval(interval);
+  }, [refreshJobId, pollRefreshJob]);
+
   const refreshFromMl = useCallback(async () => {
     if (!accountId) return;
     setRefreshing(true);
+    setRefreshJobProgress(null);
     setError(null);
     try {
       const params = new URLSearchParams({ page: String(page) });
       if (qFromUrl) params.set("search", qFromUrl);
       if (linkFromUrl === "linked") params.set("linked", "1");
       else if (linkFromUrl === "unlinked") params.set("linked", "0");
-      if (kindFromUrl) params.set("kind", kindFromUrl);
-      if (profitFromUrl) params.set("profit", profitFromUrl);
-      if (ptypeFromUrl) params.set("ptype", ptypeFromUrl);
-      if (campFromUrl) params.set("camp", campFromUrl);
       const res = await fetch(`/api/mercadolivre/${accountId}/promotions-overview?${params}`, {
         method: "POST",
       });
-      const data = await res.json().catch(() => ({}));
+      const data = (await res.json().catch(() => ({}))) as {
+        job_id?: string;
+        error?: string;
+        message?: string;
+      };
       if (!res.ok) {
-        setError((data as { error?: string }).error || "Erro ao atualizar promoções.");
+        if (res.status === 504) {
+          setError(
+            "O servidor encerrou a conexão por tempo (504). Tente novamente; se persistir, confira os logs do servidor."
+          );
+        } else {
+          setError(data.error || "Erro ao iniciar atualização de promoções.");
+        }
+        setRefreshing(false);
+        return;
+      }
+      if (data.job_id) {
+        setRefreshJobId(data.job_id);
         return;
       }
       await loadData();
+      setRefreshing(false);
     } catch {
       setError("Erro de conexão ao atualizar.");
-    } finally {
       setRefreshing(false);
     }
-  }, [accountId, page, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, loadData]);
+  }, [accountId, page, qFromUrl, linkFromUrl, loadData]);
 
   useEffect(() => {
     void loadData();
@@ -655,11 +706,21 @@ function PromocoesContent() {
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
 
-  const loaderMessagesRefresh = [
-    "Sincronizando todos os anúncios desta lista com o Mercado Livre (pode levar vários minutos)…",
-    "Cada anúncio chama a API de preços e seller-promotions…",
-    "Calculando taxas e gravando o cache para todas as páginas…",
-  ] as const;
+  const loaderMessagesRefresh = useMemo(() => {
+    const base = [
+      "Sincronizando todos os anúncios desta lista com o Mercado Livre (pode levar vários minutos)…",
+      "Cada anúncio chama a API de preços e seller-promotions…",
+      "Calculando taxas e gravando o cache para todas as páginas…",
+    ];
+    if (refreshJobProgress && refreshJobProgress.total > 0) {
+      const { processed, total } = refreshJobProgress;
+      return [
+        `Página ${processed} de ${total} processada(s)…`,
+        ...base,
+      ];
+    }
+    return base;
+  }, [refreshJobProgress]);
 
   const loaderMessagesLoad = [
     "Carregando cache de promoções…",
@@ -960,15 +1021,27 @@ function PromocoesContent() {
       {error && (
         <div className="border-b border-amber-100 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
           {error}
-          <p className="mt-2 text-xs text-amber-800 dark:text-amber-300/90">
-            Se o erro citar tabela inexistente, execute as migrations{" "}
-            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">019_ml_promotion_webhook_alerts.sql</code>,{" "}
-            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">020_promotions_cache.sql</code> e{" "}
-            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">021_promotions_cache_link_filter.sql</code>,{" "}
-            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">022_promotions_cache_promotion_type.sql</code> e{" "}
-            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">023_promotions_cache_campaign_dates.sql</code> e{" "}
-            <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">024_promotions_cache_ml_promotion_id.sql</code> no Supabase.
-          </p>
+          {(() => {
+            const m = error.toLowerCase();
+            const schemaHint =
+              m.includes("does not exist") ||
+              m.includes("não existe") ||
+              m.includes("relation") ||
+              m.includes("42p01") ||
+              (m.includes("column") && (m.includes("not exist") || m.includes("does not")));
+            if (!schemaHint) return null;
+            return (
+              <p className="mt-2 text-xs text-amber-800 dark:text-amber-300/90">
+                Execute no Supabase as migrations{" "}
+                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">019_ml_promotion_webhook_alerts.sql</code>,{" "}
+                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">020_promotions_cache.sql</code>,{" "}
+                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">021_promotions_cache_link_filter.sql</code>,{" "}
+                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">022_promotions_cache_promotion_type.sql</code>,{" "}
+                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">023_promotions_cache_campaign_dates.sql</code> e{" "}
+                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">024_promotions_cache_ml_promotion_id.sql</code>.
+              </p>
+            );
+          })()}
         </div>
       )}
 
