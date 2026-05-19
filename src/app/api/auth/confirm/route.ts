@@ -5,8 +5,8 @@ import { type NextRequest, NextResponse } from "next/server";
 type CookieOption = { name: string; value: string; options?: Record<string, unknown> };
 
 /**
- * Callback de email (recuperação de senha, confirmação de cadastro, etc.).
- * Aceita `code` (PKCE após redirect do Supabase) ou `token_hash` + `type` (template customizado).
+ * Troca token_hash ou code do email por sessão em cookie (servidor).
+ * Usado pelo template de email com {{ .TokenHash }} (não depende de PKCE no navegador).
  */
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
-      console.warn("[auth/confirm] exchangeCodeForSession:", error.message);
+      console.warn("[api/auth/confirm] exchangeCodeForSession:", error.message);
       return failRedirect;
     }
     return response;
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
   });
 
   if (error) {
-    console.warn("[auth/confirm] verifyOtp:", error.message);
+    console.warn("[api/auth/confirm] verifyOtp:", error.message);
     return failRedirect;
   }
 

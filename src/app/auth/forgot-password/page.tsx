@@ -1,11 +1,12 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { getAppOrigin } from "@/lib/app-url";
+import { parseAuthHashError } from "@/lib/auth/parse-hash-error";
 
 function ForgotForm() {
   const [email, setEmail] = useState("");
@@ -14,6 +15,15 @@ function ForgotForm() {
   const [loading, setLoading] = useState(false);
   const searchParams = useSearchParams();
   const linkErr = searchParams.get("erro") === "link";
+  const [hashError, setHashError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const err = parseAuthHashError();
+    if (err) {
+      setHashError(err);
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -23,9 +33,8 @@ function ForgotForm() {
     try {
       const supabase = createClient();
       const origin = getAppOrigin();
-      /** Passa por /auth/confirm para trocar code/token_hash por sessão em cookie (PKCE). */
       const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${origin}/auth/confirm?next=/auth/reset-password`,
+        redirectTo: `${origin}/auth/callback?next=/auth/reset-password`,
       });
       if (err) {
         setError(err.message || "Não foi possível enviar o email. Tente de novo.");
@@ -60,9 +69,10 @@ function ForgotForm() {
         <p className="mb-4 text-sm text-fg-muted">
           Informe seu email. Você receberá um link para criar uma nova senha.
         </p>
-        {linkErr && (
+        {(linkErr || hashError) && (
           <p className="mb-3 rounded bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            O link expirou ou já foi usado. Solicite um novo email abaixo.
+            {hashError ??
+              "O link expirou ou já foi usado. Se o email ainda usa o link padrão do Supabase (domínio supabase.co), altere o template conforme docs/supabase-auth-email.md e solicite um novo email."}
           </p>
         )}
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">

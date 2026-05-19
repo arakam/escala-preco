@@ -4,19 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
-
-function parseHashError(): string | null {
-  if (typeof window === "undefined") return null;
-  const h = window.location.hash.replace(/^#/, "");
-  if (!h.includes("error=")) return null;
-  const p = new URLSearchParams(h);
-  const code = p.get("error_code");
-  const desc = p.get("error_description");
-  if (code === "otp_expired") {
-    return "Este link expirou ou já foi usado (às vezes o antivírus ou o email corporativo abre o link antes de você). Solicite um novo email em Recuperar senha.";
-  }
-  return desc?.replace(/\+/g, " ") || "Não foi possível validar o link.";
-}
+import { parseAuthHashError } from "@/lib/auth/parse-hash-error";
 
 export default function ResetPasswordPage() {
   const [ready, setReady] = useState(false);
@@ -27,7 +15,7 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const hashErr = parseHashError();
+    const hashErr = parseAuthHashError();
     if (hashErr) {
       setHashError(hashErr);
       return;
@@ -42,7 +30,7 @@ export default function ResetPasswordPage() {
       const otpType = search?.get("type");
       if (tokenHash && otpType) {
         const q = new URLSearchParams({ token_hash: tokenHash, type: otpType, next: "/auth/reset-password" });
-        window.location.replace(`/auth/confirm?${q.toString()}`);
+        window.location.replace(`/api/auth/confirm?${q.toString()}`);
         return;
       }
 
