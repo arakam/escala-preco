@@ -30,8 +30,10 @@ type RangeQueryResult<T> = {
 
 /** Busca todas as linhas em lotes (limite ~1000 do Supabase por request). */
 export async function fetchAllViaRange<T>(
-  fetchPage: (from: number, to: number) => PromiseLike<RangeQueryResult<T>>
+  fetchPage: (from: number, to: number) => PromiseLike<RangeQueryResult<T>>,
+  options?: { maxRows?: number }
 ): Promise<{ rows: T[]; total: number; error: unknown }> {
+  const maxRows = options?.maxRows;
   const rows: T[] = [];
   let total = 0;
   let from = 0;
@@ -43,6 +45,10 @@ export async function fetchAllViaRange<T>(
     if (from === 0 && count != null) total = count;
     const batch = data ?? [];
     rows.push(...batch);
+    if (maxRows != null && rows.length >= maxRows) {
+      if (rows.length > maxRows) rows.length = maxRows;
+      break;
+    }
     if (batch.length < SUPABASE_RANGE_BATCH) break;
     from += SUPABASE_RANGE_BATCH;
   }

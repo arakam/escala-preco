@@ -1,5 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  fetchAllViaRange,
+  isAllPageSize,
+  SUPABASE_RANGE_BATCH,
+} from "@/lib/table-pagination";
 import { NextRequest, NextResponse } from "next/server";
 
 export interface PricingListingRow {
@@ -48,11 +53,10 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url);
   const limitParam = parseInt(url.searchParams.get("limit") || "50", 10);
-  const showAll = limitParam === 0;
+  const showAll = isAllPageSize(limitParam);
   const page = showAll ? 1 : Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
-  const limit = showAll
-    ? 10000
-    : Math.min(10000, Math.max(1, limitParam));
+  const limit = showAll ? 0 : Math.min(10000, Math.max(1, limitParam));
+  const fetchLimit = showAll ? 0 : limit;
   const search = url.searchParams.get("search")?.trim() || "";
   const statusFilter = url.searchParams.get("status")?.trim() || "";
   /** linked=1 só com produto; linked=0 só sem produto; omitido = todos */
@@ -61,7 +65,7 @@ export async function GET(req: NextRequest) {
   const skuFilter = url.searchParams.get("sku")?.trim() || "";
   const onlyWithSales30d = url.searchParams.get("only_with_sales") === "1";
 
-  const offset = (page - 1) * limit;
+  const offset = showAll ? 0 : (page - 1) * limit;
 
   const { data: account, error: accountError } = await supabase
     .from("ml_accounts")
@@ -88,10 +92,15 @@ export async function GET(req: NextRequest) {
       return q;
     };
 
-    let dataQuery = buildCacheQuery(serviceSupabase.from("pricing_cache"));
-    if (orderBy === "orders_desc") dataQuery = dataQuery.order("orders_30d", { ascending: false });
-    else if (orderBy === "orders_asc") dataQuery = dataQuery.order("orders_30d", { ascending: true });
-    else dataQuery = dataQuery.order("sort_title", { ascending: true });
+    const buildOrderedCacheQuery = () => {
+      let q = buildCacheQuery(serviceSupabase.from("pricing_cache"));
+      if (orderBy === "orders_desc") q = q.order("orders_30d", { ascending: false });
+      else if (orderBy === "orders_asc") q = q.order("orders_30d", { ascending: true });
+      else q = q.order("sort_title", { ascending: true });
+      return q;
+    };
+
+    const needsBatchFetch = showAll || limit > SUPABASE_RANGE_BATCH;
 
     const lastUpdatedPromise = serviceSupabase
       .from("pricing_cache")
@@ -108,15 +117,35 @@ export async function GET(req: NextRequest) {
       .eq("account_id", account.id)
       .not("product_id", "is", null);
 
-    const [
-      { data: cacheRows, error: cacheErr, count: totalCount },
-      { data: lastRow },
-      { count: linkedRowCount },
-    ] = await Promise.all([
-      dataQuery.range(offset, offset + limit - 1),
+    const [{ data: lastRow }, { count: linkedRowCount }] = await Promise.all([
       lastUpdatedPromise,
       linkedGlobalCountPromise,
     ]);
+
+    let cacheRows: Array<Record<string, unknown>> | null = null;
+    let cacheErr: unknown = null;
+    let totalCount: number | null = null;
+
+    if (needsBatchFetch) {
+      const maxRows = showAll ? undefined : offset + limit;
+      const batchResult = await fetchAllViaRange<Record<string, unknown>>(
+        (from, to) => buildOrderedCacheQuery().range(from, to),
+        maxRows != null ? { maxRows } : undefined
+      );
+      cacheErr = batchResult.error;
+      totalCount = batchResult.total;
+      cacheRows = showAll
+        ? batchResult.rows
+        : batchResult.rows.slice(offset, offset + limit);
+    } else {
+      const pageResult = await buildOrderedCacheQuery().range(
+        offset,
+        offset + limit - 1
+      );
+      cacheRows = pageResult.data as Array<Record<string, unknown>> | null;
+      cacheErr = pageResult.error;
+      totalCount = pageResult.count;
+    }
 
     const lastUpdatedAt = (lastRow?.cache_updated_at as string) ?? null;
     const accountHasLinkedProducts = (linkedRowCount ?? 0) > 0;
@@ -128,7 +157,7 @@ export async function GET(req: NextRequest) {
           listings: [],
           total: 0,
           page,
-          limit,
+          limit: fetchLimit,
           sales: {},
           orders: {},
           price_references: {},
@@ -149,7 +178,7 @@ export async function GET(req: NextRequest) {
         listings: [],
         total: 0,
         page,
-        limit,
+        limit: fetchLimit,
         sales: {},
         orders: {},
         price_references: {},
@@ -255,7 +284,7 @@ export async function GET(req: NextRequest) {
       listings,
       total,
       page,
-      limit,
+      limit: fetchLimit,
       sales: salesMap,
       orders: ordersMap,
       price_references: priceRefsMap,
