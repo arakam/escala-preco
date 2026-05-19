@@ -108,7 +108,21 @@ export type PromotionsOverviewExtraFilters = {
   promotionType?: string;
   /** Fase da campanha pelas datas salvas (`camp` na URL). Vazio = todas. */
   campaignPhase?: "" | PromotionCampaignPhase;
+  /** Somente linhas com PMA (produto vinculado) ≤ preço promoção. */
+  pmaLtePromoPrice?: boolean;
 };
+
+/** PMA do cadastro de produtos ≤ preço na promoção (ambos > 0). */
+export function rowMatchesPmaLtePromoPrice(row: {
+  pma: number | null;
+  promo_price: number | null;
+}): boolean {
+  const pma = row.pma;
+  const promo = row.promo_price;
+  if (pma == null || !Number.isFinite(pma) || pma <= 0) return false;
+  if (promo == null || !Number.isFinite(promo) || promo <= 0) return false;
+  return pma <= promo;
+}
 
 function parseCampaignPhaseParam(raw: string | null | undefined): "" | PromotionCampaignPhase {
   const v = raw?.trim().toLowerCase() ?? "";
@@ -134,11 +148,13 @@ export function parsePromotionsOverviewFilters(searchParams: {
   const promotionType =
     ptypeNorm && /^[A-Z][A-Z0-9_]{0,63}$/.test(ptypeNorm) ? ptypeNorm : "";
   const campaignPhase = parseCampaignPhaseParam(searchParams.get("camp"));
-  return { promotionKind, profit, promotionType, campaignPhase };
+  const pmaRaw = searchParams.get("pmaok")?.trim() ?? searchParams.get("pma_lte")?.trim() ?? "";
+  const pmaLtePromoPrice = pmaRaw === "1" || pmaRaw === "true" || pmaRaw === "sim";
+  return { promotionKind, profit, promotionType, campaignPhase, pmaLtePromoPrice };
 }
 
 function hasPromotionsOverviewExtraFilters(f?: PromotionsOverviewExtraFilters): boolean {
-  return !!(f?.promotionKind || f?.profit || f?.promotionType || f?.campaignPhase);
+  return !!(f?.promotionKind || f?.profit || f?.promotionType || f?.campaignPhase || f?.pmaLtePromoPrice);
 }
 
 function parseTimestampMs(v: unknown): number | null {
@@ -446,6 +462,8 @@ export type PromoOverviewFlatApiRow = {
   } | null;
   profit: number | null;
   profit_percent: number | null;
+  /** PMA (R$) do produto vinculado (`products.pma` via `ml_items.product_id`). */
+  pma: number | null;
 };
 
 function mapFlatToApi(
@@ -498,6 +516,7 @@ function mapFlatToApi(
       : null,
     profit,
     profit_percent: profitPercent,
+    pma: null,
   };
 }
 
@@ -610,7 +629,74 @@ function mapPromotionCacheDbRowToApi(row: Record<string, unknown>): PromoOvervie
     pricing,
     profit,
     profit_percent: profitPercent,
+    pma: null,
   };
+}
+
+/** Anexa `products.pma` do SKU vinculado ao anúncio (`ml_items.product_id`). */
+export async function attachPmaToPromoOverviewRows(
+  supabase: SupabaseClient,
+  accountId: string,
+  rows: PromoOverviewFlatApiRow[]
+): Promise<PromoOverviewFlatApiRow[]> {
+  if (rows.length === 0) return rows;
+
+  const itemIds = Array.from(new Set(rows.map((r) => String(r.item_id).trim()).filter(Boolean)));
+  if (itemIds.length === 0) return rows.map((r) => ({ ...r, pma: null }));
+
+  const { data: mlItems, error: mlErr } = await supabase
+    .from("ml_items")
+    .select("item_id, product_id")
+    .eq("account_id", accountId)
+    .in("item_id", itemIds);
+
+  if (mlErr) {
+    console.warn("[promotions-cache] attachPma ml_items", mlErr);
+    return rows.map((r) => ({ ...r, pma: null }));
+  }
+
+  const productIds = Array.from(
+    new Set(
+      (mlItems ?? [])
+        .map((row) => (row as { product_id?: string | null }).product_id)
+        .filter((id): id is string => id != null && String(id).trim() !== "")
+    )
+  );
+
+  const pmaByProductId = new Map<string, number>();
+  if (productIds.length > 0) {
+    const { data: products, error: prodErr } = await supabase
+      .from("products")
+      .select("id, pma")
+      .in("id", productIds);
+    if (prodErr) {
+      console.warn("[promotions-cache] attachPma products", prodErr);
+    } else {
+      for (const p of products ?? []) {
+        const id = String((p as { id?: string }).id ?? "");
+        const pma = Number((p as { pma?: number | string | null }).pma);
+        if (id && Number.isFinite(pma) && pma > 0) pmaByProductId.set(id, pma);
+      }
+    }
+  }
+
+  const pmaByItemId = new Map<string, number | null>();
+  for (const row of mlItems ?? []) {
+    const itemId = String((row as { item_id?: string }).item_id ?? "").trim();
+    const productId = (row as { product_id?: string | null }).product_id;
+    if (!itemId) continue;
+    if (productId == null || String(productId).trim() === "") {
+      pmaByItemId.set(itemId, null);
+      continue;
+    }
+    const pma = pmaByProductId.get(String(productId)) ?? null;
+    pmaByItemId.set(itemId, pma);
+  }
+
+  return rows.map((r) => ({
+    ...r,
+    pma: pmaByItemId.get(String(r.item_id).trim()) ?? null,
+  }));
 }
 
 export async function countMlItemsForPromotionsPage(
@@ -763,21 +849,27 @@ export async function readPromotionsCache(
     if (campPhase) {
       deduped = deduped.filter((row) => promotionCampaignPhaseFromCacheRow(row) === campPhase);
     }
-    const totalFiltered = deduped.length;
+
+    let apiRows: PromoOverviewFlatApiRow[] = deduped.map(mapPromotionCacheDbRowToApi);
+    apiRows = await attachPmaToPromoOverviewRows(supabase, accountId, apiRows);
+    if (extraFilters!.pmaLtePromoPrice) {
+      apiRows = apiRows.filter(rowMatchesPmaLtePromoPrice);
+    }
+
+    const totalFiltered = apiRows.length;
     const pageSize = PROMOTIONS_OVERVIEW_PAGE_SIZE;
     const fromIdx = (cachePage - 1) * pageSize;
-    const pageSlice = deduped.slice(fromIdx, fromIdx + pageSize);
+    const pageSlice = apiRows.slice(fromIdx, fromIdx + pageSize);
 
     let snapshotAt: string | null =
-      pageSlice[0]?.snapshot_at != null ? String(pageSlice[0].snapshot_at) : null;
-    for (const row of pageSlice) {
+      deduped[0]?.snapshot_at != null ? String(deduped[0].snapshot_at) : null;
+    for (const row of deduped) {
       if (row.snapshot_at == null) continue;
       const s = String(row.snapshot_at);
       if (!snapshotAt || s > snapshotAt) snapshotAt = s;
     }
 
-    const rows: PromoOverviewFlatApiRow[] = pageSlice.map(mapPromotionCacheDbRowToApi);
-    return { rows, total: totalFiltered, snapshot_at: snapshotAt };
+    return { rows: pageSlice, total: totalFiltered, snapshot_at: snapshotAt };
   }
 
   const total = await countMlItemsForPromotionsPage(supabase, accountId, norm, linkKey);
@@ -870,7 +962,12 @@ export async function readPromotionsCache(
     if (!snapshotAt || s > snapshotAt) snapshotAt = s;
   }
 
-  const rows: PromoOverviewFlatApiRow[] = list.map(mapPromotionCacheDbRowToApi);
+  let rows: PromoOverviewFlatApiRow[] = list.map(mapPromotionCacheDbRowToApi);
+  rows = await attachPmaToPromoOverviewRows(supabase, accountId, rows);
+  if (extraFilters?.pmaLtePromoPrice) {
+    rows = rows.filter(rowMatchesPmaLtePromoPrice);
+    return { rows, total: rows.length, snapshot_at: snapshotAt };
+  }
 
   return { rows, total, snapshot_at: snapshotAt };
 }

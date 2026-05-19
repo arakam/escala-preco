@@ -20,6 +20,7 @@ import {
   normalizeMlPromotionTypeCode,
 } from "@/lib/mercadolivre/ml-promotion-types";
 import { OnboardingGate } from "@/components/OnboardingGate";
+import { PromocoesCampanhasTab } from "@/components/PromocoesCampanhasTab";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
@@ -54,6 +55,11 @@ function profitFilterFromSearchParams(searchParams: URLSearchParams): PromoProfi
 
 /** Fase da campanha pelas datas (parâmetro `camp` na URL). */
 type PromoCampaignPhase = "" | "in" | "future" | "past" | "nodates";
+
+function pmaLtePromoFilterFromSearchParams(searchParams: URLSearchParams): boolean {
+  const v = searchParams.get("pmaok")?.trim() ?? searchParams.get("pma_lte")?.trim() ?? "";
+  return v === "1" || v === "true" || v === "sim";
+}
 
 function campFilterFromSearchParams(searchParams: URLSearchParams): PromoCampaignPhase {
   const c = searchParams.get("camp")?.trim().toLowerCase() ?? "";
@@ -118,6 +124,9 @@ function PromocoesHelpContent() {
               <li>
                 <strong>Prazo da campanha:</strong> usa início e fim quando o ML enviar datas; filtre por <em>em vigência</em>, <em>futura</em>, <em>encerrada</em> ou <em>sem datas</em>.
               </li>
+              <li>
+                <strong>PMA ≤ preço promoção:</strong> mostra só linhas em que o PMA cadastrado no produto vinculado é menor ou igual ao preço promoção (ambos &gt; 0). O PMA vem da tela Produtos; sem vínculo MLB → produto a coluna fica vazia e a linha não entra neste filtro.
+              </li>
             </ul>
           </section>
           <section>
@@ -134,6 +143,9 @@ function PromocoesHelpContent() {
               </li>
               <li>
                 <strong>Participar:</strong> marque convites (<em>Possível</em>) e use <strong>Participar na promoção</strong> para aceitar no Mercado Livre (API seller-promotions).
+              </li>
+              <li>
+                <strong>Campanhas:</strong> aba ao lado lista promoções do vendedor no ML; selecione uma campanha para ver todos os anúncios e aceitar convites em lote.
               </li>
               <li>
                 <strong>Taxa ML / Subsídio ML / Frete:</strong> taxa bruta e subsídio em colunas separadas; o subsídio entra somado em Vai receber.
@@ -202,6 +214,8 @@ interface FlatPromoRow {
   campaign_finish_at: string | null;
   /** `id` da promoção no ML (P-MLB…, etc.). */
   ml_promotion_id: string | null;
+  /** PMA (R$) do produto vinculado ao anúncio. */
+  pma: number | null;
 }
 
 function promoRowSelectionKey(r: FlatPromoRow): string {
@@ -278,6 +292,7 @@ const PROMOCOES_COLUMNS: { minWidth: number }[] = [
   { minWidth: 88 },
   { minWidth: 90 },
   { minWidth: 100 },
+  { minWidth: 72 },
   { minWidth: 80 },
   { minWidth: 88 },
   { minWidth: 140 },
@@ -328,16 +343,18 @@ function PromocoesContent() {
   const profitFromUrl = useMemo(() => profitFilterFromSearchParams(searchParams), [searchParams]);
   const ptypeFromUrl = useMemo(() => ptypeFilterFromSearchParams(searchParams), [searchParams]);
   const campFromUrl = useMemo(() => campFilterFromSearchParams(searchParams), [searchParams]);
+  const pmaLtePromoFromUrl = useMemo(() => pmaLtePromoFilterFromSearchParams(searchParams), [searchParams]);
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
   const optionsMenuRef = useRef<HTMLDivElement>(null);
-  const [promoTab, setPromoTab] = useState<"lista" | "como-funciona">("lista");
+  const [promoTab, setPromoTab] = useState<"lista" | "campanhas" | "como-funciona">("lista");
   const [draftSearch, setDraftSearch] = useState(qFromUrl);
   const [draftLinkFilter, setDraftLinkFilter] = useState<PromoLinkFilter>("all");
   const [draftKindFilter, setDraftKindFilter] = useState<PromoKindFilter>("");
   const [draftProfitFilter, setDraftProfitFilter] = useState<PromoProfitFilter>("");
   const [draftPtypeFilter, setDraftPtypeFilter] = useState("");
   const [draftCampFilter, setDraftCampFilter] = useState<PromoCampaignPhase>("");
+  const [draftPmaLtePromo, setDraftPmaLtePromo] = useState(false);
   const [page, setPage] = useState(1);
   const [flatRows, setFlatRows] = useState<FlatPromoRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -467,7 +484,7 @@ function PromocoesContent() {
 
   const prevFilterKeyRef = useRef<string>("");
   useEffect(() => {
-    const key = `${qFromUrl}\0${linkFromUrl}\0${kindFromUrl}\0${profitFromUrl}\0${ptypeFromUrl}\0${campFromUrl}`;
+    const key = `${qFromUrl}\0${linkFromUrl}\0${kindFromUrl}\0${profitFromUrl}\0${ptypeFromUrl}\0${campFromUrl}\0${pmaLtePromoFromUrl ? "1" : "0"}`;
     if (prevFilterKeyRef.current === key) return;
     prevFilterKeyRef.current = key;
     setDraftSearch(qFromUrl);
@@ -476,8 +493,9 @@ function PromocoesContent() {
     setDraftProfitFilter(profitFromUrl);
     setDraftPtypeFilter(ptypeFromUrl);
     setDraftCampFilter(campFromUrl);
+    setDraftPmaLtePromo(pmaLtePromoFromUrl);
     setPage(1);
-  }, [qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl]);
+  }, [qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl]);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -535,6 +553,7 @@ function PromocoesContent() {
       if (profitFromUrl) params.set("profit", profitFromUrl);
       if (ptypeFromUrl) params.set("ptype", ptypeFromUrl);
       if (campFromUrl) params.set("camp", campFromUrl);
+      if (pmaLtePromoFromUrl) params.set("pmaok", "1");
       const [overviewRes, alertsRes] = await Promise.all([
         fetch(`/api/mercadolivre/${accountId}/promotions-overview?${params}`),
         fetch(`/api/mercadolivre/promotion-alerts?accountId=${encodeURIComponent(accountId)}&hours=72`),
@@ -574,7 +593,7 @@ function PromocoesContent() {
     } finally {
       if (gen === loadPromoGen.current && !silent) setLoading(false);
     }
-  }, [accountId, page, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl]);
+  }, [accountId, page, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl]);
 
   /** Recarrega snapshot do cache a cada 60s (dados já atualizados por webhook/join no servidor). */
   useEffect(() => {
@@ -679,7 +698,7 @@ function PromocoesContent() {
   useEffect(() => {
     setSelectedRowKeys(new Set());
     setJoinFeedback(null);
-  }, [page, accountId, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl]);
+  }, [page, accountId, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl]);
 
   const handleFilterSubmit = useCallback(
     (e: FormEvent) => {
@@ -701,6 +720,9 @@ function PromocoesContent() {
       else params.delete("ptype");
       if (draftCampFilter) params.set("camp", draftCampFilter);
       else params.delete("camp");
+      if (draftPmaLtePromo) params.set("pmaok", "1");
+      else params.delete("pmaok");
+      params.delete("pma_lte");
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
       setFiltersModalOpen(false);
     },
@@ -711,6 +733,7 @@ function PromocoesContent() {
       draftProfitFilter,
       draftPtypeFilter,
       draftCampFilter,
+      draftPmaLtePromo,
       accountId,
       pathname,
       router,
@@ -725,6 +748,7 @@ function PromocoesContent() {
     setDraftProfitFilter("");
     setDraftPtypeFilter("");
     setDraftCampFilter("");
+    setDraftPmaLtePromo(false);
     setPage(1);
     const params = new URLSearchParams(searchParams.toString());
     params.set("accountId", accountId);
@@ -734,6 +758,8 @@ function PromocoesContent() {
     params.delete("profit");
     params.delete("ptype");
     params.delete("camp");
+    params.delete("pmaok");
+    params.delete("pma_lte");
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     setFiltersModalOpen(false);
   }, [accountId, pathname, router, searchParams]);
@@ -750,7 +776,9 @@ function PromocoesContent() {
       draftPtypeFilter ||
       ptypeFromUrl ||
       draftCampFilter ||
-      campFromUrl
+      campFromUrl ||
+      draftPmaLtePromo ||
+      pmaLtePromoFromUrl
   );
 
   const appliedPromoFilterLabels = useMemo(() => {
@@ -774,8 +802,9 @@ function PromocoesContent() {
     if (campFromUrl === "future") labels.push("Prazo: futura");
     if (campFromUrl === "past") labels.push("Prazo: encerrada");
     if (campFromUrl === "nodates") labels.push("Prazo: sem datas");
+    if (pmaLtePromoFromUrl) labels.push("PMA ≤ preço promoção");
     return labels;
-  }, [qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl]);
+  }, [qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl]);
 
   const alertByItem = useMemo(() => {
     const m = new Map<string, PromoAlert>();
@@ -978,7 +1007,7 @@ function PromocoesContent() {
   }
 
   const promocoesRefetching = loading && safeFlatRows.length > 0;
-  const loaderOpen = refreshing || promocoesRefetching;
+  const loaderOpen = promoTab === "lista" && (refreshing || promocoesRefetching);
 
   return (
     <div className="adminty-promocoes-page space-y-5">
@@ -986,6 +1015,7 @@ function PromocoesContent() {
         <SmartLoaderOverlay open={loaderOpen} messages={[...loaderMessages]} />
 
         <div className="border-b border-slate-200 bg-white px-3 pt-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
           <div className="flex flex-wrap items-end gap-1">
             <button
               type="button"
@@ -1000,6 +1030,17 @@ function PromocoesContent() {
             </button>
             <button
               type="button"
+              onClick={() => setPromoTab("campanhas")}
+              className={
+                promoTab === "campanhas"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+              }
+            >
+              Campanhas
+            </button>
+            <button
+              type="button"
               onClick={() => setPromoTab("como-funciona")}
               className={
                 promoTab === "como-funciona"
@@ -1010,12 +1051,50 @@ function PromocoesContent() {
               Como funciona?
             </button>
           </div>
+          {accounts.length > 1 && (
+            <label className="mb-1 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+              <span className="whitespace-nowrap font-medium text-slate-700 dark:text-slate-200">Conta</span>
+              <select
+                value={accountId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, v);
+                  const params = new URLSearchParams(searchParams.toString());
+                  params.set("accountId", v);
+                  router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+                }}
+                className="h-8 min-w-[10rem] rounded border border-slate-200 bg-white px-2 text-xs text-slate-800 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.ml_nickname || `Conta ${a.ml_user_id}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          </div>
         </div>
 
         {promoTab === "como-funciona" && (
           <div className="max-h-[min(70vh,720px)] overflow-y-auto border-b border-slate-100 bg-white px-4 py-4 dark:bg-slate-900/20">
             <PromocoesHelpContent />
           </div>
+        )}
+
+        {promoTab === "campanhas" && accountId && (
+          <PromocoesCampanhasTab
+            accountId={accountId}
+            onOpenItemInLista={(itemId, promotionType) => {
+              setPromoTab("lista");
+              setPage(1);
+              const params = new URLSearchParams(searchParams.toString());
+              params.set("accountId", accountId);
+              params.set("q", itemId);
+              if (promotionType) params.set("ptype", promotionType);
+              router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+            }}
+          />
         )}
 
         {promoTab === "lista" && (
@@ -1141,6 +1220,7 @@ function PromocoesContent() {
                 setDraftProfitFilter(profitFromUrl);
                 setDraftPtypeFilter(ptypeFromUrl);
                 setDraftCampFilter(campFromUrl);
+                setDraftPmaLtePromo(pmaLtePromoFromUrl);
                 setFiltersModalOpen(true);
               }}
               className="btn btn-icon btn-sm btn-outline-secondary"
@@ -1343,40 +1423,44 @@ function PromocoesContent() {
               {promoStickyTh(5, "Status")}
               {promoStickyTh(6, "Preço", { align: "right" })}
               {promoStickyTh(7, "Preço promoção", { align: "right" })}
-              {promoStickyTh(8, "Custo", { align: "right" })}
-              {promoStickyTh(9, "Tipo")}
-              {promoStickyTh(10, "Campanha ML", {
+              {promoStickyTh(8, "PMA", {
+                align: "right",
+                title: "Preço Mínimo Anunciado (R$) do produto vinculado ao anúncio",
+              })}
+              {promoStickyTh(9, "Custo", { align: "right" })}
+              {promoStickyTh(10, "Tipo")}
+              {promoStickyTh(11, "Campanha ML", {
                 title: "Tipo de campanha no ML (campo type em seller-promotions)",
                 thClass: "max-w-[14rem]",
               })}
-              {promoStickyTh(11, "Promoção", { thClass: "min-w-[12rem]" })}
-              {promoStickyTh(12, "Vai receber", {
+              {promoStickyTh(12, "Promoção", { thClass: "min-w-[12rem]" })}
+              {promoStickyTh(13, "Vai receber", {
                 align: "right",
                 title: "Preço promoção − taxa ML − frete + subsídio ML",
               })}
-              {promoStickyTh(13, "Lucro R$", { align: "right" })}
-              {promoStickyTh(14, "Lucro %", { align: "right" })}
-              {promoStickyTh(15, "Taxa ML", {
+              {promoStickyTh(14, "Lucro R$", { align: "right" })}
+              {promoStickyTh(15, "Lucro %", { align: "right" })}
+              {promoStickyTh(16, "Taxa ML", {
                 align: "right",
                 title: "Comissão ML bruta (antes do subsídio)",
               })}
-              {promoStickyTh(16, "Subsídio ML", {
+              {promoStickyTh(17, "Subsídio ML", {
                 align: "right",
                 title: "Abatimento do Mercado Livre na comissão (original_price × meli_percentage / 100)",
               })}
-              {promoStickyTh(17, "Frete", { align: "right" })}
-              {promoStickyTh(18, "Imposto", { align: "right" })}
-              {promoStickyTh(19, "Taxa extra", { align: "right" })}
-              {promoStickyTh(20, "Desp. fixas", { align: "right" })}
-              {promoStickyTh(21, "Início campanha", {
+              {promoStickyTh(18, "Frete", { align: "right" })}
+              {promoStickyTh(19, "Imposto", { align: "right" })}
+              {promoStickyTh(20, "Taxa extra", { align: "right" })}
+              {promoStickyTh(21, "Desp. fixas", { align: "right" })}
+              {promoStickyTh(22, "Início campanha", {
                 title: "Início da campanha (seller-promotions), horário de São Paulo",
                 thClass: "whitespace-nowrap",
               })}
-              {promoStickyTh(22, "Fim campanha", {
+              {promoStickyTh(23, "Fim campanha", {
                 title: "Fim da campanha (seller-promotions), horário de São Paulo",
                 thClass: "whitespace-nowrap",
               })}
-              {promoStickyTh(23, "ML")}
+              {promoStickyTh(24, "ML")}
             </tr>
           </thead>
         <tbody>
@@ -1490,30 +1574,36 @@ function PromocoesContent() {
                   </td>
                   <td
                     {...cell(8, "whitespace-nowrap p-2 text-right tabular-nums text-sm text-fg")}
+                    title="PMA do produto vinculado (cadastro em Produtos)"
+                  >
+                    {r.pma != null && r.pma > 0 ? formatPrice(r.pma) : "—"}
+                  </td>
+                  <td
+                    {...cell(9, "whitespace-nowrap p-2 text-right tabular-nums text-sm text-fg")}
                     title="Custo no cache de preços (tela Preços / produto vinculado)"
                   >
                     {formatPrice(r.cost_price)}
                   </td>
-                  <td {...cell(9, "p-2")}>
+                  <td {...cell(10, "p-2")}>
                     <span
                       className={`inline-flex rounded-app px-2 py-0.5 text-xs font-medium ${tipoBadge}`}
                     >
                       {tipoLabel}
                     </span>
                   </td>
-                  <td {...cell(10, "max-w-[14rem] p-2 text-xs text-fg")} title={r.promotionType ?? undefined}>
+                  <td {...cell(11, "max-w-[14rem] p-2 text-xs text-fg")} title={r.promotionType ?? undefined}>
                     <span className="line-clamp-2">{labelForMlPromotionType(r.promotionType)}</span>
                   </td>
-                  <td {...cell(11, "max-w-[24rem] p-2 text-xs leading-snug text-fg")}>
+                  <td {...cell(12, "max-w-[24rem] p-2 text-xs leading-snug text-fg")}>
                     <div className="font-medium text-fg-strong">{r.promotionLabel}</div>
                     {r.value_hint ? (
                       <div className="mt-0.5 text-[11px] text-fg-muted">{r.value_hint}</div>
                     ) : null}
                   </td>
-                  <td {...cell(12, "whitespace-nowrap p-2 text-right text-sm font-semibold text-green-700 dark:text-green-400")}>
+                  <td {...cell(13, "whitespace-nowrap p-2 text-right text-sm font-semibold text-green-700 dark:text-green-400")}>
                     {calc ? formatPrice(calc.vai_receber) : "—"}
                   </td>
-                  <td {...cell(13, "whitespace-nowrap p-2 text-right text-sm tabular-nums")}>
+                  <td {...cell(14, "whitespace-nowrap p-2 text-right text-sm tabular-nums")}>
                     {profit != null ? (
                       <span className={profit >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
                         {formatPrice(profit)}
@@ -1522,7 +1612,7 @@ function PromocoesContent() {
                       <span className="text-fg-muted">—</span>
                     )}
                   </td>
-                  <td {...cell(14, "whitespace-nowrap p-2 text-right text-sm tabular-nums")}>
+                  <td {...cell(15, "whitespace-nowrap p-2 text-right text-sm tabular-nums")}>
                     {profitPercent != null ? (
                       <span
                         className={
@@ -1536,10 +1626,10 @@ function PromocoesContent() {
                       <span className="text-fg-muted">—</span>
                     )}
                   </td>
-                  <td {...cell(15, "whitespace-nowrap p-2 text-right text-sm text-amber-700 dark:text-amber-300")}>
+                  <td {...cell(16, "whitespace-nowrap p-2 text-right text-sm text-amber-700 dark:text-amber-300")}>
                     {calc ? formatPrice(calc.fee) : "—"}
                   </td>
-                  <td {...cell(16, "whitespace-nowrap p-2 text-right text-sm text-sky-700 dark:text-sky-300")}>
+                  <td {...cell(17, "whitespace-nowrap p-2 text-right text-sm text-sky-700 dark:text-sky-300")}>
                     {calc && calc.meli_fee_subsidy > 0 ? (
                       <span title="Subsídio do Mercado Livre (somado em Vai receber)">
                         +{formatPrice(calc.meli_fee_subsidy)}
@@ -1548,7 +1638,7 @@ function PromocoesContent() {
                       <span className="text-fg-muted">—</span>
                     )}
                   </td>
-                  <td {...cell(17, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(18, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.shipping_cost > 0 ? (
                         <span className="text-red-600 dark:text-red-400">{formatPrice(calc.shipping_cost)}</span>
@@ -1559,7 +1649,7 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(18, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(19, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.tax_amount > 0 ? (
                         <span className="text-orange-600 dark:text-orange-400" title={r.tax_percent ? `${r.tax_percent}%` : undefined}>
@@ -1572,7 +1662,7 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(19, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(20, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.extra_fee_amount > 0 ? (
                         <span
@@ -1588,7 +1678,7 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(20, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(21, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.fixed_expenses_amount > 0 ? (
                         <span className="text-indigo-600 dark:text-indigo-400">{formatPrice(calc.fixed_expenses_amount)}</span>
@@ -1599,13 +1689,13 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(21, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_start_at ?? undefined}>
+                  <td {...cell(22, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_start_at ?? undefined}>
                     {formatCampaignDatePt(r.campaign_start_at)}
                   </td>
-                  <td {...cell(22, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_finish_at ?? undefined}>
+                  <td {...cell(23, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_finish_at ?? undefined}>
                     {formatCampaignDatePt(r.campaign_finish_at)}
                   </td>
-                  <td {...cell(23, "p-2")}>
+                  <td {...cell(24, "p-2")}>
                     {r.permalink ? (
                       <a
                         href={r.permalink}
@@ -1775,6 +1865,22 @@ function PromocoesContent() {
                   <option value="past">Encerrada</option>
                   <option value="nodates">Sem datas no ML</option>
                 </select>
+              </div>
+              <div>
+                <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700 dark:text-slate-200">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 rounded border-slate-300"
+                    checked={draftPmaLtePromo}
+                    onChange={(e) => setDraftPmaLtePromo(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium">PMA ≤ preço promoção</span>
+                    <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                      Só anúncios com produto vinculado em que o PMA cadastrado é menor ou igual ao preço promoção.
+                    </span>
+                  </span>
+                </label>
               </div>
               <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
                 {showFilterResetButton && (

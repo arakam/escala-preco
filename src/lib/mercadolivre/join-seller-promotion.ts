@@ -3,8 +3,7 @@
  * @see https://developers.mercadolivre.com.br/pt_br/gerenciar-ofertas
  */
 
-/** Campanhas em que o ML define o preço ao aceitar (sem deal_price no body). */
-const JOIN_WITHOUT_DEAL_PRICE = new Set([
+export const JOIN_WITHOUT_DEAL_PRICE = new Set([
   "MARKETPLACE_CAMPAIGN",
   "SMART",
   "VOLUME",
@@ -12,6 +11,11 @@ const JOIN_WITHOUT_DEAL_PRICE = new Set([
   "PRICE_MATCHING",
   "UNHEALTHY_STOCK",
 ]);
+
+export function requiresDealPriceForPromotionType(promotionType: string): boolean {
+  const t = promotionType.trim().toUpperCase();
+  return t ? !JOIN_WITHOUT_DEAL_PRICE.has(t) : true;
+}
 
 export type JoinSellerPromotionInput = {
   item_id: string;
