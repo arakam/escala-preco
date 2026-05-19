@@ -145,7 +145,7 @@ function PromocoesHelpContent() {
                 <strong>Participar:</strong> marque convites (<em>Possível</em>) e use <strong>Participar na promoção</strong> para aceitar no Mercado Livre (API seller-promotions).
               </li>
               <li>
-                <strong>Campanhas:</strong> aba ao lado lista promoções do vendedor no ML; selecione uma campanha para ver todos os anúncios e aceitar convites em lote.
+                <strong>Campanhas:</strong> abas equivalentes ao painel do ML (Sugeridas, Eventos comerciais, Menos tarifas, Oferta do dia e relâmpago, Meios de pagamento, Criadas por você). Dentro de cada aba, escolha a <strong>campanha</strong> no seletor para ver anúncios e aceitar convites em lote. O <strong>Desconto no PIX</strong> fica em <em>Meios de pagamento</em> (tipo BANK no ML).
               </li>
               <li>
                 <strong>Taxa ML / Subsídio ML / Frete:</strong> taxa bruta e subsídio em colunas separadas; o subsídio entra somado em Vai receber.
@@ -1030,7 +1030,14 @@ function PromocoesContent() {
             </button>
             <button
               type="button"
-              onClick={() => setPromoTab("campanhas")}
+              onClick={() => {
+                setPromoTab("campanhas");
+                const params = new URLSearchParams(searchParams.toString());
+                if (!params.get("pcat")) {
+                  params.set("pcat", "eventos");
+                  router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+                }
+              }}
               className={
                 promoTab === "campanhas"
                   ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
@@ -1092,6 +1099,8 @@ function PromocoesContent() {
               params.set("accountId", accountId);
               params.set("q", itemId);
               if (promotionType) params.set("ptype", promotionType);
+              const pcat = searchParams.get("pcat");
+              if (pcat) params.set("pcat", pcat);
               router.replace(`${pathname}?${params.toString()}`, { scroll: false });
             }}
           />

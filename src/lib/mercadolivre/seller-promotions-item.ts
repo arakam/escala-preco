@@ -1,3 +1,4 @@
+import type { MlCampaignItemRow, MlSellerCampaignRow } from "@/lib/mercadolivre/fetch-seller-campaigns";
 import {
   inferPromotionTypeFromAnyLabelText,
   normalizeMlPromotionTypeCode,
@@ -140,6 +141,19 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v != null && typeof v === "object" && !Array.isArray(v);
 }
 
+/** Campanha co-participação PIX (`type` BANK, `payment_method` PIX). */
+export function isBankPixCofinancedPromotion(p: Record<string, unknown>): boolean {
+  const code = getSellerPromotionTypeCode(p);
+  if (code === "BANK" || (code != null && code.startsWith("BANK"))) return true;
+  const pm = String(p.payment_method ?? p.paymentMethod ?? "").trim().toUpperCase();
+  if (pm === "PIX") return true;
+  for (const obj of sellerPromotionTypeLookupObjects(p)) {
+    const sub = String(obj.sub_type ?? obj.subType ?? "").trim().toUpperCase();
+    if (sub === "COFINANCED" && pm === "PIX") return true;
+  }
+  return false;
+}
+
 /** Lista de objetos promoção a partir do JSON do ML (array, results, objeto único, etc.). */
 export function normalizeSellerPromotionsList(raw: unknown): Record<string, unknown>[] {
   if (raw == null) return [];
@@ -149,6 +163,7 @@ export function normalizeSellerPromotionsList(raw: unknown): Record<string, unkn
   if (isPlainObject(raw)) {
     if (Array.isArray(raw.results)) return raw.results.filter(isPlainObject) as Record<string, unknown>[];
     if (Array.isArray(raw.promotions)) return raw.promotions.filter(isPlainObject) as Record<string, unknown>[];
+    if (Array.isArray(raw.offers)) return raw.offers.filter(isPlainObject) as Record<string, unknown>[];
     if (Array.isArray(raw.benefits)) return raw.benefits.filter(isPlainObject) as Record<string, unknown>[];
     if (Array.isArray(raw.data)) return raw.data.filter(isPlainObject) as Record<string, unknown>[];
     if (raw.type != null || raw.status != null || raw.id != null) {
@@ -192,10 +207,27 @@ export function isPossibleSellerPromotion(p: Record<string, unknown>): boolean {
   const sid = getSellerPromotionStatusId(p);
   if (sid === "candidate") return true;
   if (sid === "pending") {
+    if (isBankPixCofinancedPromotion(p)) return true;
     const amt = getSellerPromotionPriceAmount(p);
     return amt == null || amt <= 0;
   }
   return false;
+}
+
+/** PIX/BANK e outros status que a lógica genérica descartava. */
+export function classifySellerPromotionPartition(
+  p: Record<string, unknown>
+): "active" | "possible" | null {
+  if (isActiveSellerPromotion(p)) return "active";
+  if (isPossibleSellerPromotion(p)) return "possible";
+  if (!isBankPixCofinancedPromotion(p)) return null;
+  const sid = getSellerPromotionStatusId(p);
+  if (sid === "finished" || sid === "inactive") return null;
+  if (sid === "candidate") return "possible";
+  if (sid === "started" || sid === "active" || sid === "pending" || sid === "programmed") {
+    return "active";
+  }
+  return "possible";
 }
 
 /** Parte a resposta de GET /seller-promotions/items/{id} para exibição. */
@@ -262,6 +294,15 @@ export function getSellerPromotionPriceAmount(p: Record<string, unknown>): numbe
   if (Number.isFinite(price) && price > 0) return price;
   const suggested = Number(p.suggested_discounted_price);
   if (Number.isFinite(suggested) && suggested > 0) return suggested;
+  if (isBankPixCofinancedPromotion(p)) {
+    const orig = getSellerPromotionOriginalPriceAmount(p);
+    const meli = Number(p.meli_percentage);
+    const seller = Number(p.seller_percentage);
+    if (orig != null && orig > 0 && (Number.isFinite(meli) || Number.isFinite(seller))) {
+      const pct = Math.min(100, Math.max(0, (meli > 0 ? meli : 0) + (seller > 0 ? seller : 0)));
+      if (pct > 0) return Math.round(orig * (1 - pct / 100) * 100) / 100;
+    }
+  }
   return null;
 }
 
@@ -304,9 +345,14 @@ export function getSellerPromotionMeliFeeSubsidyBrl(p: Record<string, unknown>):
 
 export function formatSellerPromotionTitle(p: Record<string, unknown>): string {
   const code = getSellerPromotionTypeCode(p);
+  const paymentMethod = String(p.payment_method ?? p.paymentMethod ?? "").trim().toUpperCase();
   const nameRaw = String(p.name ?? "").trim();
-  const name = nameRaw || (code ?? "Promoção");
-  const typ = code && nameRaw ? ` · ${code}` : "";
+  let name = nameRaw;
+  if (!name && isBankPixCofinancedPromotion(p)) {
+    name = paymentMethod === "PIX" ? "Desconto no PIX" : "Meio de pagamento (BANK)";
+  }
+  if (!name) name = code ?? "Promoção";
+  const typ = code && nameRaw ? ` · ${code}` : code && !nameRaw && code !== name ? ` · ${code}` : "";
   return `${name}${typ}`;
 }
 
@@ -414,11 +460,78 @@ export function partitionSellerPromotionsRich(raw: unknown): {
       campaign_finish_at,
       ml_promotion_id,
     };
-    if (isActiveSellerPromotion(p)) active.push(row);
-    else if (isPossibleSellerPromotion(p)) possible.push(row);
+    const bucket = classifySellerPromotionPartition(p);
+    if (bucket === "active") active.push(row);
+    else if (bucket === "possible") possible.push(row);
   }
   return { active, possible };
 }
+
+function mergePromotionDisplayRows(
+  base: SellerPromotionDisplayRow[],
+  extra: SellerPromotionDisplayRow[]
+): SellerPromotionDisplayRow[] {
+  if (extra.length === 0) return base;
+  const seen = new Set(
+    base.map((r) => `${r.ml_promotion_id ?? ""}|${r.promotion_type ?? ""}|${r.label}`)
+  );
+  const out = [...base];
+  for (const r of extra) {
+    const key = `${r.ml_promotion_id ?? ""}|${r.promotion_type ?? ""}|${r.label}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
+
+/** Linha de exibição a partir de item em campanha BANK/PIX (GET …/promotions/{id}/items). */
+export function sellerPromotionDisplayRowFromBankCampaignItem(
+  campaign: MlSellerCampaignRow,
+  item: MlCampaignItemRow
+): SellerPromotionDisplayRow {
+  const raw: Record<string, unknown> = {
+    type: "BANK",
+    sub_type: "COFINANCED",
+    payment_method: "PIX",
+    name: campaign.name,
+    id: campaign.id,
+    promotion_id: campaign.id,
+    status: item.status,
+    original_price: item.original_price,
+    price: item.price,
+    meli_percentage: item.meli_percentage,
+    seller_percentage: item.seller_percentage,
+    offer_id: item.offer_id,
+    start_date: campaign.start_date,
+    finish_date: campaign.finish_date,
+  };
+  const promoPrice = getSellerPromotionPriceAmount(raw);
+  const label = formatSellerPromotionTitle(raw);
+  return {
+    label,
+    original_price: item.original_price,
+    promo_price: promoPrice,
+    value_hint: getSellerPromotionValueHint(raw, promoPrice),
+    meli_fee_subsidy: getSellerPromotionMeliFeeSubsidyBrl(raw),
+    promotion_type: "BANK",
+    ml_promotion_id: campaign.id,
+    campaign_start_at: campaign.start_date,
+    campaign_finish_at: campaign.finish_date,
+  };
+}
+
+export function partitionSellerPromotionRowByStatus(
+  row: SellerPromotionDisplayRow,
+  itemStatus: string
+): "active" | "possible" {
+  const s = itemStatus.toLowerCase();
+  if (s === "candidate") return "possible";
+  if (s === "started" || s === "active" || s === "pending" || s === "programmed") return "active";
+  return "possible";
+}
+
+export { mergePromotionDisplayRows };
 
 export function formatSellerPromotionLine(p: Record<string, unknown>): string {
   const code = getSellerPromotionTypeCode(p);

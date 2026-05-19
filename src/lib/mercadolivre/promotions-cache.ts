@@ -1,8 +1,14 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { fetchSellerPromotionsForItem, runWithConcurrency } from "@/lib/mercadolivre/client";
+import {
+  fetchBankPixPromotionRowsForItem,
+  listBankPixCampaignsForUser,
+  type MlSellerCampaignRow,
+} from "@/lib/mercadolivre/fetch-seller-campaigns";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import {
+  mergePromotionDisplayRows,
   partitionSellerPromotionsRich,
   type SellerPromotionDisplayRow,
 } from "@/lib/mercadolivre/seller-promotions-item";
@@ -997,9 +1003,20 @@ async function enrichMlItemRowsToApiRows(ctx: {
   siteId: string;
   accessToken: string;
   isMercadoLider: boolean;
+  mlUserId: number | null;
   rows: MlItemRow[];
 }): Promise<{ apiRows: PromoOverviewFlatApiRow[]; flat: FlatPromoInternal[]; itemIds: string[] }> {
-  const { supabase, adminSupabase, accountId, siteId, accessToken, isMercadoLider, rows } = ctx;
+  const { supabase, adminSupabase, accountId, siteId, accessToken, isMercadoLider, mlUserId, rows } = ctx;
+  let bankCampaignsCache: MlSellerCampaignRow[] | null = null;
+  const loadBankCampaigns = async (): Promise<MlSellerCampaignRow[]> => {
+    if (bankCampaignsCache) return bankCampaignsCache;
+    if (mlUserId == null || !Number.isFinite(mlUserId)) {
+      bankCampaignsCache = [];
+      return bankCampaignsCache;
+    }
+    bankCampaignsCache = await listBankPixCampaignsForUser(mlUserId, accessToken);
+    return bankCampaignsCache;
+  };
   const itemIds = rows.map((r) => r.item_id);
   let cacheByItem = new Map<string, CacheRow | null>();
 
@@ -1029,8 +1046,22 @@ async function enrichMlItemRowsToApiRows(ctx: {
       const cache = cacheByItem.get(itemId) ?? null;
       const promoRaw = await fetchSellerPromotionsForItem(itemId, accessToken);
 
-      const { active, possible } = partitionSellerPromotionsRich(promoRaw);
-      const promotionsFailed = promoRaw === null;
+      let { active, possible } = partitionSellerPromotionsRich(promoRaw);
+      const hasBankInItemApi = [...active, ...possible].some((r) => r.promotion_type === "BANK");
+      if (!hasBankInItemApi) {
+        try {
+          const bankRows = await fetchBankPixPromotionRowsForItem(
+            itemId,
+            accessToken,
+            await loadBankCampaigns()
+          );
+          active = mergePromotionDisplayRows(active, bankRows.active);
+          possible = mergePromotionDisplayRows(possible, bankRows.possible);
+        } catch (e) {
+          console.warn("[promotions-cache] BANK/PIX supplement", itemId, e);
+        }
+      }
+      const promotionsFailed = promoRaw === null && active.length === 0 && possible.length === 0;
 
       return {
         item_id: itemId,
@@ -1385,6 +1416,7 @@ export async function refreshPromotionsForItems(params: {
     siteId,
     accessToken,
     isMercadoLider,
+    mlUserId,
     rows: mlRowsToEnrich,
   });
 
@@ -1453,6 +1485,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
   cachePage: number;
   siteId: string;
   accessToken: string;
+  mlUserId: number;
   isMercadoLider: boolean;
   snapshotAt: string;
   deleteItemIdsBeforeInsert: boolean;
@@ -1467,6 +1500,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
     cachePage,
     siteId,
     accessToken,
+    mlUserId,
     isMercadoLider,
     snapshotAt,
     deleteItemIdsBeforeInsert,
@@ -1508,6 +1542,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
     siteId,
     accessToken,
     isMercadoLider,
+    mlUserId,
     rows,
   });
 
@@ -1673,6 +1708,7 @@ export async function refreshPromotionsCache(params: {
         cachePage: p,
         siteId,
         accessToken,
+        mlUserId,
         isMercadoLider,
         snapshotAt,
         deleteItemIdsBeforeInsert: true,
@@ -1702,6 +1738,7 @@ export async function refreshPromotionsCache(params: {
     cachePage,
     siteId,
     accessToken,
+    mlUserId,
     isMercadoLider,
     snapshotAt,
     deleteItemIdsBeforeInsert: true,

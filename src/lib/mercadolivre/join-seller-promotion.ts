@@ -22,6 +22,8 @@ export type JoinSellerPromotionInput = {
   promotion_id: string;
   promotion_type: string;
   deal_price?: number | null;
+  /** Obrigatório para BANK/PIX (Desconto no PIX). */
+  offer_id?: string | null;
 };
 
 export type JoinSellerPromotionBodyResult =
@@ -31,10 +33,11 @@ export type JoinSellerPromotionBodyResult =
 export function buildSellerPromotionJoinBody(
   promotionId: string,
   promotionType: string,
-  dealPrice?: number | null
+  dealPrice?: number | null,
+  offerId?: string | null
 ): JoinSellerPromotionBodyResult {
   const pid = promotionId.trim();
-  const ptype = promotionType.trim();
+  const ptype = promotionType.trim().toUpperCase();
   if (!pid || !ptype) {
     return { ok: false, error: "promotion_id e promotion_type são obrigatórios." };
   }
@@ -43,6 +46,18 @@ export function buildSellerPromotionJoinBody(
     promotion_id: pid,
     promotion_type: ptype,
   };
+
+  if (ptype === "BANK" || ptype.startsWith("BANK")) {
+    const oid = offerId != null ? String(offerId).trim() : "";
+    if (!oid) {
+      return {
+        ok: false,
+        error: "offer_id é obrigatório para participar no Desconto no PIX (BANK).",
+      };
+    }
+    body.offer_id = oid;
+    return { ok: true, body };
+  }
 
   if (!JOIN_WITHOUT_DEAL_PRICE.has(ptype)) {
     const n = dealPrice != null ? Number(dealPrice) : NaN;

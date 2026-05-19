@@ -2,7 +2,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { fetchMlResourcePath } from "@/lib/mercadolivre/client";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
+import {
+  filterCampaignsByUiCategory,
+  getMlPromotionUiCategory,
+  parseMlPromotionUiCategoryId,
+  type MlPromotionUiCategoryId,
+} from "@/lib/mercadolivre/ml-promotion-ui-categories";
 import { normalizeMlPromotionTypeCode } from "@/lib/mercadolivre/ml-promotion-types";
+import {
+  partitionSellerPromotionRowByStatus,
+  sellerPromotionDisplayRowFromBankCampaignItem,
+  type SellerPromotionDisplayRow,
+} from "@/lib/mercadolivre/seller-promotions-item";
 
 export type MlSellerCampaignRow = {
   id: string;
@@ -20,6 +31,9 @@ export type MlCampaignItemRow = {
   status: string;
   price: number | null;
   original_price: number | null;
+  meli_percentage: number | null;
+  seller_percentage: number | null;
+  offer_id: string | null;
 };
 
 export type MlCampaignItemsPage = {
@@ -66,11 +80,17 @@ function normalizeCampaignItemRow(raw: Record<string, unknown>): MlCampaignItemR
   if (!item_id) return null;
   const price = Number(raw.price);
   const original_price = Number(raw.original_price);
+  const meli_percentage = Number(raw.meli_percentage);
+  const seller_percentage = Number(raw.seller_percentage);
+  const offerRaw = raw.offer_id ?? raw.offerId;
   return {
     item_id,
     status: parseMlStatus(raw.status),
-    price: Number.isFinite(price) ? price : null,
-    original_price: Number.isFinite(original_price) ? original_price : null,
+    price: Number.isFinite(price) && price > 0 ? price : null,
+    original_price: Number.isFinite(original_price) && original_price > 0 ? original_price : null,
+    meli_percentage: Number.isFinite(meli_percentage) ? meli_percentage : null,
+    seller_percentage: Number.isFinite(seller_percentage) ? seller_percentage : null,
+    offer_id: offerRaw != null && String(offerRaw).trim() !== "" ? String(offerRaw).trim() : null,
   };
 }
 
@@ -154,6 +174,98 @@ export async function fetchSellerPromotionsForUser(
   return { ok: true, campaigns, paging };
 }
 
+const MAX_ML_CAMPAIGN_SCAN_PAGES = 40;
+
+function isBankPixCampaignType(type: string): boolean {
+  const t = normalizeMlPromotionTypeCode(type) || type.trim().toUpperCase();
+  return t === "BANK" || t.startsWith("BANK");
+}
+
+/** Campanhas BANK (Desconto no PIX) do vendedor — GET /seller-promotions/users/{id}. */
+export async function listBankPixCampaignsForUser(
+  mlUserId: number,
+  accessToken: string
+): Promise<MlSellerCampaignRow[]> {
+  const out: MlSellerCampaignRow[] = [];
+  let offset = 0;
+  const limit = 50;
+
+  for (let page = 0; page < MAX_ML_CAMPAIGN_SCAN_PAGES; page++) {
+    const batch = await fetchSellerPromotionsForUser(mlUserId, accessToken, { offset, limit });
+    if (!batch.ok) break;
+    for (const c of batch.campaigns) {
+      if (isBankPixCampaignType(c.type)) out.push(c);
+    }
+    if (batch.campaigns.length < limit || offset + limit >= batch.paging.total) break;
+    offset += limit;
+  }
+
+  return out;
+}
+
+/**
+ * Varre páginas do ML e devolve campanhas filtradas por aba (categoria UI).
+ * Necessário porque a API não filtra por categoria nem por `type` em /users/{id}.
+ */
+export async function fetchSellerPromotionsForUserByUiCategory(
+  mlUserId: number,
+  accessToken: string,
+  options: {
+    categoryId: MlPromotionUiCategoryId;
+    offset?: number;
+    limit?: number;
+  }
+): Promise<
+  | {
+      ok: true;
+      campaigns: MlSellerCampaignRow[];
+      paging: { offset: number; limit: number; total: number; scanned_ml_total: number };
+    }
+  | { ok: false; status: number; message: string }
+> {
+  const category = getMlPromotionUiCategory(options.categoryId);
+  if (!category) {
+    return { ok: false, status: 400, message: "Categoria de promoção inválida." };
+  }
+
+  const offset = Math.max(0, options.offset ?? 0);
+  const limit = Math.min(50, Math.max(1, options.limit ?? 50));
+  const pageSize = 50;
+  const allFiltered: MlSellerCampaignRow[] = [];
+  let mlOffset = 0;
+  let scannedMlTotal = 0;
+
+  for (let page = 0; page < MAX_ML_CAMPAIGN_SCAN_PAGES; page++) {
+    const batch = await fetchSellerPromotionsForUser(mlUserId, accessToken, {
+      offset: mlOffset,
+      limit: pageSize,
+    });
+    if (!batch.ok) {
+      return { ok: false, status: batch.status, message: batch.message };
+    }
+    scannedMlTotal = batch.paging.total;
+    const filtered = filterCampaignsByUiCategory(batch.campaigns, category);
+    allFiltered.push(...filtered);
+
+    const received = batch.campaigns.length;
+    if (received < pageSize) break;
+    mlOffset += pageSize;
+    if (mlOffset >= batch.paging.total) break;
+  }
+
+  const slice = allFiltered.slice(offset, offset + limit);
+  return {
+    ok: true,
+    campaigns: slice,
+    paging: {
+      offset,
+      limit,
+      total: allFiltered.length,
+      scanned_ml_total: scannedMlTotal,
+    },
+  };
+}
+
 export type FetchCampaignItemsParams = {
   promotionId: string;
   promotionType: string;
@@ -214,6 +326,37 @@ export async function fetchSellerPromotionCampaignItems(
       },
     },
   };
+}
+
+/** Consulta campanhas BANK/PIX se o item participa (GET …/promotions/{id}/items?item_id=). */
+export async function fetchBankPixPromotionRowsForItem(
+  itemId: string,
+  accessToken: string,
+  bankCampaigns: MlSellerCampaignRow[]
+): Promise<{ active: SellerPromotionDisplayRow[]; possible: SellerPromotionDisplayRow[] }> {
+  const active: SellerPromotionDisplayRow[] = [];
+  const possible: SellerPromotionDisplayRow[] = [];
+  const id = String(itemId).trim().toUpperCase();
+  if (!id || bankCampaigns.length === 0) return { active, possible };
+
+  for (const campaign of bankCampaigns) {
+    const res = await fetchSellerPromotionCampaignItems({
+      promotionId: campaign.id,
+      promotionType: "BANK",
+      accessToken,
+      itemId: id,
+      limit: 5,
+    });
+    if (!res.ok) continue;
+    for (const item of res.page.results) {
+      const row = sellerPromotionDisplayRowFromBankCampaignItem(campaign, item);
+      const bucket = partitionSellerPromotionRowByStatus(row, item.status);
+      if (bucket === "active") active.push(row);
+      else possible.push(row);
+    }
+  }
+
+  return { active, possible };
 }
 
 export function formatCampaignBenefitsHint(benefits: Record<string, unknown> | null): string | null {

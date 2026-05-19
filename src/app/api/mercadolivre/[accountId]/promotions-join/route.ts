@@ -107,6 +107,7 @@ export async function POST(
     promotion_id: string;
     promotion_type: string;
     deal_price: number | null;
+    offer_id: string | null;
   }> = [];
 
   for (const row of rawItems) {
@@ -119,7 +120,11 @@ export async function POST(
       row.deal_price != null && Number.isFinite(Number(row.deal_price))
         ? Number(row.deal_price)
         : null;
-    normalized.push({ item_id, promotion_id, promotion_type, deal_price });
+    const offer_id =
+      row.offer_id != null && String(row.offer_id).trim() !== ""
+        ? String(row.offer_id).trim()
+        : null;
+    normalized.push({ item_id, promotion_id, promotion_type, deal_price, offer_id });
   }
 
   if (normalized.length === 0) {
@@ -136,7 +141,8 @@ export async function POST(
       const built = buildSellerPromotionJoinBody(
         item.promotion_id,
         item.promotion_type,
-        item.deal_price
+        item.deal_price,
+        item.offer_id
       );
       if (!built.ok) {
         return {

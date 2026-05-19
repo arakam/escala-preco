@@ -29,6 +29,7 @@ export const ML_PROMOTION_TYPE_CATALOG: readonly MlPromotionTypeEntry[] = [
   { code: "PRICE_MATCHING", labelPt: "Preços competitivos (PRICE_MATCHING)" },
   { code: "UNHEALTHY_STOCK", labelPt: "Liquidação estoque Full (UNHEALTHY_STOCK)" },
   { code: "SELLER_COUPON_CAMPAIGN", labelPt: "Cupons do vendedor (SELLER_COUPON_CAMPAIGN)" },
+  { code: "BANK", labelPt: "Desconto no PIX (BANK)" },
 ] as const;
 
 const LABEL_BY_CODE = new Map<string, string>(

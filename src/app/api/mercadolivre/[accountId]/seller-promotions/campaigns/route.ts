@@ -2,8 +2,10 @@ import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import {
   fetchSellerPromotionsForUser,
+  fetchSellerPromotionsForUserByUiCategory,
   resolveMlAccountAccessToken,
 } from "@/lib/mercadolivre/fetch-seller-campaigns";
+import { parseMlPromotionUiCategoryId } from "@/lib/mercadolivre/ml-promotion-ui-categories";
 
 /**
  * GET /api/mercadolivre/{accountId}/seller-promotions/campaigns
@@ -39,16 +41,23 @@ export async function GET(
   const { searchParams } = new URL(request.url);
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10) || 0);
   const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10) || 50));
+  const categoryRaw = searchParams.get("category")?.trim() ?? searchParams.get("pcat")?.trim() ?? "";
 
   const access = await resolveMlAccountAccessToken(supabase, accountId, user.id);
   if (!access) {
     return NextResponse.json({ error: "Token do Mercado Livre indisponível" }, { status: 401 });
   }
 
-  const result = await fetchSellerPromotionsForUser(access.mlUserId, access.accessToken, {
-    offset,
-    limit,
-  });
+  const result = categoryRaw
+    ? await fetchSellerPromotionsForUserByUiCategory(access.mlUserId, access.accessToken, {
+        categoryId: parseMlPromotionUiCategoryId(categoryRaw),
+        offset,
+        limit,
+      })
+    : await fetchSellerPromotionsForUser(access.mlUserId, access.accessToken, {
+        offset,
+        limit,
+      });
 
   if (!result.ok) {
     return NextResponse.json(
@@ -60,5 +69,6 @@ export async function GET(
   return NextResponse.json({
     campaigns: result.campaigns,
     paging: result.paging,
+    category: categoryRaw ? parseMlPromotionUiCategoryId(categoryRaw) : null,
   });
 }
