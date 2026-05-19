@@ -228,26 +228,66 @@ function formatPromotionValuePart(p: Record<string, unknown>): string {
     return `ML ${mp ?? 0}% · vend. ${sp ?? 0}%`;
   }
 
-  const sug = p.suggested_discounted_price;
-  if (sug != null && Number.isFinite(Number(sug))) return `sug. ${brl.format(Number(sug))}`;
-
-  const orig = p.original_price;
-  if (orig != null && Number.isFinite(Number(orig))) return `lista ${brl.format(Number(orig))}`;
+  const range = getSellerPromotionPriceRangeHint(p);
+  if (range) return range;
 
   return "—";
 }
 
+/** ML enviou faixa completa (mín., máx. e sugerido) para definir preço na campanha. */
+export function hasSellerPromotionFullDiscountRange(p: Record<string, unknown>): boolean {
+  const min = Number(p.min_discounted_price);
+  const max = Number(p.max_discounted_price);
+  const suggested = Number(p.suggested_discounted_price);
+  return (
+    Number.isFinite(min) &&
+    min > 0 &&
+    Number.isFinite(max) &&
+    max > 0 &&
+    Number.isFinite(suggested) &&
+    suggested > 0
+  );
+}
+
 /**
- * Preço efetivo da oferta (BRL) para coluna de promoção, taxa ML e frete Líder.
- * Prioriza deal/desconto antes de `price` — na API do ML `price` pode ser lista/origens e `deal_price` o valor da promoção.
+ * Preço na campanha (BRL) em seller-promotions/items:
+ * com faixa min/max/sugerido → `max_discounted_price`;
+ * senão `price` quando > 0; senão `suggested_discounted_price`.
  */
 export function getSellerPromotionPriceAmount(p: Record<string, unknown>): number | null {
-  for (const key of ["deal_price", "discounted_price", "price", "suggested_discounted_price"] as const) {
-    const raw = p[key];
-    const n = Number(raw);
-    if (Number.isFinite(n) && n > 0) return n;
+  if (hasSellerPromotionFullDiscountRange(p)) {
+    return Number(p.max_discounted_price);
   }
+  const price = Number(p.price);
+  if (Number.isFinite(price) && price > 0) return price;
+  const suggested = Number(p.suggested_discounted_price);
+  if (Number.isFinite(suggested) && suggested > 0) return suggested;
   return null;
+}
+
+/** `original_price` — preço do item sem desconto (doc ML). */
+export function getSellerPromotionOriginalPriceAmount(p: Record<string, unknown>): number | null {
+  const orig = Number(p.original_price);
+  if (Number.isFinite(orig) && orig > 0) return orig;
+  return null;
+}
+
+/** Faixa na coluna Promoção (mín./sug.) quando o máx. já é o Preço promoção. */
+export function getSellerPromotionPriceRangeHint(p: Record<string, unknown>): string | null {
+  const min = Number(p.min_discounted_price);
+  const max = Number(p.max_discounted_price);
+  const suggested = Number(p.suggested_discounted_price);
+  const parts: string[] = [];
+  if (Number.isFinite(min) && min > 0) parts.push(`mín. ${brl.format(min)}`);
+  if (hasSellerPromotionFullDiscountRange(p)) {
+    if (Number.isFinite(suggested) && suggested > 0) {
+      parts.push(`sug. ${brl.format(suggested)}`);
+    }
+  } else if (Number.isFinite(max) && max > 0) {
+    parts.push(`máx. ${brl.format(max)}`);
+  }
+  if (parts.length === 0) return null;
+  return parts.join(" · ");
 }
 
 /**
@@ -283,8 +323,10 @@ export function getSellerPromotionApiId(p: Record<string, unknown>): string | nu
 
 export type SellerPromotionDisplayRow = {
   label: string;
+  /** Preço sem desconto (`original_price` na API). */
+  original_price: number | null;
   promo_price: number | null;
-  /** Texto de benefício (%, co-participação, etc.) quando não basta uma coluna de preço. */
+  /** Texto de benefício (%, co-participação, faixa min/máx, etc.). */
   value_hint: string | null;
   /** Abatimento na taxa ML (R$): original_price × meli_percentage / 100 quando o ML informa subsídio (ex. SMART). */
   meli_fee_subsidy: number | null;
@@ -298,17 +340,32 @@ export type SellerPromotionDisplayRow = {
   campaign_finish_at: string | null;
 };
 
+function mergePromotionValueHints(...parts: Array<string | null | undefined>): string | null {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of parts) {
+    const s = raw?.trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out.length > 0 ? out.join(" · ") : null;
+}
+
 function getSellerPromotionValueHint(
   p: Record<string, unknown>,
   promoPrice: number | null
 ): string | null {
   const part = formatPromotionValuePart(p);
-  if (part === "—") return null;
+  const range = getSellerPromotionPriceRangeHint(p);
+  if (part === "—") return range;
   if (promoPrice != null) {
     const formatted = brl.format(promoPrice);
-    if (part === formatted || part.endsWith(formatted) || part.includes(formatted)) return null;
+    if (part === formatted || part.endsWith(formatted) || part.includes(formatted)) {
+      return range;
+    }
   }
-  return part;
+  return mergePromotionValueHints(part, range);
 }
 
 function formatDisplayRowAsLine(r: SellerPromotionDisplayRow): string {
@@ -337,6 +394,7 @@ export function partitionSellerPromotionsRich(raw: unknown): {
   const possible: SellerPromotionDisplayRow[] = [];
   for (const p of list) {
     const promoPrice = getSellerPromotionPriceAmount(p);
+    const originalPrice = getSellerPromotionOriginalPriceAmount(p);
     const label = formatSellerPromotionTitle(p);
     const value_hint = getSellerPromotionValueHint(p, promoPrice);
     const meli_fee_subsidy = getSellerPromotionMeliFeeSubsidyBrl(p);
@@ -347,6 +405,7 @@ export function partitionSellerPromotionsRich(raw: unknown): {
     const ml_promotion_id = getSellerPromotionApiId(p);
     const row: SellerPromotionDisplayRow = {
       label,
+      original_price: originalPrice,
       promo_price: promoPrice,
       value_hint,
       meli_fee_subsidy,

@@ -91,7 +91,8 @@ function PromocoesHelpContent() {
                 <strong>todos os anúncios</strong> que entram na lista atual (busca + vínculo), em todas as páginas — pode levar vários minutos em catálogos grandes.
               </li>
               <li>
-                <strong>Preço</strong> vem da API de preços (standard); <strong>Preço promoção</strong> vem do seller-promotions / oferta.
+                <strong>Preço</strong> = <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">original_price</code> de cada promoção em seller-promotions/items (preço sem desconto).
+                <strong> Preço promoção</strong> = com faixa min/máx/sugerido do ML, usa <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">max_discounted_price</code>; senão <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">price</code> ou <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">suggested_discounted_price</code>. Mín. e sugerido aparecem na coluna Promoção.
               </li>
               <li>
                 <strong>Valor bruto</strong> é o <strong>Preço promoção</strong>. <strong>Vai receber</strong> = bruto − taxa ML − frete. <strong>Lucro</strong> = Vai receber − custo − imposto − taxa extra − desp. fixas. Use o cache de preços (vínculo produto) para custo e cadastros; atualize a tela Preços se faltar vínculo.

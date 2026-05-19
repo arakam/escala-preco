@@ -1,11 +1,6 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import {
-  fetchSellerPromotionsForItem,
-  getItemPrices,
-  getStandardPriceAmount,
-  runWithConcurrency,
-} from "@/lib/mercadolivre/client";
+import { fetchSellerPromotionsForItem, runWithConcurrency } from "@/lib/mercadolivre/client";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import {
   partitionSellerPromotionsRich,
@@ -330,6 +325,10 @@ function flattenPromoRows(enriched: PromoOverviewEnrichedRow[]): FlatPromoIntern
     if (actives.length === 0 && poss.length === 0) {
       out.push({
         ...base,
+        active_price:
+          r.list_price != null && Number.isFinite(r.list_price) && r.list_price > 0
+            ? r.list_price
+            : null,
         promotion_kind: "—",
         promotion_label: r.promotions_api_failed
           ? "Erro ao consultar promoções no ML"
@@ -348,6 +347,7 @@ function flattenPromoRows(enriched: PromoOverviewEnrichedRow[]): FlatPromoIntern
     actives.forEach((slice, i) => {
       out.push({
         ...base,
+        active_price: slice.original_price,
         promotion_kind: "ativa",
         promotion_label: slice.label,
         promo_price: slice.promo_price,
@@ -363,6 +363,7 @@ function flattenPromoRows(enriched: PromoOverviewEnrichedRow[]): FlatPromoIntern
     poss.forEach((slice, i) => {
       out.push({
         ...base,
+        active_price: slice.original_price,
         promotion_kind: "possível",
         promotion_label: slice.label,
         promo_price: slice.promo_price,
@@ -951,17 +952,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
       const itemId = row.item_id;
       const listPrice = row.price != null ? Number(row.price) : null;
       const cache = cacheByItem.get(itemId) ?? null;
-      const [promoRaw, prices] = await Promise.all([
-        fetchSellerPromotionsForItem(itemId, accessToken),
-        getItemPrices(itemId, accessToken, {}),
-      ]);
-      const standard = getStandardPriceAmount(prices);
-      const activePrice =
-        standard != null && Number.isFinite(standard) && standard > 0
-          ? standard
-          : listPrice != null && Number.isFinite(listPrice) && listPrice > 0
-            ? listPrice
-            : null;
+      const promoRaw = await fetchSellerPromotionsForItem(itemId, accessToken);
 
       const { active, possible } = partitionSellerPromotionsRich(promoRaw);
       const promotionsFailed = promoRaw === null;
@@ -976,7 +967,8 @@ async function writePromotionsCacheForMlItemPage(ctx: {
         listing_type_id: row.listing_type_id,
         category_id: row.category_id,
         list_price: listPrice,
-        active_price: activePrice,
+        /** Por linha de promoção vem de `original_price`; fallback em flatten. */
+        active_price: null,
         active_promotions: active,
         possible_promotions: possible,
         promotions_api_failed: promotionsFailed,
