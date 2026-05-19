@@ -95,7 +95,7 @@ function PromocoesHelpContent() {
                 <strong> Preço promoção</strong> = com faixa min/máx/sugerido do ML, usa <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">max_discounted_price</code>; senão <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">price</code> ou <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">suggested_discounted_price</code>. Mín. e sugerido aparecem na coluna Promoção.
               </li>
               <li>
-                <strong>Valor bruto</strong> é o <strong>Preço promoção</strong>. <strong>Vai receber</strong> = bruto − taxa ML − frete. <strong>Lucro</strong> = Vai receber − custo − imposto − taxa extra − desp. fixas. Use o cache de preços (vínculo produto) para custo e cadastros; atualize a tela Preços se faltar vínculo.
+                <strong>Valor bruto</strong> é o <strong>Preço promoção</strong>. <strong>Taxa ML</strong> = comissão bruta; <strong>Subsídio ML</strong> = abatimento do Mercado Livre (ex. SMART). <strong>Vai receber</strong> = bruto − taxa ML − frete + subsídio ML. <strong>Lucro</strong> = Vai receber − custo − imposto − taxa extra − desp. fixas.
               </li>
             </ul>
           </section>
@@ -136,7 +136,7 @@ function PromocoesHelpContent() {
                 <strong>Participar:</strong> marque convites (<em>Possível</em>) e use <strong>Participar na promoção</strong> para aceitar no Mercado Livre (API seller-promotions).
               </li>
               <li>
-                <strong>Taxa ML / Frete:</strong> conforme tabela oficial e Mercado Líder; promoções SMART podem abater subsídio na taxa.
+                <strong>Taxa ML / Subsídio ML / Frete:</strong> taxa bruta e subsídio em colunas separadas; o subsídio entra somado em Vai receber.
               </li>
               <li>
                 <strong>ML:</strong> link para o anúncio no site do Mercado Livre.
@@ -284,6 +284,7 @@ const PROMOCOES_COLUMNS: { minWidth: number }[] = [
   { minWidth: 200 },
   { minWidth: 95 },
   { minWidth: 95 },
+  { minWidth: 72 },
   { minWidth: 72 },
   { minWidth: 72 },
   { minWidth: 72 },
@@ -1196,7 +1197,8 @@ function PromocoesContent() {
                 <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">021_promotions_cache_link_filter.sql</code>,{" "}
                 <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">022_promotions_cache_promotion_type.sql</code>,{" "}
                 <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">023_promotions_cache_campaign_dates.sql</code> e{" "}
-                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">024_promotions_cache_ml_promotion_id.sql</code>.
+                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">024_promotions_cache_ml_promotion_id.sql</code> e{" "}
+                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">025_promotions_cache_meli_fee_subsidy.sql</code>.
               </p>
             );
           })()}
@@ -1329,24 +1331,31 @@ function PromocoesContent() {
               {promoStickyTh(11, "Promoção", { thClass: "min-w-[12rem]" })}
               {promoStickyTh(12, "Vai receber", {
                 align: "right",
-                title: "Preço promoção (bruto) − taxa ML − frete",
+                title: "Preço promoção − taxa ML − frete + subsídio ML",
               })}
               {promoStickyTh(13, "Lucro R$", { align: "right" })}
               {promoStickyTh(14, "Lucro %", { align: "right" })}
-              {promoStickyTh(15, "Taxa ML", { align: "right" })}
-              {promoStickyTh(16, "Frete", { align: "right" })}
-              {promoStickyTh(17, "Imposto", { align: "right" })}
-              {promoStickyTh(18, "Taxa extra", { align: "right" })}
-              {promoStickyTh(19, "Desp. fixas", { align: "right" })}
-              {promoStickyTh(20, "Início campanha", {
+              {promoStickyTh(15, "Taxa ML", {
+                align: "right",
+                title: "Comissão ML bruta (antes do subsídio)",
+              })}
+              {promoStickyTh(16, "Subsídio ML", {
+                align: "right",
+                title: "Abatimento do Mercado Livre na comissão (original_price × meli_percentage / 100)",
+              })}
+              {promoStickyTh(17, "Frete", { align: "right" })}
+              {promoStickyTh(18, "Imposto", { align: "right" })}
+              {promoStickyTh(19, "Taxa extra", { align: "right" })}
+              {promoStickyTh(20, "Desp. fixas", { align: "right" })}
+              {promoStickyTh(21, "Início campanha", {
                 title: "Início da campanha (seller-promotions), horário de São Paulo",
                 thClass: "whitespace-nowrap",
               })}
-              {promoStickyTh(21, "Fim campanha", {
+              {promoStickyTh(22, "Fim campanha", {
                 title: "Fim da campanha (seller-promotions), horário de São Paulo",
                 thClass: "whitespace-nowrap",
               })}
-              {promoStickyTh(22, "ML")}
+              {promoStickyTh(23, "ML")}
             </tr>
           </thead>
         <tbody>
@@ -1509,7 +1518,16 @@ function PromocoesContent() {
                   <td {...cell(15, "whitespace-nowrap p-2 text-right text-sm text-amber-700 dark:text-amber-300")}>
                     {calc ? formatPrice(calc.fee) : "—"}
                   </td>
-                  <td {...cell(16, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(16, "whitespace-nowrap p-2 text-right text-sm text-sky-700 dark:text-sky-300")}>
+                    {calc && calc.meli_fee_subsidy > 0 ? (
+                      <span title="Subsídio do Mercado Livre (somado em Vai receber)">
+                        +{formatPrice(calc.meli_fee_subsidy)}
+                      </span>
+                    ) : (
+                      <span className="text-fg-muted">—</span>
+                    )}
+                  </td>
+                  <td {...cell(17, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.shipping_cost > 0 ? (
                         <span className="text-red-600 dark:text-red-400">{formatPrice(calc.shipping_cost)}</span>
@@ -1520,7 +1538,7 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(17, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(18, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.tax_amount > 0 ? (
                         <span className="text-orange-600 dark:text-orange-400" title={r.tax_percent ? `${r.tax_percent}%` : undefined}>
@@ -1533,7 +1551,7 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(18, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(19, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.extra_fee_amount > 0 ? (
                         <span
@@ -1549,7 +1567,7 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(19, "whitespace-nowrap p-2 text-right text-sm")}>
+                  <td {...cell(20, "whitespace-nowrap p-2 text-right text-sm")}>
                     {calc ? (
                       calc.fixed_expenses_amount > 0 ? (
                         <span className="text-indigo-600 dark:text-indigo-400">{formatPrice(calc.fixed_expenses_amount)}</span>
@@ -1560,13 +1578,13 @@ function PromocoesContent() {
                       "—"
                     )}
                   </td>
-                  <td {...cell(20, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_start_at ?? undefined}>
+                  <td {...cell(21, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_start_at ?? undefined}>
                     {formatCampaignDatePt(r.campaign_start_at)}
                   </td>
-                  <td {...cell(21, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_finish_at ?? undefined}>
+                  <td {...cell(22, "whitespace-nowrap p-2 text-left text-[11px] tabular-nums text-fg")} title={r.campaign_finish_at ?? undefined}>
                     {formatCampaignDatePt(r.campaign_finish_at)}
                   </td>
-                  <td {...cell(22, "p-2")}>
+                  <td {...cell(23, "p-2")}>
                     {r.permalink ? (
                       <a
                         href={r.permalink}

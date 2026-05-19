@@ -37,7 +37,7 @@ function appendPromotionsSchemaHint(msg: string): string {
     m.includes("42p01") ||
     (m.includes("column") && (m.includes("not exist") || m.includes("does not")))
   ) {
-    return `${msg} Se o erro citar tabela ou coluna inexistente, execute no Supabase as migrations 019_ml_promotion_webhook_alerts.sql, 020_promotions_cache.sql, 021_promotions_cache_link_filter.sql, 022_promotions_cache_promotion_type.sql, 023_promotions_cache_campaign_dates.sql e 024_promotions_cache_ml_promotion_id.sql.`;
+    return `${msg} Se o erro citar tabela ou coluna inexistente, execute no Supabase as migrations 019_ml_promotion_webhook_alerts.sql, 020_promotions_cache.sql, 021_promotions_cache_link_filter.sql, 022_promotions_cache_promotion_type.sql, 023_promotions_cache_campaign_dates.sql, 024_promotions_cache_ml_promotion_id.sql e 025_promotions_cache_meli_fee_subsidy.sql.`;
   }
   return msg;
 }
@@ -420,6 +420,7 @@ export type PromoOverviewFlatApiRow = {
     tax_amount: number;
     extra_fee_amount: number;
     fixed_expenses_amount: number;
+    meli_fee_subsidy: number;
     vai_receber: number;
     net_amount: number;
   } | null;
@@ -470,6 +471,7 @@ function mapFlatToApi(
           tax_amount: pricing.tax_amount,
           extra_fee_amount: pricing.extra_fee_amount,
           fixed_expenses_amount: pricing.fixed_expenses_amount,
+          meli_fee_subsidy: pricing.meli_fee_subsidy,
           vai_receber: pricing.vai_receber,
           net_amount: pricing.net_amount,
         }
@@ -518,6 +520,11 @@ function mapPromotionCacheDbRowToApi(row: Record<string, unknown>): PromoOvervie
   const promotionKind = String(row.promotion_kind) as "ativa" | "possível" | "—";
   const hasPricing = row.net_amount != null && Number.isFinite(Number(row.net_amount));
 
+  const meliSubsidy =
+    row.meli_fee_subsidy != null && Number.isFinite(Number(row.meli_fee_subsidy))
+      ? Math.max(0, Number(row.meli_fee_subsidy))
+      : 0;
+
   const pricing = hasPricing
     ? {
         price: Number(row.promo_price ?? row.active_price ?? 0),
@@ -526,6 +533,7 @@ function mapPromotionCacheDbRowToApi(row: Record<string, unknown>): PromoOvervie
         tax_amount: Number(row.tax_amount ?? 0),
         extra_fee_amount: Number(row.extra_fee_amount ?? 0),
         fixed_expenses_amount: Number(row.fixed_expenses_amount ?? 0),
+        meli_fee_subsidy: meliSubsidy,
         net_amount: Number(row.net_amount),
         vai_receber:
           Math.round(
@@ -1004,7 +1012,6 @@ async function writePromotionsCacheForMlItemPage(ctx: {
         height_cm: f.height_cm,
         width_cm: f.width_cm,
         length_cm: f.length_cm,
-        meli_fee_subsidy: f.meli_fee_subsidy,
       },
     });
   });
@@ -1041,6 +1048,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
         price: feeRow.price,
         fee: feeRow.fee,
         shipping_cost: feeRow.shipping_cost,
+        meli_fee_subsidy: f.meli_fee_subsidy,
       });
     }
     const profit =
@@ -1103,6 +1111,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
       extra_fee_percent: r.extra_fee_percent,
       fixed_expenses: r.fixed_expenses,
       fee: r.pricing?.fee ?? null,
+      meli_fee_subsidy: r.pricing?.meli_fee_subsidy ?? null,
       shipping_cost: r.pricing?.shipping_cost ?? null,
       tax_amount: r.pricing?.tax_amount ?? null,
       extra_fee_amount: r.pricing?.extra_fee_amount ?? null,
