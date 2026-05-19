@@ -37,6 +37,28 @@ export default function ResetPasswordPage() {
     let cancelled = false;
 
     async function bootstrap() {
+      const search = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+      const tokenHash = search?.get("token_hash");
+      const otpType = search?.get("type");
+      if (tokenHash && otpType) {
+        const q = new URLSearchParams({ token_hash: tokenHash, type: otpType, next: "/auth/reset-password" });
+        window.location.replace(`/auth/confirm?${q.toString()}`);
+        return;
+      }
+
+      const authCode = search?.get("code");
+      if (authCode) {
+        const { error } = await supabase.auth.exchangeCodeForSession(authCode);
+        if (cancelled) return;
+        if (error) {
+          setHashError(error.message || "Link inválido.");
+          return;
+        }
+        window.history.replaceState(null, "", window.location.pathname);
+        setReady(true);
+        return;
+      }
+
       const raw = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "";
       if (raw) {
         const p = new URLSearchParams(raw);

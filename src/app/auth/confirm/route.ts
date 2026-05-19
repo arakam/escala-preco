@@ -5,10 +5,11 @@ import { type NextRequest, NextResponse } from "next/server";
 type CookieOption = { name: string; value: string; options?: Record<string, unknown> };
 
 /**
- * Troca token_hash (email PKCE) por sessão em cookie.
- * No Supabase, ajuste o template "Reset password" para apontar para esta URL com token_hash e type=recovery.
+ * Callback de email (recuperação de senha, confirmação de cadastro, etc.).
+ * Aceita `code` (PKCE após redirect do Supabase) ou `token_hash` + `type` (template customizado).
  */
 export async function GET(request: NextRequest) {
+  const code = request.nextUrl.searchParams.get("code");
   const token_hash = request.nextUrl.searchParams.get("token_hash");
   const type = request.nextUrl.searchParams.get("type") as EmailOtpType | null;
   const nextRaw = request.nextUrl.searchParams.get("next") ?? "/auth/reset-password";
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
     new URL("/auth/forgot-password?erro=link", request.nextUrl.origin)
   );
 
-  if (!token_hash || !type) {
+  if (!code && (!token_hash || !type)) {
     return failRedirect;
   }
 
@@ -43,12 +44,22 @@ export async function GET(request: NextRequest) {
     }
   );
 
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) {
+      console.warn("[auth/confirm] exchangeCodeForSession:", error.message);
+      return failRedirect;
+    }
+    return response;
+  }
+
   const { error } = await supabase.auth.verifyOtp({
-    type,
-    token_hash,
+    type: type!,
+    token_hash: token_hash!,
   });
 
   if (error) {
+    console.warn("[auth/confirm] verifyOtp:", error.message);
     return failRedirect;
   }
 

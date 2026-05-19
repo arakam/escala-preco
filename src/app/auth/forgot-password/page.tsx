@@ -23,9 +23,9 @@ function ForgotForm() {
     try {
       const supabase = createClient();
       const origin = getAppOrigin();
-      /** redirect_to do link no email (fluxo padrão do Supabase → hash na URL abaixo). */
+      /** Passa por /auth/confirm para trocar code/token_hash por sessão em cookie (PKCE). */
       const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${origin}/auth/reset-password`,
+        redirectTo: `${origin}/auth/confirm?next=/auth/reset-password`,
       });
       if (err) {
         setError(err.message || "Não foi possível enviar o email. Tente de novo.");
