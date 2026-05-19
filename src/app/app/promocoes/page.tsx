@@ -520,10 +520,11 @@ function PromocoesContent() {
     }
   }, []);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!accountId) return;
     const gen = ++loadPromoGen.current;
-    setLoading(true);
+    const silent = options?.silent === true;
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ page: String(page) });
@@ -571,9 +572,29 @@ function PromocoesContent() {
       setFlatRows([]);
       setSnapshotAt(null);
     } finally {
-      if (gen === loadPromoGen.current) setLoading(false);
+      if (gen === loadPromoGen.current && !silent) setLoading(false);
     }
   }, [accountId, page, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl]);
+
+  /** Recarrega snapshot do cache a cada 60s (dados já atualizados por webhook/join no servidor). */
+  useEffect(() => {
+    if (!accountId || refreshing || refreshJobId) return;
+    const interval = setInterval(() => {
+      void loadData({ silent: true });
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [accountId, refreshing, refreshJobId, loadData]);
+
+  useEffect(() => {
+    if (!accountId) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void loadData({ silent: true });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [accountId, loadData]);
 
   const pollRefreshJob = useCallback(
     async (jobId: string) => {

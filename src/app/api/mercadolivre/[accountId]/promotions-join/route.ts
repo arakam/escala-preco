@@ -10,6 +10,7 @@ import {
   type JoinSellerPromotionItemResult,
 } from "@/lib/mercadolivre/join-seller-promotion";
 import { normalizeMlPromotionTypeCode } from "@/lib/mercadolivre/ml-promotion-types";
+import { refreshPromotionsForItems } from "@/lib/mercadolivre/promotions-cache";
 
 type JoinBody = {
   items?: JoinSellerPromotionInput[];
@@ -54,7 +55,7 @@ export async function POST(
 
   const { data: account, error: accountError } = await supabase
     .from("ml_accounts")
-    .select("id")
+    .select("id, user_id")
     .eq("id", accountId)
     .eq("user_id", user.id)
     .single();
@@ -165,6 +166,27 @@ export async function POST(
 
   const okCount = results.filter((r) => r.status === "ok").length;
   const errorCount = results.filter((r) => r.status === "error").length;
+
+  const okItemIds = Array.from(
+    new Set(
+      results
+        .filter((r) => r.status === "ok")
+        .map((r) => String(r.item_id).trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+  if (okItemIds.length > 0) {
+    try {
+      await refreshPromotionsForItems({
+        supabase: adminSupabase,
+        accountId: account.id,
+        userId: user.id,
+        itemIds: okItemIds,
+      });
+    } catch (e) {
+      console.warn("[promotions-join] refresh cache após join:", e);
+    }
+  }
 
   return NextResponse.json({
     summary: {

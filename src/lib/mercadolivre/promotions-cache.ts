@@ -195,7 +195,27 @@ type MlItemRow = {
   updated_at: string;
   listing_type_id: string | null;
   category_id: string | null;
+  product_id?: string | null;
 };
+
+type PromoCacheSliceKey = {
+  cache_search: string;
+  cache_link_filter: PromotionsLinkFilter;
+  cache_page: number;
+};
+
+function itemMatchesPromotionsLinkFilter(
+  row: Pick<MlItemRow, "product_id">,
+  linkKey: PromotionsLinkFilter
+): boolean {
+  if (linkKey === "linked") return row.product_id != null;
+  if (linkKey === "unlinked") return row.product_id == null;
+  return true;
+}
+
+function sliceKeyString(s: PromoCacheSliceKey): string {
+  return `${s.cache_search}\0${s.cache_link_filter}\0${s.cache_page}`;
+}
 
 type CacheRow = {
   item_id: string;
@@ -872,70 +892,20 @@ async function fetchIsMercadoLider(
   }
 }
 
-/**
- * Uma página de `ml_items` → ML + taxas → grava `promotions_cache_rows` para `cache_page`.
- * @param deleteItemIdsBeforeInsert — se true, remove linhas antigas desses `item_id` (sync parcial); se false, assume wipe prévio (catálogo completo).
- */
-async function writePromotionsCacheForMlItemPage(ctx: {
+/** Busca ML + taxas para uma lista de anúncios (sem gravar cache). */
+async function enrichMlItemRowsToApiRows(ctx: {
   supabase: SupabaseClient;
   adminSupabase: SupabaseClient;
   accountId: string;
-  userId: string;
-  norm: string;
-  linkKey: PromotionsLinkFilter;
-  cachePage: number;
   siteId: string;
   accessToken: string;
   isMercadoLider: boolean;
-  snapshotAt: string;
-  deleteItemIdsBeforeInsert: boolean;
-}): Promise<{ apiRows: PromoOverviewFlatApiRow[]; total: number; itemIds: string[] }> {
-  const {
-    supabase,
-    adminSupabase,
-    accountId,
-    userId,
-    norm,
-    linkKey,
-    cachePage,
-    siteId,
-    accessToken,
-    isMercadoLider,
-    snapshotAt,
-    deleteItemIdsBeforeInsert,
-  } = ctx;
-
-  const from = (cachePage - 1) * PROMOTIONS_OVERVIEW_PAGE_SIZE;
-  const to = from + PROMOTIONS_OVERVIEW_PAGE_SIZE - 1;
-
-  let query = supabase
-    .from("ml_items")
-    .select(
-      "item_id, title, status, price, thumbnail, permalink, updated_at, listing_type_id, category_id",
-      { count: "exact" }
-    )
-    .eq("account_id", accountId)
-    .order("updated_at", { ascending: false })
-    .range(from, to);
-
-  if (linkKey === "linked") query = query.not("product_id", "is", null);
-  else if (linkKey === "unlinked") query = query.is("product_id", null);
-
-  if (norm) {
-    query = query.or(`title.ilike.%${norm}%,item_id.ilike.%${norm}%`);
-  }
-
-  const { data: items, error: itemsErr, count } = await query;
-  if (itemsErr) {
-    console.error("[promotions-cache] refresh items", itemsErr);
-    throw new Error(appendPromotionsSchemaHint(formatPostgrestError("Erro ao listar anúncios", itemsErr)));
-  }
-
-  const rows = (items ?? []) as MlItemRow[];
-  const total = count ?? 0;
+  rows: MlItemRow[];
+}): Promise<{ apiRows: PromoOverviewFlatApiRow[]; flat: FlatPromoInternal[]; itemIds: string[] }> {
+  const { supabase, adminSupabase, accountId, siteId, accessToken, isMercadoLider, rows } = ctx;
   const itemIds = rows.map((r) => r.item_id);
-
   let cacheByItem = new Map<string, CacheRow | null>();
+
   if (itemIds.length > 0) {
     const { data: cacheRows, error: cacheErr } = await supabase
       .from("pricing_cache")
@@ -975,7 +945,6 @@ async function writePromotionsCacheForMlItemPage(ctx: {
         listing_type_id: row.listing_type_id,
         category_id: row.category_id,
         list_price: listPrice,
-        /** Por linha de promoção vem de `original_price`; fallback em flatten. */
         active_price: null,
         active_promotions: active,
         possible_promotions: possible,
@@ -1019,15 +988,12 @@ async function writePromotionsCacheForMlItemPage(ctx: {
   const feeByFlatIndex = new Map<number, { fee: number; shipping_cost: number; price: number }>();
   for (let i = 0; i < feeEntries.length; i += PRICING_CALCULATE_CLIENT_BATCH_SIZE) {
     const chunk = feeEntries.slice(i, i + PRICING_CALCULATE_CLIENT_BATCH_SIZE);
-    const { results } = await computeItemsFees(
-      chunk.map((c) => c.item),
-      {
-        siteId,
-        accessToken,
-        isMercadoLider,
-        supabaseAdmin: adminSupabase,
-      }
-    );
+    const { results } = await computeItemsFees(chunk.map((c) => c.item), {
+      siteId,
+      accessToken,
+      isMercadoLider,
+      supabaseAdmin: adminSupabase,
+    });
     chunk.forEach((e, j) => {
       const r = results[j];
       if (r) {
@@ -1060,7 +1026,39 @@ async function writePromotionsCacheForMlItemPage(ctx: {
     return mapFlatToApi(f, full, profit, profitPercent);
   });
 
-  if (deleteItemIdsBeforeInsert && itemIds.length > 0) {
+  return { apiRows, flat, itemIds };
+}
+
+async function persistPromoApiRowsToCacheSlice(ctx: {
+  supabase: SupabaseClient;
+  adminSupabase: SupabaseClient;
+  accountId: string;
+  userId: string;
+  norm: string;
+  linkKey: PromotionsLinkFilter;
+  cachePage: number;
+  snapshotAt: string;
+  isMercadoLider: boolean;
+  itemIds: string[];
+  apiRows: PromoOverviewFlatApiRow[];
+  flat: FlatPromoInternal[];
+}): Promise<void> {
+  const {
+    supabase,
+    adminSupabase,
+    accountId,
+    userId,
+    norm,
+    linkKey,
+    cachePage,
+    snapshotAt,
+    isMercadoLider,
+    itemIds,
+    apiRows,
+    flat,
+  } = ctx;
+
+  if (itemIds.length > 0) {
     const { error: delErr } = await supabase
       .from("promotions_cache_rows")
       .delete()
@@ -1144,6 +1142,348 @@ async function writePromotionsCacheForMlItemPage(ctx: {
       await patchPricingCacheMlActivePromotions(adminSupabase, accountId, promoTextByItem);
     } catch (e) {
       console.warn("[promotions-cache] sync pricing_cache.ml_active_promotions", e);
+    }
+  }
+}
+
+async function listPromoCacheSlicesForItems(
+  supabase: SupabaseClient,
+  accountId: string,
+  userId: string,
+  itemIds: string[]
+): Promise<PromoCacheSliceKey[]> {
+  if (itemIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("promotions_cache_rows")
+    .select("cache_search, cache_link_filter, cache_page")
+    .eq("account_id", accountId)
+    .eq("user_id", userId)
+    .in("item_id", itemIds);
+  if (error) {
+    console.warn("[promotions-cache] list slices for items", error);
+    return [{ cache_search: "", cache_link_filter: "all", cache_page: 1 }];
+  }
+  const seen = new Map<string, PromoCacheSliceKey>();
+  for (const row of data ?? []) {
+    const r = row as {
+      cache_search?: string;
+      cache_link_filter?: string;
+      cache_page?: number;
+    };
+    const linkRaw = String(r.cache_link_filter ?? "all");
+    const linkKey: PromotionsLinkFilter =
+      linkRaw === "linked" || linkRaw === "unlinked" ? linkRaw : "all";
+    const slice: PromoCacheSliceKey = {
+      cache_search: String(r.cache_search ?? ""),
+      cache_link_filter: linkKey,
+      cache_page: Math.max(1, Number(r.cache_page) || 1),
+    };
+    seen.set(sliceKeyString(slice), slice);
+  }
+  if (seen.size === 0) {
+    return [{ cache_search: "", cache_link_filter: "all", cache_page: 1 }];
+  }
+  return Array.from(seen.values());
+}
+
+/**
+ * Atualiza no ML e persiste cache de promoções só para os anúncios informados.
+ * Usado por webhooks e após participar em promoção (sem recarregar o catálogo inteiro).
+ */
+export async function refreshPromotionsForItems(params: {
+  supabase: SupabaseClient;
+  accountId: string;
+  userId: string;
+  itemIds: string[];
+}): Promise<{ refreshed: string[]; skipped: string[] }> {
+  const ids = Array.from(
+    new Set(
+      params.itemIds
+        .map((id) => String(id).trim().toUpperCase())
+        .filter((id) => /^ML[A-Z]?\d+$/i.test(id))
+    )
+  );
+  if (ids.length === 0) return { refreshed: [], skipped: [] };
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.warn("[promotions-cache] refreshPromotionsForItems: Supabase incompleto");
+    return { refreshed: [], skipped: ids };
+  }
+  const adminSupabase = createSupabaseClient(supabaseUrl, supabaseServiceKey);
+
+  const { data: accountRow, error: accErr } = await params.supabase
+    .from("ml_accounts")
+    .select("id, site_id, ml_user_id")
+    .eq("id", params.accountId)
+    .eq("user_id", params.userId)
+    .single();
+
+  if (accErr || !accountRow) {
+    console.warn("[promotions-cache] refreshPromotionsForItems: conta não encontrada", accErr);
+    return { refreshed: [], skipped: ids };
+  }
+
+  const mlUserId = Number(accountRow.ml_user_id);
+  const siteId = (accountRow.site_id as string | null) || "MLB";
+
+  const { data: tokenRow, error: tokenErr } = await params.supabase
+    .from("ml_tokens")
+    .select("access_token, refresh_token, expires_at")
+    .eq("account_id", params.accountId)
+    .single();
+
+  if (tokenErr || !tokenRow) {
+    console.warn("[promotions-cache] refreshPromotionsForItems: token ausente", tokenErr);
+    return { refreshed: [], skipped: ids };
+  }
+
+  const tr = tokenRow as { access_token: string; refresh_token: string; expires_at: string };
+  const accessToken = await getValidAccessToken(
+    params.accountId,
+    tr.access_token,
+    tr.refresh_token,
+    tr.expires_at,
+    adminSupabase
+  );
+  if (!accessToken) {
+    console.warn("[promotions-cache] refreshPromotionsForItems: access token inválido");
+    return { refreshed: [], skipped: ids };
+  }
+
+  const { data: mlItems, error: itemsErr } = await params.supabase
+    .from("ml_items")
+    .select(
+      "item_id, title, status, price, thumbnail, permalink, updated_at, listing_type_id, category_id, product_id"
+    )
+    .eq("account_id", params.accountId)
+    .in("item_id", ids);
+
+  if (itemsErr) {
+    console.error("[promotions-cache] refreshPromotionsForItems ml_items", itemsErr);
+    return { refreshed: [], skipped: ids };
+  }
+
+  const mlRows = (mlItems ?? []) as MlItemRow[];
+  const mlById = new Map(mlRows.map((r) => [String(r.item_id).toUpperCase(), r]));
+  const skipped = ids.filter((id) => !mlById.has(id));
+  const toProcess = ids.filter((id) => mlById.has(id));
+  if (toProcess.length === 0) return { refreshed: [], skipped: ids };
+
+  const isMercadoLider = await fetchIsMercadoLider(accessToken, mlUserId);
+  const snapshotAt = new Date().toISOString();
+  const slices = await listPromoCacheSlicesForItems(
+    params.supabase,
+    params.accountId,
+    params.userId,
+    toProcess
+  );
+
+  const mlRowsToEnrich = toProcess.map((id) => mlById.get(id)!);
+  const { apiRows: allApiRows, flat: allFlat } = await enrichMlItemRowsToApiRows({
+    supabase: params.supabase,
+    adminSupabase,
+    accountId: params.accountId,
+    siteId,
+    accessToken,
+    isMercadoLider,
+    rows: mlRowsToEnrich,
+  });
+
+  const refreshed = new Set<string>();
+
+  for (const slice of slices) {
+    const norm = slice.cache_search;
+    const linkKey = slice.cache_link_filter;
+
+    const idsToClear = toProcess.filter((id) => {
+      const row = mlById.get(id);
+      return row != null && !itemMatchesPromotionsLinkFilter(row, linkKey);
+    });
+
+    if (idsToClear.length > 0) {
+      await params.supabase
+        .from("promotions_cache_rows")
+        .delete()
+        .eq("account_id", params.accountId)
+        .eq("user_id", params.userId)
+        .eq("cache_search", norm)
+        .eq("cache_link_filter", linkKey)
+        .in("item_id", idsToClear);
+    }
+
+    const rowsForSlice = mlRowsToEnrich.filter((r) => itemMatchesPromotionsLinkFilter(r, linkKey));
+    if (rowsForSlice.length === 0) continue;
+
+    const sliceItemIds = new Set(rowsForSlice.map((r) => String(r.item_id).toUpperCase()));
+    const apiRows = allApiRows.filter((r) => sliceItemIds.has(String(r.item_id).toUpperCase()));
+    const flat = allFlat.filter((f) => sliceItemIds.has(String(f.item_id).toUpperCase()));
+    const itemIds = rowsForSlice.map((r) => r.item_id);
+
+    await persistPromoApiRowsToCacheSlice({
+      supabase: params.supabase,
+      adminSupabase,
+      accountId: params.accountId,
+      userId: params.userId,
+      norm,
+      linkKey,
+      cachePage: slice.cache_page,
+      snapshotAt,
+      isMercadoLider,
+      itemIds,
+      apiRows,
+      flat,
+    });
+
+    for (const id of itemIds) refreshed.add(String(id).toUpperCase());
+  }
+
+  return { refreshed: Array.from(refreshed), skipped };
+}
+
+/**
+ * Uma página de `ml_items` → ML + taxas → grava `promotions_cache_rows` para `cache_page`.
+ * @param deleteItemIdsBeforeInsert — se true, remove linhas antigas desses `item_id` (sync parcial); se false, assume wipe prévio (catálogo completo).
+ */
+async function writePromotionsCacheForMlItemPage(ctx: {
+  supabase: SupabaseClient;
+  adminSupabase: SupabaseClient;
+  accountId: string;
+  userId: string;
+  norm: string;
+  linkKey: PromotionsLinkFilter;
+  cachePage: number;
+  siteId: string;
+  accessToken: string;
+  isMercadoLider: boolean;
+  snapshotAt: string;
+  deleteItemIdsBeforeInsert: boolean;
+}): Promise<{ apiRows: PromoOverviewFlatApiRow[]; total: number; itemIds: string[] }> {
+  const {
+    supabase,
+    adminSupabase,
+    accountId,
+    userId,
+    norm,
+    linkKey,
+    cachePage,
+    siteId,
+    accessToken,
+    isMercadoLider,
+    snapshotAt,
+    deleteItemIdsBeforeInsert,
+  } = ctx;
+
+  const from = (cachePage - 1) * PROMOTIONS_OVERVIEW_PAGE_SIZE;
+  const to = from + PROMOTIONS_OVERVIEW_PAGE_SIZE - 1;
+
+  let query = supabase
+    .from("ml_items")
+    .select(
+      "item_id, title, status, price, thumbnail, permalink, updated_at, listing_type_id, category_id",
+      { count: "exact" }
+    )
+    .eq("account_id", accountId)
+    .order("updated_at", { ascending: false })
+    .range(from, to);
+
+  if (linkKey === "linked") query = query.not("product_id", "is", null);
+  else if (linkKey === "unlinked") query = query.is("product_id", null);
+
+  if (norm) {
+    query = query.or(`title.ilike.%${norm}%,item_id.ilike.%${norm}%`);
+  }
+
+  const { data: items, error: itemsErr, count } = await query;
+  if (itemsErr) {
+    console.error("[promotions-cache] refresh items", itemsErr);
+    throw new Error(appendPromotionsSchemaHint(formatPostgrestError("Erro ao listar anúncios", itemsErr)));
+  }
+
+  const rows = (items ?? []) as MlItemRow[];
+  const total = count ?? 0;
+
+  const { apiRows, flat, itemIds } = await enrichMlItemRowsToApiRows({
+    supabase,
+    adminSupabase,
+    accountId,
+    siteId,
+    accessToken,
+    isMercadoLider,
+    rows,
+  });
+
+  if (deleteItemIdsBeforeInsert) {
+    await persistPromoApiRowsToCacheSlice({
+      supabase,
+      adminSupabase,
+      accountId,
+      userId,
+      norm,
+      linkKey,
+      cachePage,
+      snapshotAt,
+      isMercadoLider,
+      itemIds,
+      apiRows,
+      flat,
+    });
+  } else if (apiRows.length > 0) {
+    const dbRows = apiRows.map((r) => ({
+      account_id: accountId,
+      user_id: userId,
+      cache_page: cachePage,
+      cache_search: norm,
+      cache_link_filter: linkKey,
+      row_key: r.rowKey,
+      item_id: r.item_id,
+      title: r.title,
+      status: r.status,
+      thumbnail: r.thumbnail,
+      permalink: r.permalink,
+      updated_at: r.updated_at || null,
+      listing_type_id: r.listing_type_id,
+      category_id: r.category_id,
+      list_price: r.list_price,
+      active_price: r.active_price,
+      promotion_kind: r.promotionKind,
+      promotion_label: r.promotionLabel,
+      promotion_type: r.promotionType ?? null,
+      campaign_start_at: r.campaign_start_at ?? null,
+      campaign_finish_at: r.campaign_finish_at ?? null,
+      ml_promotion_id: r.ml_promotion_id ?? null,
+      promo_price: r.promo_price,
+      value_hint: r.value_hint,
+      promotions_api_failed: r.promotions_api_failed,
+      cost_price: r.cost_price,
+      weight_kg: r.weight_kg,
+      height_cm: r.height_cm,
+      width_cm: r.width_cm,
+      length_cm: r.length_cm,
+      tax_percent: r.tax_percent,
+      extra_fee_percent: r.extra_fee_percent,
+      fixed_expenses: r.fixed_expenses,
+      fee: r.pricing?.fee ?? null,
+      meli_fee_subsidy: r.pricing?.meli_fee_subsidy ?? null,
+      shipping_cost: r.pricing?.shipping_cost ?? null,
+      tax_amount: r.pricing?.tax_amount ?? null,
+      extra_fee_amount: r.pricing?.extra_fee_amount ?? null,
+      fixed_expenses_amount: r.pricing?.fixed_expenses_amount ?? null,
+      net_amount: r.pricing?.net_amount ?? null,
+      profit: r.profit,
+      profit_percent: r.profit_percent,
+      snapshot_at: snapshotAt,
+      is_mercado_lider_snapshot: isMercadoLider,
+    }));
+    const chunkSize = 80;
+    for (let i = 0; i < dbRows.length; i += chunkSize) {
+      const slice = dbRows.slice(i, i + chunkSize);
+      const { error: insErr } = await supabase.from("promotions_cache_rows").insert(slice);
+      if (insErr) {
+        console.error("[promotions-cache] insert", insErr);
+        throw new Error(appendPromotionsSchemaHint(formatPostgrestError("Erro ao gravar cache de promoções", insErr)));
+      }
     }
   }
 

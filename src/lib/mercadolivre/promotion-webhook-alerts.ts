@@ -40,7 +40,7 @@ export async function resolveAndStorePromotionWebhookAlert(
   account: { id: string; user_id: string },
   topic: string,
   resourcePath: string
-): Promise<void> {
+): Promise<{ item_id: string | null }> {
   const path = resourcePath.startsWith("/") ? resourcePath : `/${resourcePath}`;
   const externalId = extractExternalId(path);
 
@@ -59,7 +59,7 @@ export async function resolveAndStorePromotionWebhookAlert(
       fetch_error: "token_indisponivel",
       raw_api: null,
     });
-    return;
+    return { item_id: null };
   }
 
   const res = await fetchMlResourcePath(path, accessToken);
@@ -77,7 +77,7 @@ export async function resolveAndStorePromotionWebhookAlert(
       fetch_error: `http_${res.status}: ${res.body}`,
       raw_api: null,
     });
-    return;
+    return { item_id: null };
   }
 
   const parsed = parseCandidateOfferBody(res.data);
@@ -94,6 +94,8 @@ export async function resolveAndStorePromotionWebhookAlert(
     fetch_error: null,
     raw_api: res.data as object,
   });
+
+  return { item_id: parsed.item_id };
 }
 
 export function isPromotionPublicWebhookTopic(topic: string): boolean {

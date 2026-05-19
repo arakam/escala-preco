@@ -4,6 +4,7 @@ import {
   resolveAndStorePromotionWebhookAlert,
 } from "@/lib/mercadolivre/promotion-webhook-alerts";
 import { scheduleItemsWebhookSync } from "@/lib/mercadolivre/webhook-items-sync";
+import { schedulePromotionsWebhookCacheRefresh } from "@/lib/mercadolivre/webhook-promotions-sync";
 import { processOrdersWebhookSync } from "@/lib/mercadolivre/webhook-orders-sync";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -107,7 +108,15 @@ export async function POST(request: NextRequest) {
 
   if (resource && isPromotionPublicWebhookTopic(topic)) {
     await Promise.all(
-      accounts.map((acc) => resolveAndStorePromotionWebhookAlert(supabase, acc, topic, resource))
+      accounts.map(async (acc) => {
+        const resolved = await resolveAndStorePromotionWebhookAlert(
+          supabase,
+          acc,
+          topic,
+          resource
+        );
+        schedulePromotionsWebhookCacheRefresh([acc], resolved.item_id);
+      })
     ).catch((e) => console.error("[ML webhook] promotion alerts:", e));
   }
 
