@@ -6,6 +6,7 @@ import {
   readTagsCellFromCsvRow,
   syncImportedProductTagsBulk,
 } from "@/lib/product-tags";
+import { PRODUCT_CSV_CANONICAL_KEYS } from "@/lib/products-csv";
 
 /** PostgREST/Supabase limita ~1000 linhas por request; importar em lotes. */
 const UPSERT_BATCH_SIZE = 500;
@@ -16,6 +17,7 @@ interface ParsedProduct {
   sku: string;
   title: string;
   description: string | null;
+  supplier: string | null;
   ean: string | null;
   height: number | null;
   width: number | null;
@@ -85,11 +87,14 @@ function parsePrice(value: string): number | null {
   return parseNumber(value, 9999999999);
 }
 
-const EXPECTED_HEADERS = ["sku", "titulo", "altura", "largura", "comprimento", "peso", "precocusto", "imposto", "taxaextra", "despfixas", "pma", "tags"];
+const EXPECTED_HEADERS = PRODUCT_CSV_CANONICAL_KEYS;
 
 const VALID_HEADER_ALIASES: Record<string, string[]> = {
   sku: ["sku"],
   titulo: ["titulo", "title", "nome"],
+  descricao: ["descricao", "description", "descrição", "descrio"],
+  fornecedor: ["fornecedor", "supplier", "fornecedores"],
+  ean: ["ean", "gtin", "codigobarras", "codigo_barras"],
   tags: ["tags", "tag", "rotulos", "rotulo", "etiquetas", "etiqueta"],
   altura: ["altura", "height"],
   largura: ["largura", "width"],
@@ -176,6 +181,9 @@ export async function POST(request: NextRequest) {
   const colIndex = {
     sku: normalized.get("sku") ?? -1,
     title: normalized.get("titulo") ?? -1,
+    description: normalized.get("descricao") ?? -1,
+    supplier: normalized.get("fornecedor") ?? -1,
+    ean: normalized.get("ean") ?? -1,
     height: normalized.get("altura") ?? -1,
     width: normalized.get("largura") ?? -1,
     length: normalized.get("comprimento") ?? -1,
@@ -211,8 +219,11 @@ export async function POST(request: NextRequest) {
     products.push({
       sku,
       title: title || sku,
-      description: null,
-      ean: null,
+      description:
+        colIndex.description >= 0 ? values[colIndex.description]?.trim() || null : null,
+      supplier:
+        colIndex.supplier >= 0 ? values[colIndex.supplier]?.trim() || null : null,
+      ean: colIndex.ean >= 0 ? values[colIndex.ean]?.trim() || null : null,
       height: colIndex.height >= 0 ? parseDimension(values[colIndex.height]) : null,
       width: colIndex.width >= 0 ? parseDimension(values[colIndex.width]) : null,
       length: colIndex.length >= 0 ? parseDimension(values[colIndex.length]) : null,

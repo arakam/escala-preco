@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { resolveProductIdsByTagIds } from "@/lib/product-tags";
+import {
+  parseProductListFilters,
+  resolveProductIdsForListFilters,
+} from "@/lib/product-filters";
 import { fetchAllViaRange, isAllPageSize } from "@/lib/table-pagination";
 
 export async function GET(request: NextRequest) {
@@ -15,10 +18,7 @@ export async function GET(request: NextRequest) {
 
   const searchParams = request.nextUrl.searchParams;
   const search = searchParams.get("search") || "";
-  const tagIdsParam = searchParams.get("tags")?.trim() || "";
-  const tagIds = tagIdsParam
-    ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean)
-    : [];
+  const listFilters = parseProductListFilters(searchParams);
   const limitParam = parseInt(searchParams.get("limit") || "50", 10);
   const showAll = isAllPageSize(limitParam);
   const page = showAll ? 1 : parseInt(searchParams.get("page") || "1", 10);
@@ -42,23 +42,25 @@ export async function GET(request: NextRequest) {
 
   const sortColumn = validSortColumns.includes(sortBy) ? sortBy : "total_listings";
 
-  let productIdsForTags: string[] | null = null;
-  if (tagIds.length > 0) {
-    try {
-      productIdsForTags = await resolveProductIdsByTagIds(supabase, tagIds);
-      if (productIdsForTags.length === 0) {
-        return NextResponse.json({
-          stats: [],
-          total: 0,
-          page,
-          limit: showAll ? 0 : limit,
-          totalPages: 0,
-        });
-      }
-    } catch (e) {
-      console.error("Erro ao filtrar estatísticas por tags:", e);
-      return NextResponse.json({ error: "Erro ao filtrar por tags" }, { status: 500 });
+  let productIdsFiltered: string[] | null = null;
+  try {
+    productIdsFiltered = await resolveProductIdsForListFilters(
+      supabase,
+      user.id,
+      listFilters
+    );
+    if (productIdsFiltered?.length === 0) {
+      return NextResponse.json({
+        stats: [],
+        total: 0,
+        page,
+        limit: showAll ? 0 : limit,
+        totalPages: 0,
+      });
     }
+  } catch (e) {
+    console.error("Erro ao filtrar estatísticas:", e);
+    return NextResponse.json({ error: "Erro ao filtrar produtos" }, { status: 500 });
   }
 
   const buildBaseQuery = () => {
@@ -69,8 +71,8 @@ export async function GET(request: NextRequest) {
     if (search) {
       q = q.or(`sku.ilike.%${search}%,title.ilike.%${search}%`);
     }
-    if (productIdsForTags) {
-      q = q.in("product_id", productIdsForTags);
+    if (productIdsFiltered) {
+      q = q.in("product_id", productIdsFiltered);
     }
     return q.order(sortColumn, { ascending: sortOrder });
   };

@@ -73,6 +73,7 @@ export async function PUT(
       sku: body.sku.trim(),
       title: body.title?.trim() || body.sku.trim(),
       description: body.description?.trim() || null,
+      supplier: body.supplier?.trim() || null,
       ean: body.ean?.trim() || null,
       height: body.height ?? null,
       width: body.width ?? null,

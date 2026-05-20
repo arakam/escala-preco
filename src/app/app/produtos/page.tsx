@@ -24,6 +24,7 @@ interface ProductFormData {
   sku: string;
   title: string;
   description: string;
+  supplier: string;
   ean: string;
   height: string;
   width: string;
@@ -40,6 +41,7 @@ const emptyForm: ProductFormData = {
   sku: "",
   title: "",
   description: "",
+  supplier: "",
   ean: "",
   height: "",
   width: "",
@@ -96,6 +98,10 @@ function ProdutosPageContent() {
   const [searchInput, setSearchInput] = useState("");
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [draftFilterTagIds, setDraftFilterTagIds] = useState<string[]>([]);
+  const [filterSupplier, setFilterSupplier] = useState("");
+  const [draftFilterSupplier, setDraftFilterSupplier] = useState("");
+  const [filterHasPma, setFilterHasPma] = useState<"" | "yes" | "no">("");
+  const [draftFilterHasPma, setDraftFilterHasPma] = useState<"" | "yes" | "no">("");
   const [allTags, setAllTags] = useState<ProductTag[]>([]);
   const [tagsTabList, setTagsTabList] = useState<ProductTagWithCount[]>([]);
   const [tagsTabLoading, setTagsTabLoading] = useState(false);
@@ -191,6 +197,8 @@ function ProdutosPageContent() {
     });
     if (search) params.set("search", search);
     if (filterTagIds.length > 0) params.set("tags", filterTagIds.join(","));
+    if (filterSupplier.trim()) params.set("supplier", filterSupplier.trim());
+    if (filterHasPma) params.set("has_pma", filterHasPma);
 
     const res = await fetch(`/api/products?${params}`);
     if (res.ok) {
@@ -199,7 +207,7 @@ function ProdutosPageContent() {
       setTotal(data.total ?? 0);
     }
     setLoading(false);
-  }, [page, pageSize, search, filterTagIds]);
+  }, [page, pageSize, search, filterTagIds, filterSupplier, filterHasPma]);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -209,6 +217,8 @@ function ProdutosPageContent() {
     });
     if (search) params.set("search", search);
     if (filterTagIds.length > 0) params.set("tags", filterTagIds.join(","));
+    if (filterSupplier.trim()) params.set("supplier", filterSupplier.trim());
+    if (filterHasPma) params.set("has_pma", filterHasPma);
 
     const res = await fetch(`/api/products/stats?${params}`);
     if (res.ok) {
@@ -217,7 +227,7 @@ function ProdutosPageContent() {
       setTotal(data.total ?? 0);
     }
     setLoading(false);
-  }, [page, pageSize, search, filterTagIds]);
+  }, [page, pageSize, search, filterTagIds, filterSupplier, filterHasPma]);
 
   const loadUnregisteredSkus = useCallback(async () => {
     setUnregisteredLoading(true);
@@ -320,8 +330,11 @@ function ProdutosPageContent() {
       const name = tagNameById.get(id);
       if (name) labels.push(`Tag: ${name}`);
     }
+    if (filterSupplier.trim()) labels.push(`Fornecedor: ${filterSupplier.trim()}`);
+    if (filterHasPma === "yes") labels.push("PMA: com valor cadastrado");
+    if (filterHasPma === "no") labels.push("PMA: sem valor cadastrado");
     return labels;
-  }, [search, filterTagIds, tagNameById]);
+  }, [search, filterTagIds, filterSupplier, filterHasPma, tagNameById]);
 
   useEffect(() => {
     if (!optionsMenuOpen) return;
@@ -339,6 +352,10 @@ function ProdutosPageContent() {
     setSearchInput("");
     setFilterTagIds([]);
     setDraftFilterTagIds([]);
+    setFilterSupplier("");
+    setDraftFilterSupplier("");
+    setFilterHasPma("");
+    setDraftFilterHasPma("");
     setPage(1);
     setFiltersModalOpen(false);
   }, []);
@@ -438,6 +455,7 @@ function ProdutosPageContent() {
       sku: product.sku,
       title: product.title,
       description: product.description ?? "",
+      supplier: product.supplier ?? "",
       ean: product.ean ?? "",
       height: product.height?.toString() ?? "",
       width: product.width?.toString() ?? "",
@@ -475,6 +493,7 @@ function ProdutosPageContent() {
       sku: form.sku.trim(),
       title: form.title.trim() || form.sku.trim(),
       description: form.description.trim() || null,
+      supplier: form.supplier.trim() || null,
       ean: form.ean.trim() || null,
       height: form.height ? parseFloat(form.height.replace(",", ".")) : null,
       width: form.width ? parseFloat(form.width.replace(",", ".")) : null,
@@ -686,6 +705,8 @@ function ProdutosPageContent() {
     e.preventDefault();
     setSearch(searchInput.trim());
     setFilterTagIds(draftFilterTagIds);
+    setFilterSupplier(draftFilterSupplier.trim());
+    setFilterHasPma(draftFilterHasPma);
     setPage(1);
     setFiltersModalOpen(false);
   }
@@ -945,6 +966,8 @@ function ProdutosPageContent() {
                 onClick={() => {
                   setSearchInput(search);
                   setDraftFilterTagIds(filterTagIds);
+                  setDraftFilterSupplier(filterSupplier);
+                  setDraftFilterHasPma(filterHasPma);
                   setFiltersModalOpen(true);
                 }}
                 className="btn btn-icon btn-sm btn-outline-secondary"
@@ -1286,6 +1309,7 @@ function ProdutosPageContent() {
                 <tr>
                   <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">SKU</th>
                   <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Título</th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Fornecedor</th>
                   <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Tags</th>
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Custo (R$)</th>
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Imposto (%)</th>
@@ -1310,6 +1334,11 @@ function ProdutosPageContent() {
                     <td className="max-w-[240px] p-2" title={product.title}>
                       <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
                         {product.title}
+                      </span>
+                    </td>
+                    <td className="max-w-[160px] p-2" title={product.supplier ?? undefined}>
+                      <span className="line-clamp-2 text-sm text-slate-700 dark:text-slate-200">
+                        {product.supplier?.trim() || "—"}
                       </span>
                     </td>
                     <td className="max-w-[180px] p-2">
@@ -1736,7 +1765,9 @@ function ProdutosPageContent() {
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-800">Filtros</h2>
-                <p className="text-xs text-slate-500">Busque por SKU, título ou filtre por tags.</p>
+                <p className="text-xs text-slate-500">
+                  Busque por SKU ou título, filtre por fornecedor, PMA ou tags.
+                </p>
               </div>
               <button
                 type="button"
@@ -1754,9 +1785,37 @@ function ProdutosPageContent() {
                   type="text"
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder="SKU ou título…"
+                  placeholder="SKU, título ou fornecedor…"
                   className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
                 />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Fornecedor
+                </label>
+                <input
+                  type="text"
+                  value={draftFilterSupplier}
+                  onChange={(e) => setDraftFilterSupplier(e.target.value)}
+                  placeholder="Nome ou parte do fornecedor…"
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  PMA no cadastro
+                </label>
+                <select
+                  value={draftFilterHasPma}
+                  onChange={(e) =>
+                    setDraftFilterHasPma(e.target.value as "" | "yes" | "no")
+                  }
+                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                >
+                  <option value="">Todos</option>
+                  <option value="yes">Com PMA cadastrado</option>
+                  <option value="no">Sem PMA cadastrado</option>
+                </select>
               </div>
               {allTags.length > 0 && (
                 <div>
@@ -1855,6 +1914,16 @@ function ProdutosPageContent() {
                     type="text"
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
+                    className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-fg">Fornecedor</label>
+                  <input
+                    type="text"
+                    value={form.supplier}
+                    onChange={(e) => setForm({ ...form, supplier: e.target.value })}
+                    placeholder="Nome do fornecedor"
                     className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
@@ -2095,18 +2164,16 @@ function ProdutosPageContent() {
             </div>
             <form onSubmit={handleImport} className="p-4">
               <p className="mb-4 text-sm text-fg">
-                O arquivo CSV deve conter a coluna <strong>SKU</strong> (obrigatório),
-                e opcionalmente: Titulo, Altura, Largura, Comprimento, Peso, PrecoCusto, Imposto, TaxaExtra, DespFixas, PMA, Tags
-                (várias tags separadas por <code>;</code> ou <code>,</code>).
+                Use o <strong>modelo CSV</strong> (mesmas colunas da exportação): SKU (obrigatório),
+                Titulo, Descricao, Fornecedor, EAN, dimensões, PrecoCusto, Imposto, TaxaExtra, DespFixas, PMA e Tags.
               </p>
               <p className="mb-4 text-sm text-fg">
                 Produtos com SKU existente serão atualizados. A importação processa{" "}
                 <strong>todas as linhas do arquivo</strong>, não só a página visível na tabela.
               </p>
               <p className="mb-4 text-xs text-slate-500">
-                Na coluna <strong>Tags</strong>, use vírgula entre tags (ex.:{" "}
-                <code>full, queima estoque</code>). Se o CSV usa <code>;</code> como separador de colunas,
-                evite <code>;</code> dentro da célula de tags — ou deixe o campo entre aspas.
+                Arquivo em UTF-8 (o modelo já inclui acentos corretos). Na coluna <strong>Tags</strong>, separe
+                com vírgula (ex.: <code>full, queima estoque</code>). Colunas separadas por <code>;</code>.
               </p>
               <a
                 href="/api/products/template"

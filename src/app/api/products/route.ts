@@ -6,6 +6,10 @@ import {
   resolveProductIdsByTagIds,
   setProductTagsByNames,
 } from "@/lib/product-tags";
+import {
+  applyProductFiltersToQuery,
+  parseProductListFilters,
+} from "@/lib/product-filters";
 import { fetchAllViaRange, isAllPageSize } from "@/lib/table-pagination";
 
 export async function GET(request: NextRequest) {
@@ -20,10 +24,7 @@ export async function GET(request: NextRequest) {
 
   const searchParams = request.nextUrl.searchParams;
   const search = searchParams.get("search") || "";
-  const tagIdsParam = searchParams.get("tags")?.trim() || "";
-  const tagIds = tagIdsParam
-    ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean)
-    : [];
+  const listFilters = parseProductListFilters(searchParams);
   const limitParam = parseInt(searchParams.get("limit") || "50", 10);
   const showAll = isAllPageSize(limitParam);
   const page = showAll ? 1 : parseInt(searchParams.get("page") || "1", 10);
@@ -31,9 +32,9 @@ export async function GET(request: NextRequest) {
   const offset = (page - 1) * limit;
 
   let productIdsForTags: string[] | null = null;
-  if (tagIds.length > 0) {
+  if (listFilters.tagIds.length > 0) {
     try {
-      productIdsForTags = await resolveProductIdsByTagIds(supabase, tagIds);
+      productIdsForTags = await resolveProductIdsByTagIds(supabase, listFilters.tagIds);
       if (productIdsForTags.length === 0) {
         return NextResponse.json({
           products: [],
@@ -57,12 +58,13 @@ export async function GET(request: NextRequest) {
       .order("created_at", { ascending: false });
     if (search) {
       q = q.or(
-        `sku.ilike.%${search}%,title.ilike.%${search}%,ean.ilike.%${search}%`
+        `sku.ilike.%${search}%,title.ilike.%${search}%,ean.ilike.%${search}%,supplier.ilike.%${search}%`
       );
     }
     if (productIdsForTags) {
       q = q.in("id", productIdsForTags);
     }
+    q = applyProductFiltersToQuery(q, listFilters);
     return q;
   };
 
@@ -147,6 +149,7 @@ export async function POST(request: NextRequest) {
       sku: body.sku.trim(),
       title: body.title?.trim() || body.sku.trim(),
       description: body.description?.trim() || null,
+      supplier: body.supplier?.trim() || null,
       ean: body.ean?.trim() || null,
       height: body.height ?? null,
       width: body.width ?? null,

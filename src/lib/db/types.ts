@@ -40,6 +40,7 @@ export interface Product {
   sku: string;
   title: string;
   description: string | null;
+  supplier: string | null;
   ean: string | null;
   height: number | null;
   width: number | null;
@@ -61,6 +62,7 @@ export interface ProductInput {
   sku: string;
   title: string;
   description?: string | null;
+  supplier?: string | null;
   ean?: string | null;
   height?: number | null;
   width?: number | null;

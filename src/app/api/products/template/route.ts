@@ -1,29 +1,18 @@
-import { NextResponse } from "next/server";
+import {
+  buildProductCsvContent,
+  escapeProductCsvCell,
+  escapeProductTagsCsvCell,
+  PRODUCT_CSV_TEMPLATE_EXAMPLE_ROW,
+  productCsvDownloadResponse,
+} from "@/lib/products-csv";
 
 export async function GET() {
-  const headers = ["SKU", "Titulo", "Altura", "Largura", "Comprimento", "Peso", "PrecoCusto", "Imposto", "TaxaExtra", "DespFixas", "PMA", "Tags"];
-  
-  const exampleRow = [
-    "SKU-001",
-    "Produto Exemplo",
-    "10",
-    "20",
-    "30",
-    "0.5",
-    "50.00",
-    "10.5",
-    "5.0",
-    "2.00",
-    "99.90",
-    "full, queima estoque",
-  ];
+  const row = PRODUCT_CSV_TEMPLATE_EXAMPLE_ROW.map((cell, idx) =>
+    idx === PRODUCT_CSV_TEMPLATE_EXAMPLE_ROW.length - 1
+      ? escapeProductTagsCsvCell(cell)
+      : escapeProductCsvCell(cell)
+  ).join(";");
 
-  const csv = [headers.join(";"), exampleRow.join(";")].join("\n");
-
-  return new NextResponse(csv, {
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": 'attachment; filename="modelo_produtos.csv"',
-    },
-  });
+  const csv = buildProductCsvContent([row]);
+  return productCsvDownloadResponse(csv, "modelo_produtos.csv");
 }
