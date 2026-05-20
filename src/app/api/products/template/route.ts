@@ -15,7 +15,7 @@ export async function GET() {
     "5.0",
     "2.00",
     "99.90",
-    "full;queima estoque",
+    "full, queima estoque",
   ];
 
   const csv = [headers.join(";"), exampleRow.join(";")].join("\n");

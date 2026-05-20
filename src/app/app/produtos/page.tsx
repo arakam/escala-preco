@@ -128,6 +128,8 @@ function ProdutosPageContent() {
     imported?: number;
     parsed?: number;
     partial?: boolean;
+    rows_with_tags_in_file?: number;
+    tags_linked?: number;
     errors?: string[];
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -700,30 +702,66 @@ function ProdutosPageContent() {
     formData.append("file", file);
     formData.append("mode", "upsert");
 
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
     try {
       const res = await fetch("/api/products/import", {
         method: "POST",
         body: formData,
+        signal: controller.signal,
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data: Record<string, unknown> = {};
+      try {
+        data = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      } catch {
+        setImportResult({
+          success: false,
+          errors: [
+            res.ok
+              ? "Resposta inválida do servidor."
+              : `Erro ${res.status}: resposta não é JSON.`,
+          ],
+        });
+        return;
+      }
 
       if (res.ok) {
+        const errs = data.errors as string[] | undefined;
         setImportResult({
           success: data.success !== false,
-          imported: data.imported,
-          parsed: data.parsed,
-          partial: data.partial,
-          errors: data.errors,
+          imported: data.imported as number | undefined,
+          parsed: data.parsed as number | undefined,
+          partial: data.partial as boolean | undefined,
+          rows_with_tags_in_file: data.rows_with_tags_in_file as number | undefined,
+          tags_linked: data.tags_linked as number | undefined,
+          errors: errs,
         });
-        loadProducts();
+        void loadProducts();
+        void loadAllTags();
         void loadUnregisteredSkus();
         reloadOnboarding();
       } else {
-        setImportResult({ success: false, errors: [data.error || "Erro ao importar"] });
+        const details = data.details as string[] | undefined;
+        const main = (data.error as string) || "Erro ao importar";
+        setImportResult({
+          success: false,
+          errors: details?.length ? [main, ...details.slice(0, 5)] : [main],
+        });
       }
-    } catch {
-      setImportResult({ success: false, errors: ["Erro de conexão"] });
+    } catch (err) {
+      const aborted = err instanceof Error && err.name === "AbortError";
+      setImportResult({
+        success: false,
+        errors: [
+          aborted
+            ? "Importação cancelada ou expirou (arquivo muito grande). Tente dividir o CSV."
+            : "Erro de conexão ao importar.",
+        ],
+      });
     } finally {
+      window.clearTimeout(timeoutId);
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -2062,7 +2100,13 @@ function ProdutosPageContent() {
                 (várias tags separadas por <code>;</code> ou <code>,</code>).
               </p>
               <p className="mb-4 text-sm text-fg">
-                Produtos com SKU existente serão atualizados.
+                Produtos com SKU existente serão atualizados. A importação processa{" "}
+                <strong>todas as linhas do arquivo</strong>, não só a página visível na tabela.
+              </p>
+              <p className="mb-4 text-xs text-slate-500">
+                Na coluna <strong>Tags</strong>, use vírgula entre tags (ex.:{" "}
+                <code>full, queima estoque</code>). Se o CSV usa <code>;</code> como separador de colunas,
+                evite <code>;</code> dentro da célula de tags — ou deixe o campo entre aspas.
               </p>
               <a
                 href="/api/products/template"
@@ -2083,6 +2127,12 @@ function ProdutosPageContent() {
                 required
               />
 
+              {importing && (
+                <p className="mb-4 text-sm text-slate-600">
+                  Importando… arquivos grandes podem levar alguns minutos. Não feche esta janela.
+                </p>
+              )}
+
               {importResult && (
                 <div
                   className={`mb-4 rounded p-3 text-sm ${
@@ -2090,20 +2140,38 @@ function ProdutosPageContent() {
                   }`}
                 >
                   {importResult.success && !importResult.partial ? (
-                    <p>
-                      {importResult.imported ?? 0} produto(s) importado(s) com sucesso
-                      {importResult.parsed != null && importResult.parsed !== importResult.imported
-                        ? ` (${importResult.parsed} no arquivo)`
-                        : ""}
-                      .
-                    </p>
+                    <div className="space-y-1">
+                      <p>
+                        {importResult.imported ?? 0} produto(s) importado(s) ou atualizado(s) com sucesso
+                        {importResult.parsed != null && importResult.parsed !== importResult.imported
+                          ? ` (${importResult.parsed} no arquivo)`
+                          : ""}
+                        .
+                      </p>
+                      {(importResult.rows_with_tags_in_file ?? 0) > 0 && (
+                        <p className="text-xs">
+                          Tags: {importResult.tags_linked ?? 0} de{" "}
+                          {importResult.rows_with_tags_in_file} linha(s) com tags no CSV tiveram vínculos
+                          aplicados.
+                        </p>
+                      )}
+                    </div>
                   ) : importResult.partial ? (
                     <p>
                       Importação parcial: {importResult.imported ?? 0} de {importResult.parsed ?? "?"} produto(s).
                       Veja os avisos abaixo.
                     </p>
                   ) : (
-                    <p>{importResult.errors?.[0] || "Erro ao importar"}</p>
+                    <div className="space-y-1">
+                      <p>{importResult.errors?.[0] || "Erro ao importar"}</p>
+                      {importResult.errors && importResult.errors.length > 1 && (
+                        <ul className="list-inside list-disc text-xs">
+                          {importResult.errors.slice(1, 6).map((err, i) => (
+                            <li key={i}>{err}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   )}
                   {importResult.errors && importResult.errors.length > 0 && importResult.success && (
                     <details className="mt-2">

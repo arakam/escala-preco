@@ -5,10 +5,10 @@ export function normalizeTagName(name: string): string {
   return name.trim().replace(/\s+/g, " ");
 }
 
-/** Separa nomes de tags em célula CSV (vírgula ou ponto-e-vírgula). */
+/** Separa nomes de tags em célula CSV (vírgula, pipe ou ponto-e-vírgula). */
 export function parseTagNamesFromCell(cell: string | null | undefined): string[] {
   if (!cell?.trim()) return [];
-  const parts = cell.split(/[;,]/).map((p) => normalizeTagName(p)).filter(Boolean);
+  const parts = cell.split(/[;,|]/).map((p) => normalizeTagName(p)).filter(Boolean);
   const seen = new Set<string>();
   const out: string[] = [];
   for (const p of parts) {
@@ -21,8 +21,32 @@ export function parseTagNamesFromCell(cell: string | null | undefined): string[]
   return out;
 }
 
+/** Usa vírgula na exportação para não conflitar com o separador `;` do CSV brasileiro. */
 export function formatTagsForCsv(tags: { name: string }[]): string {
-  return tags.map((t) => t.name).join(";");
+  return tags.map((t) => t.name).join(", ");
+}
+
+/**
+ * Lê a coluna Tags mesmo quando o CSV usa `;` e a célula tinha tags com `;` sem aspas
+ * (vira colunas extras após a última coluna reconhecida).
+ */
+export function readTagsCellFromCsvRow(
+  values: string[],
+  tagsColumnIndex: number,
+  maxKnownColumnIndex: number,
+  csvSeparator: string
+): string {
+  if (tagsColumnIndex < 0) return "";
+  const spillover =
+    tagsColumnIndex === maxKnownColumnIndex && values.length > maxKnownColumnIndex + 1;
+  if (spillover) {
+    return values
+      .slice(tagsColumnIndex)
+      .map((v) => v.trim())
+      .filter(Boolean)
+      .join(csvSeparator === ";" ? ";" : ",");
+  }
+  return values[tagsColumnIndex]?.trim() ?? "";
 }
 
 type TagRow = { id: string; name: string; user_id: string };
@@ -250,6 +274,78 @@ export async function fetchAllTagsGroupedByProductIdForUser(
   }
 
   return result;
+}
+
+const SKU_LOOKUP_BATCH = 200;
+const ASSIGNMENT_DELETE_BATCH = 150;
+const ASSIGNMENT_INSERT_BATCH = 500;
+
+/** Mapa sku (lower) → product id, em lotes (evita `.in()` gigante no Supabase). */
+export async function lookupProductIdsBySkus(
+  supabase: SupabaseClient,
+  userId: string,
+  skus: string[]
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const unique = Array.from(new Set(skus.map((s) => s.trim()).filter(Boolean)));
+  for (let i = 0; i < unique.length; i += SKU_LOOKUP_BATCH) {
+    const batch = unique.slice(i, i + SKU_LOOKUP_BATCH);
+    const { data, error } = await supabase
+      .from("products")
+      .select("id, sku")
+      .eq("user_id", userId)
+      .in("sku", batch);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      map.set(String(row.sku).toLowerCase(), String(row.id));
+    }
+  }
+  return map;
+}
+
+/** Aplica tags de importação CSV em massa (substitui vínculos dos produtos listados). */
+export async function syncImportedProductTagsBulk(
+  supabase: SupabaseClient,
+  userId: string,
+  rows: { productId: string; tagNames: string[] }[]
+): Promise<void> {
+  if (rows.length === 0) return;
+
+  const allNames: string[] = [];
+  for (const r of rows) {
+    for (const n of r.tagNames) allNames.push(n);
+  }
+  const tagMap = await getOrCreateTagsByNames(supabase, userId, allNames);
+
+  const productIds = rows.map((r) => r.productId);
+  for (let i = 0; i < productIds.length; i += ASSIGNMENT_DELETE_BATCH) {
+    const batch = productIds.slice(i, i + ASSIGNMENT_DELETE_BATCH);
+    const { error } = await supabase
+      .from("product_tag_assignments")
+      .delete()
+      .in("product_id", batch);
+    if (error) throw error;
+  }
+
+  const inserts: { product_id: string; tag_id: string }[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const names = Array.from(new Set(r.tagNames.map(normalizeTagName).filter(Boolean)));
+    for (const name of names) {
+      const tag = tagMap.get(name.toLowerCase());
+      if (!tag) continue;
+      const key = `${r.productId}:${tag.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      inserts.push({ product_id: r.productId, tag_id: tag.id });
+    }
+  }
+
+  for (let i = 0; i < inserts.length; i += ASSIGNMENT_INSERT_BATCH) {
+    const batch = inserts.slice(i, i + ASSIGNMENT_INSERT_BATCH);
+    const { error } = await supabase.from("product_tag_assignments").insert(batch);
+    if (error) throw error;
+  }
 }
 
 export type ProductTagWithCount = ProductTag & { product_count: number };

@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { parseTagNamesFromCell, setProductTagsByNames } from "@/lib/product-tags";
+import {
+  lookupProductIdsBySkus,
+  parseTagNamesFromCell,
+  readTagsCellFromCsvRow,
+  syncImportedProductTagsBulk,
+} from "@/lib/product-tags";
 
 /** PostgREST/Supabase limita ~1000 linhas por request; importar em lotes. */
 const UPSERT_BATCH_SIZE = 500;
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 interface ParsedProduct {
   sku: string;
@@ -182,6 +187,7 @@ export async function POST(request: NextRequest) {
     pma: normalized.get("pma") ?? -1,
     tags: normalized.get("tags") ?? -1,
   };
+  const maxKnownColumnIndex = Math.max(-1, ...Array.from(normalized.values()));
 
   const products: ParsedProduct[] = [];
   const errors: string[] = [];
@@ -217,7 +223,16 @@ export async function POST(request: NextRequest) {
       fixed_expenses: colIndex.fixed_expenses >= 0 ? parsePrice(values[colIndex.fixed_expenses]) : null,
       pma: colIndex.pma >= 0 ? parsePrice(values[colIndex.pma]) : null,
       tag_names:
-        colIndex.tags >= 0 ? parseTagNamesFromCell(values[colIndex.tags]) : [],
+        colIndex.tags >= 0
+          ? parseTagNamesFromCell(
+              readTagsCellFromCsvRow(
+                values,
+                colIndex.tags,
+                maxKnownColumnIndex,
+                separator
+              )
+            )
+          : [],
     });
   }
 
@@ -268,31 +283,35 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const skusWithTags = deduplicatedProducts.filter((p) => p.tag_names.length > 0);
-  if (imported > 0 && skusWithTags.length > 0) {
-    const skuList = skusWithTags.map((p) => p.sku);
-    const { data: dbProducts, error: lookupErr } = await supabase
-      .from("products")
-      .select("id, sku")
-      .eq("user_id", user.id)
-      .in("sku", skuList);
-
-    if (lookupErr) {
-      errors.push(`Tags: erro ao localizar produtos importados (${lookupErr.message})`);
-    } else {
-      const skuToId = new Map(
-        (dbProducts ?? []).map((r) => [String(r.sku).toLowerCase(), String(r.id)])
+  const rowsWithTagsInFile = deduplicatedProducts.filter((p) => p.tag_names.length > 0);
+  let tagsLinked = 0;
+  if (imported > 0 && rowsWithTagsInFile.length > 0) {
+    try {
+      const skuToId = await lookupProductIdsBySkus(
+        supabase,
+        user.id,
+        rowsWithTagsInFile.map((p) => p.sku)
       );
-      for (const p of skusWithTags) {
+      const tagRows: { productId: string; tagNames: string[] }[] = [];
+      let missingSku = 0;
+      for (const p of rowsWithTagsInFile) {
         const productId = skuToId.get(p.sku.toLowerCase());
-        if (!productId) continue;
-        try {
-          await setProductTagsByNames(supabase, user.id, productId, p.tag_names);
-        } catch (tagErr) {
-          const msg = tagErr instanceof Error ? tagErr.message : String(tagErr);
-          errors.push(`Tags SKU ${p.sku}: ${msg}`);
+        if (!productId) {
+          missingSku++;
+          continue;
         }
+        tagRows.push({ productId, tagNames: p.tag_names });
       }
+      if (tagRows.length > 0) {
+        await syncImportedProductTagsBulk(supabase, user.id, tagRows);
+        tagsLinked = tagRows.length;
+      }
+      if (missingSku > 0) {
+        errors.push(`Tags: ${missingSku} SKU(s) com tags no CSV não encontrados após importação.`);
+      }
+    } catch (tagErr) {
+      const msg = tagErr instanceof Error ? tagErr.message : String(tagErr);
+      errors.push(`Tags: ${msg || "erro ao aplicar tags do CSV"}`);
     }
   }
 
@@ -305,6 +324,8 @@ export async function POST(request: NextRequest) {
     parsed: deduplicatedProducts.length,
     duplicatesRemoved,
     partial,
+    rows_with_tags_in_file: rowsWithTagsInFile.length,
+    tags_linked: tagsLinked,
     errors: allErrors.length > 0 ? allErrors : undefined,
   });
 }
