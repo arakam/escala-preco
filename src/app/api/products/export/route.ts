@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { fetchTagsGroupedByProductId, formatTagsForCsv } from "@/lib/product-tags";
+import {
+  fetchAllTagsGroupedByProductIdForUser,
+  fetchTagsGroupedByProductId,
+  formatTagsForCsv,
+} from "@/lib/product-tags";
 
 const PAGE_SIZE = 1000;
+
+export const maxDuration = 120;
 
 export async function GET() {
   const supabase = await createClient();
@@ -14,6 +20,7 @@ export async function GET() {
     return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   }
 
+  try {
   type ProductExportRow = {
     id: string;
     sku: string;
@@ -49,10 +56,13 @@ export async function GET() {
     from += PAGE_SIZE;
   }
 
-  const tagMap = await fetchTagsGroupedByProductId(
-    supabase,
-    products.map((p) => p.id)
-  );
+  const tagMap =
+    products.length > 500
+      ? await fetchAllTagsGroupedByProductIdForUser(supabase, user.id)
+      : await fetchTagsGroupedByProductId(
+          supabase,
+          products.map((p) => p.id)
+        );
 
   const headers = ["SKU", "Titulo", "Descricao", "EAN", "Altura", "Largura", "Comprimento", "Peso", "PrecoCusto", "DespFixas", "PMA", "Tags"];
   
@@ -88,4 +98,9 @@ export async function GET() {
       "Content-Disposition": `attachment; filename="produtos_${new Date().toISOString().split("T")[0]}.csv"`,
     },
   });
+  } catch (e) {
+    console.error("Erro ao exportar produtos:", e);
+    const msg = e instanceof Error ? e.message : "Erro ao exportar produtos";
+    return NextResponse.json({ error: msg || "Erro ao exportar produtos" }, { status: 500 });
+  }
 }

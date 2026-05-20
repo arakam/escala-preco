@@ -162,6 +162,8 @@ export async function setProductTagsByNames(
   if (insErr) throw insErr;
 }
 
+const TAG_ASSIGNMENT_PRODUCT_BATCH = 150;
+
 export async function fetchTagsGroupedByProductId(
   supabase: SupabaseClient,
   productIds: string[]
@@ -169,27 +171,82 @@ export async function fetchTagsGroupedByProductId(
   const result = new Map<string, ProductTag[]>();
   if (productIds.length === 0) return result;
 
-  const { data, error } = await supabase
-    .from("product_tag_assignments")
-    .select("product_id, product_tags ( id, name, user_id, created_at )")
-    .in("product_id", productIds);
+  for (let i = 0; i < productIds.length; i += TAG_ASSIGNMENT_PRODUCT_BATCH) {
+    const batch = productIds.slice(i, i + TAG_ASSIGNMENT_PRODUCT_BATCH);
+    const { data, error } = await supabase
+      .from("product_tag_assignments")
+      .select("product_id, product_tags ( id, name, user_id, created_at )")
+      .in("product_id", batch);
 
-  if (error) throw error;
+    if (error) throw error;
 
-  for (const row of data ?? []) {
-    const pid = String(row.product_id);
-    const tag = row.product_tags as ProductTag | ProductTag[] | null;
-    const tagObj = Array.isArray(tag) ? tag[0] : tag;
-    if (!tagObj?.id) continue;
-    const list = result.get(pid) ?? [];
-    list.push({
-      id: tagObj.id,
-      name: tagObj.name,
-      user_id: tagObj.user_id,
-      created_at: tagObj.created_at,
-    });
-    list.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-    result.set(pid, list);
+    for (const row of data ?? []) {
+      const pid = String(row.product_id);
+      const tag = row.product_tags as ProductTag | ProductTag[] | null;
+      const tagObj = Array.isArray(tag) ? tag[0] : tag;
+      if (!tagObj?.id) continue;
+      const list = result.get(pid) ?? [];
+      list.push({
+        id: tagObj.id,
+        name: tagObj.name,
+        user_id: tagObj.user_id,
+        created_at: tagObj.created_at,
+      });
+      list.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+      result.set(pid, list);
+    }
+  }
+
+  return result;
+}
+
+/** Carrega todas as tags de produtos do usuário (eficiente para export em massa). */
+export async function fetchAllTagsGroupedByProductIdForUser(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<Map<string, ProductTag[]>> {
+  const result = new Map<string, ProductTag[]>();
+
+  const { data: userTags, error: tagsErr } = await supabase
+    .from("product_tags")
+    .select("id, name, user_id, created_at")
+    .eq("user_id", userId);
+
+  if (tagsErr) throw tagsErr;
+  const tagList = (userTags ?? []) as ProductTag[];
+  if (tagList.length === 0) return result;
+
+  const tagById = new Map(tagList.map((t) => [t.id, t]));
+  const tagIds = tagList.map((t) => t.id);
+
+  for (let i = 0; i < tagIds.length; i += TAG_ASSIGNMENT_PRODUCT_BATCH) {
+    const batch = tagIds.slice(i, i + TAG_ASSIGNMENT_PRODUCT_BATCH);
+    let offset = 0;
+    const pageSize = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from("product_tag_assignments")
+        .select("product_id, tag_id")
+        .in("tag_id", batch)
+        .range(offset, offset + pageSize - 1);
+
+      if (error) throw error;
+
+      const rows = data ?? [];
+      for (const row of rows) {
+        const pid = String(row.product_id);
+        const tag = tagById.get(String(row.tag_id));
+        if (!tag) continue;
+        const list = result.get(pid) ?? [];
+        if (!list.some((t) => t.id === tag.id)) {
+          list.push(tag);
+          list.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+          result.set(pid, list);
+        }
+      }
+      if (rows.length < pageSize) break;
+      offset += pageSize;
+    }
   }
 
   return result;
