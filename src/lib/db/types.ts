@@ -23,6 +23,17 @@ export interface MLAccountWithToken extends MLAccount {
   expires_at?: string;
 }
 
+export interface ProductTag {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface ProductTagWithCount extends ProductTag {
+  product_count: number;
+}
+
 export interface Product {
   id: string;
   user_id: string;
@@ -42,6 +53,8 @@ export interface Product {
   pma: number | null;
   created_at: string;
   updated_at: string;
+  /** Preenchido em listagens da API quando tags são carregadas em lote */
+  tags?: ProductTag[];
 }
 
 export interface ProductInput {
@@ -59,6 +72,8 @@ export interface ProductInput {
   extra_fee_percent?: number | null;
   fixed_expenses?: number | null;
   pma?: number | null;
+  /** Nomes de tags; cria tags inexistentes e substitui vínculos do produto */
+  tag_names?: string[];
 }
 
 export interface ProductListingStats {

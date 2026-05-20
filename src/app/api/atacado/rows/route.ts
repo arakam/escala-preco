@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 import { NextRequest, NextResponse } from "next/server";
 import { isAllPageSize } from "@/lib/table-pagination";
 
@@ -65,6 +66,10 @@ export async function GET(request: NextRequest) {
   const filterSku = searchParams.get("sku")?.trim() ?? "";
   const filterVariation = searchParams.get("variation") ?? ""; // "com" | "sem" | ""
   const hideVariations = searchParams.get("hide_variations") === "true"; // Mostrar só anúncios, sem expandir variações
+  const tagIdsParam = searchParams.get("tags")?.trim() ?? "";
+  const tagIds = tagIdsParam
+    ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
   const limitParam = parseInt(searchParams.get("limit") ?? String(PAGE_SIZE), 10);
   const showAll = isAllPageSize(limitParam);
   const page = showAll ? 1 : Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
@@ -88,6 +93,20 @@ export async function GET(request: NextRequest) {
     .single();
   if (!account) {
     return NextResponse.json({ error: "Conta não encontrada" }, { status: 404 });
+  }
+
+  let allowedItemIds: string[] | null = null;
+  if (tagIds.length > 0) {
+    try {
+      const resolved = await resolveMlItemIdsByProductTagIds(supabase, accountId, tagIds);
+      allowedItemIds = resolved ?? [];
+      if (allowedItemIds.length === 0) {
+        return NextResponse.json({ rows: [], total: 0, totalItems: 0, page, limit: showAll ? 0 : limit });
+      }
+    } catch (e) {
+      console.error("[atacado/rows] filtro por tags:", e);
+      return NextResponse.json({ error: "Erro ao filtrar por tags" }, { status: 500 });
+    }
   }
 
   // Buscar itens com paginação interna (evita limite de 1000 do Supabase)
@@ -146,6 +165,9 @@ export async function GET(request: NextRequest) {
       if (filter === "com_familia") {
         query = query.not("family_name", "is", null);
       }
+      if (allowedItemIds) {
+        query = query.in("item_id", allowedItemIds);
+      }
 
       const { data, error } = await query;
       if (error) throw error;
@@ -168,7 +190,8 @@ export async function GET(request: NextRequest) {
   }
 
   // Verificar se há filtros específicos ativos (não incluir itens da família quando filtrando)
-  const hasSpecificFilters = filterMlb || filterMlbu || filterTitle || filterSku || filterVariation;
+  const hasSpecificFilters =
+    filterMlb || filterMlbu || filterTitle || filterSku || filterVariation || !!allowedItemIds;
 
   // Incluir itens da mesma família APENAS quando não há filtros específicos
   if (!hasSpecificFilters && items.length > 0) {

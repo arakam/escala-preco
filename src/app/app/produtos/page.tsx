@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { AppTable } from "@/components/AppTable";
+import { ProductTagInput } from "@/components/ProductTagInput";
 import { TablePageSizeSelect } from "@/components/TablePageSizeSelect";
 import { OnboardingGate } from "@/components/OnboardingGate";
 import {
@@ -10,7 +11,14 @@ import {
   TABLE_PAGE_SIZE_OPTIONS,
 } from "@/lib/table-pagination";
 import { useOnboarding } from "@/contexts/onboarding-context";
-import { Product, ProductInput, ProductListingStats, UnregisteredSku } from "@/lib/db/types";
+import {
+  Product,
+  ProductInput,
+  ProductListingStats,
+  ProductTag,
+  ProductTagWithCount,
+  UnregisteredSku,
+} from "@/lib/db/types";
 
 interface ProductFormData {
   sku: string;
@@ -44,7 +52,7 @@ const emptyForm: ProductFormData = {
   pma: "",
 };
 
-type ViewMode = "products" | "stats" | "unregistered" | "operational" | "taxes" | "howitworks";
+type ViewMode = "products" | "stats" | "tags" | "unregistered" | "operational" | "taxes" | "howitworks";
 
 type FinanceOpRow = {
   category_key: string;
@@ -86,6 +94,17 @@ function ProdutosPageContent() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
+  const [draftFilterTagIds, setDraftFilterTagIds] = useState<string[]>([]);
+  const [allTags, setAllTags] = useState<ProductTag[]>([]);
+  const [tagsTabList, setTagsTabList] = useState<ProductTagWithCount[]>([]);
+  const [tagsTabLoading, setTagsTabLoading] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [tagSaving, setTagSaving] = useState(false);
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editingTagName, setEditingTagName] = useState("");
+  const [tagsTabMessage, setTagsTabMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [formTagNames, setFormTagNames] = useState<string[]>([]);
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
   const optionsMenuRef = useRef<HTMLDivElement>(null);
@@ -132,6 +151,36 @@ function ProdutosPageContent() {
   } | null>(null);
   const [unregisteredLoading, setUnregisteredLoading] = useState(false);
 
+  const loadAllTags = useCallback(async () => {
+    try {
+      const res = await fetch("/api/product-tags");
+      if (res.ok) {
+        const data = await res.json();
+        const tags = (data.tags ?? []) as ProductTagWithCount[];
+        setAllTags(tags);
+        return tags;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  }, []);
+
+  const loadTagsTab = useCallback(async () => {
+    setTagsTabLoading(true);
+    try {
+      const res = await fetch("/api/product-tags");
+      if (res.ok) {
+        const data = await res.json();
+        const tags = (data.tags ?? []) as ProductTagWithCount[];
+        setTagsTabList(tags);
+        setAllTags(tags);
+      }
+    } finally {
+      setTagsTabLoading(false);
+    }
+  }, []);
+
   const loadProducts = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({
@@ -139,6 +188,7 @@ function ProdutosPageContent() {
       limit: String(pageSize),
     });
     if (search) params.set("search", search);
+    if (filterTagIds.length > 0) params.set("tags", filterTagIds.join(","));
 
     const res = await fetch(`/api/products?${params}`);
     if (res.ok) {
@@ -147,7 +197,7 @@ function ProdutosPageContent() {
       setTotal(data.total ?? 0);
     }
     setLoading(false);
-  }, [page, pageSize, search]);
+  }, [page, pageSize, search, filterTagIds]);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -156,6 +206,7 @@ function ProdutosPageContent() {
       limit: String(pageSize),
     });
     if (search) params.set("search", search);
+    if (filterTagIds.length > 0) params.set("tags", filterTagIds.join(","));
 
     const res = await fetch(`/api/products/stats?${params}`);
     if (res.ok) {
@@ -164,7 +215,7 @@ function ProdutosPageContent() {
       setTotal(data.total ?? 0);
     }
     setLoading(false);
-  }, [page, pageSize, search]);
+  }, [page, pageSize, search, filterTagIds]);
 
   const loadUnregisteredSkus = useCallback(async () => {
     setUnregisteredLoading(true);
@@ -180,9 +231,14 @@ function ProdutosPageContent() {
   }, []);
 
   useEffect(() => {
+    void loadAllTags();
+  }, [loadAllTags]);
+
+  useEffect(() => {
     if (viewMode === "products") loadProducts();
     else if (viewMode === "stats") loadStats();
-  }, [viewMode, loadProducts, loadStats]);
+    else if (viewMode === "tags") void loadTagsTab();
+  }, [viewMode, loadProducts, loadStats, loadTagsTab]);
 
   const loadOperationalCosts = useCallback(async () => {
     setFinanceLoading(true);
@@ -249,10 +305,21 @@ function ProdutosPageContent() {
     else if (viewMode === "unregistered") void loadUnregisteredSkus();
   }, [viewMode, loadOperationalCosts, loadTaxParameters, loadUnregisteredSkus]);
 
+  const tagNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of allTags) m.set(t.id, t.name);
+    return m;
+  }, [allTags]);
+
   const appliedListFilters = useMemo(() => {
-    if (!search.trim()) return [];
-    return [`Busca: ${search.trim()}`];
-  }, [search]);
+    const labels: string[] = [];
+    if (search.trim()) labels.push(`Busca: ${search.trim()}`);
+    for (const id of filterTagIds) {
+      const name = tagNameById.get(id);
+      if (name) labels.push(`Tag: ${name}`);
+    }
+    return labels;
+  }, [search, filterTagIds, tagNameById]);
 
   useEffect(() => {
     if (!optionsMenuOpen) return;
@@ -268,6 +335,8 @@ function ProdutosPageContent() {
   const clearListFilters = useCallback(() => {
     setSearch("");
     setSearchInput("");
+    setFilterTagIds([]);
+    setDraftFilterTagIds([]);
     setPage(1);
     setFiltersModalOpen(false);
   }, []);
@@ -352,22 +421,17 @@ function ProdutosPageContent() {
     }
   }
 
-  function handleSearchSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSearch(searchInput.trim());
-    setPage(1);
-    setFiltersModalOpen(false);
-  }
-
   function openNewProduct() {
     setEditingProduct(null);
     setForm(emptyForm);
+    setFormTagNames([]);
     setFormError(null);
     setModalOpen(true);
   }
 
   function openEditProduct(product: Product) {
     setEditingProduct(product);
+    setFormTagNames((product.tags ?? []).map((t) => t.name));
     setForm({
       sku: product.sku,
       title: product.title,
@@ -391,6 +455,7 @@ function ProdutosPageContent() {
     setModalOpen(false);
     setEditingProduct(null);
     setForm(emptyForm);
+    setFormTagNames([]);
     setFormError(null);
   }
 
@@ -418,6 +483,7 @@ function ProdutosPageContent() {
       extra_fee_percent: form.extra_fee_percent ? parseFloat(form.extra_fee_percent.replace(",", ".")) : null,
       fixed_expenses: form.fixed_expenses ? parseFloat(form.fixed_expenses.replace(",", ".")) : null,
       pma: form.pma ? parseFloat(form.pma.replace(",", ".")) : null,
+      tag_names: formTagNames,
     };
 
     try {
@@ -440,6 +506,7 @@ function ProdutosPageContent() {
 
       closeModal();
       loadProducts();
+      void loadAllTags();
       void loadUnregisteredSkus();
       reloadOnboarding();
     } catch {
@@ -531,8 +598,94 @@ function ProdutosPageContent() {
       sku,
       title: title ?? "",
     });
+    setFormTagNames([]);
     setFormError(null);
     setModalOpen(true);
+  }
+
+  async function handleCreateTag() {
+    const name = newTagName.trim();
+    if (!name) return;
+    setTagSaving(true);
+    setTagsTabMessage(null);
+    try {
+      const res = await fetch("/api/product-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setTagsTabMessage({ type: "error", text: data.error ?? "Erro ao criar tag" });
+        return;
+      }
+      setNewTagName("");
+      setTagsTabMessage({ type: "success", text: "Tag criada." });
+      await loadTagsTab();
+    } catch {
+      setTagsTabMessage({ type: "error", text: "Erro de conexão ao criar tag" });
+    } finally {
+      setTagSaving(false);
+    }
+  }
+
+  async function handleSaveTagRename(tagId: string) {
+    const name = editingTagName.trim();
+    if (!name) return;
+    setTagSaving(true);
+    setTagsTabMessage(null);
+    try {
+      const res = await fetch(`/api/product-tags/${tagId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setTagsTabMessage({ type: "error", text: data.error ?? "Erro ao renomear tag" });
+        return;
+      }
+      setEditingTagId(null);
+      setEditingTagName("");
+      setTagsTabMessage({ type: "success", text: "Tag atualizada." });
+      await loadTagsTab();
+      if (viewMode === "products") void loadProducts();
+      else if (viewMode === "stats") void loadStats();
+    } catch {
+      setTagsTabMessage({ type: "error", text: "Erro de conexão" });
+    } finally {
+      setTagSaving(false);
+    }
+  }
+
+  async function handleDeleteTag(tagId: string, tagName: string) {
+    if (!window.confirm(`Excluir a tag «${tagName}»? Ela será removida de todos os produtos.`)) return;
+    setTagSaving(true);
+    try {
+      const res = await fetch(`/api/product-tags/${tagId}`, { method: "DELETE" });
+      if (res.ok) {
+        setFilterTagIds((prev) => prev.filter((id) => id !== tagId));
+        await loadTagsTab();
+        if (viewMode === "products") void loadProducts();
+        else if (viewMode === "stats") void loadStats();
+      }
+    } finally {
+      setTagSaving(false);
+    }
+  }
+
+  function toggleDraftFilterTag(tagId: string) {
+    setDraftFilterTagIds((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
+    );
+  }
+
+  function applyListFilters(e: React.FormEvent) {
+    e.preventDefault();
+    setSearch(searchInput.trim());
+    setFilterTagIds(draftFilterTagIds);
+    setPage(1);
+    setFiltersModalOpen(false);
   }
 
   async function handleImport(e: React.FormEvent) {
@@ -613,6 +766,17 @@ function ProdutosPageContent() {
             </button>
             <button
               type="button"
+              onClick={() => setViewMode("tags")}
+              className={
+                viewMode === "tags"
+                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
+                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-500 hover:text-slate-800"
+              }
+            >
+              Tags
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setViewMode("unregistered");
                 setPage(1);
@@ -663,12 +827,15 @@ function ProdutosPageContent() {
 
         <div className="border-b border-slate-100 px-3 py-3">
           {(viewMode === "stats" ||
+            viewMode === "tags" ||
             viewMode === "unregistered" ||
             viewMode === "operational" ||
             viewMode === "taxes" ||
             viewMode === "howitworks") && (
             <p className="mb-2 text-[11px] text-slate-500">
               {viewMode === "stats" && "Anúncios e vendas vinculados a cada SKU cadastrado."}
+              {viewMode === "tags" &&
+                "Crie e gerencie tags para classificar produtos. Use nos filtros de Produtos, Estatísticas e Preços."}
               {viewMode === "unregistered" &&
                 "SKUs presentes nos anúncios (seller_custom_field) que ainda não têm produto cadastrado na base."}
               {viewMode === "operational" && "Valores mensais estimados de custos operacionais da empresa."}
@@ -677,7 +844,7 @@ function ProdutosPageContent() {
                 "Visão geral das abas desta página e de como produtos, anúncios e parâmetros alimentam a calculadora de preços."}
             </p>
           )}
-          {viewMode !== "howitworks" && (
+          {viewMode !== "howitworks" && viewMode !== "tags" && (
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
@@ -739,6 +906,7 @@ function ProdutosPageContent() {
                 type="button"
                 onClick={() => {
                   setSearchInput(search);
+                  setDraftFilterTagIds(filterTagIds);
                   setFiltersModalOpen(true);
                 }}
                 className="btn btn-icon btn-sm btn-outline-secondary"
@@ -814,7 +982,148 @@ function ProdutosPageContent() {
           </div>
         )}
 
-      {viewMode === "unregistered" ? (
+      {viewMode === "tags" ? (
+        tagsTabLoading ? (
+          <p className="p-3 text-sm text-slate-500">Carregando tags…</p>
+        ) : (
+          <div className="space-y-4 px-3 pb-4">
+            <p className="text-sm text-slate-600">
+              Tags ajudam a filtrar produtos e anúncios vinculados (ex.: <em>full</em>, <em>queima estoque</em>).
+              Também podem ser definidas no formulário do produto ou na coluna <strong>Tags</strong> do CSV de importação.
+            </p>
+            {tagsTabMessage && (
+              <div
+                className={`rounded px-3 py-2 text-sm ${
+                  tagsTabMessage.type === "success"
+                    ? "bg-green-50 text-green-800"
+                    : "bg-red-50 text-red-800"
+                }`}
+              >
+                {tagsTabMessage.text}
+              </div>
+            )}
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[12rem] flex-1">
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Nova tag
+                </label>
+                <input
+                  type="text"
+                  value={newTagName}
+                  onChange={(e) => setNewTagName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleCreateTag();
+                    }
+                  }}
+                  placeholder="Ex.: full, queima estoque…"
+                  className="input w-full py-2 text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCreateTag()}
+                disabled={tagSaving || !newTagName.trim()}
+                className="btn btn-primary btn-sm disabled:opacity-50"
+              >
+                {tagSaving ? "Salvando…" : "Criar tag"}
+              </button>
+            </div>
+            {tagsTabList.length === 0 ? (
+              <p className="text-sm text-slate-500">Nenhuma tag cadastrada ainda.</p>
+            ) : (
+              <div className="adminty-table-card">
+                <AppTable
+                  maxHeight="min(60vh, 24rem)"
+                  className="[&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none"
+                  tableClassName="min-w-full text-left text-sm"
+                >
+                  <thead className="sticky top-0 z-10">
+                    <tr>
+                      <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Tag</th>
+                      <th className="p-2 text-center text-xs font-semibold uppercase tracking-wide text-white/95">Produtos</th>
+                      <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tagsTabList.map((tag) => (
+                      <tr
+                        key={tag.id}
+                        className="border-b border-slate-100 bg-white/50 hover:bg-primary/5"
+                      >
+                        <td className="p-2">
+                          {editingTagId === tag.id ? (
+                            <input
+                              type="text"
+                              value={editingTagName}
+                              onChange={(e) => setEditingTagName(e.target.value)}
+                              className="input w-full max-w-xs py-1 text-sm"
+                              autoFocus
+                            />
+                          ) : (
+                            <span className="inline-flex rounded bg-[#0d6efd]/10 px-2 py-0.5 text-sm font-medium text-[#0d6efd]">
+                              {tag.name}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-2 text-center tabular-nums">{tag.product_count}</td>
+                        <td className="p-2">
+                          <div className="flex flex-wrap gap-2">
+                            {editingTagId === tag.id ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSaveTagRename(tag.id)}
+                                  disabled={tagSaving}
+                                  className="text-sm text-[#0d6efd] hover:underline disabled:opacity-50"
+                                >
+                                  Salvar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingTagId(null);
+                                    setEditingTagName("");
+                                  }}
+                                  className="text-sm text-slate-600 hover:underline"
+                                >
+                                  Cancelar
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingTagId(tag.id);
+                                    setEditingTagName(tag.name);
+                                  }}
+                                  className="text-sm text-[#0d6efd] hover:underline"
+                                >
+                                  Renomear
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteTag(tag.id, tag.name)}
+                                  disabled={tagSaving}
+                                  className="text-sm text-red-600 hover:underline disabled:opacity-50"
+                                >
+                                  Excluir
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </AppTable>
+              </div>
+            )}
+          </div>
+        )
+      ) : viewMode === "unregistered" ? (
         unregisteredLoading ? (
           <p className="p-3 text-sm text-slate-500">Carregando…</p>
         ) : unregisteredSkus.length === 0 ? (
@@ -939,6 +1248,7 @@ function ProdutosPageContent() {
                 <tr>
                   <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">SKU</th>
                   <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Título</th>
+                  <th className="p-2 text-left text-xs font-semibold uppercase tracking-wide text-white/95">Tags</th>
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Custo (R$)</th>
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Imposto (%)</th>
                   <th className="p-2 text-right text-xs font-semibold uppercase tracking-wide text-white/95">Taxa Extra (%)</th>
@@ -963,6 +1273,22 @@ function ProdutosPageContent() {
                       <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
                         {product.title}
                       </span>
+                    </td>
+                    <td className="max-w-[180px] p-2">
+                      <div className="flex flex-wrap gap-1">
+                        {(product.tags ?? []).length === 0 ? (
+                          <span className="text-xs text-slate-400">—</span>
+                        ) : (
+                          (product.tags ?? []).map((t) => (
+                            <span
+                              key={t.id}
+                              className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                            >
+                              {t.name}
+                            </span>
+                          ))
+                        )}
+                      </div>
                     </td>
                     <td className="p-2 text-right text-sm text-slate-700 dark:text-slate-200">
                       {product.cost_price != null ? Number(product.cost_price).toFixed(2) : "—"}
@@ -1322,6 +1648,14 @@ function ProdutosPageContent() {
             </p>
           </section>
           <section>
+            <h3 className="mb-2 text-[13px] font-semibold text-slate-900 dark:text-slate-100">Tags</h3>
+            <p className="text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
+              Classifique produtos com rótulos livres (ex.: full, queima). Crie na aba Tags, no formulário do produto ou na coluna{" "}
+              <strong className="font-medium text-slate-800 dark:text-slate-200">Tags</strong> do CSV. Use os filtros em Produtos,
+              Estatísticas e Preços para refinar listagens.
+            </p>
+          </section>
+          <section>
             <h3 className="mb-2 text-[13px] font-semibold text-slate-900 dark:text-slate-100">Estatísticas</h3>
             <p className="text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
               Após vincular, mostra por SKU quantos anúncios e variações existem, preços, estoque e vendas agregados dos itens ligados ao produto.
@@ -1364,7 +1698,7 @@ function ProdutosPageContent() {
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-800">Filtros</h2>
-                <p className="text-xs text-slate-500">Busque por SKU ou título na listagem atual.</p>
+                <p className="text-xs text-slate-500">Busque por SKU, título ou filtre por tags.</p>
               </div>
               <button
                 type="button"
@@ -1375,7 +1709,7 @@ function ProdutosPageContent() {
                 ✕
               </button>
             </div>
-            <form onSubmit={handleSearchSubmit} className="space-y-4 p-4">
+            <form onSubmit={applyListFilters} className="space-y-4 p-4">
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Buscar</label>
                 <input
@@ -1386,6 +1720,33 @@ function ProdutosPageContent() {
                   className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
                 />
               </div>
+              {allTags.length > 0 && (
+                <div>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Tags (qualquer uma)
+                  </label>
+                  <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
+                    {allTags.map((t) => (
+                      <label
+                        key={t.id}
+                        className={`cursor-pointer rounded border px-2 py-1 text-xs ${
+                          draftFilterTagIds.includes(t.id)
+                            ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
+                            : "border-slate-200 bg-white text-slate-700"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={draftFilterTagIds.includes(t.id)}
+                          onChange={() => toggleDraftFilterTag(t.id)}
+                        />
+                        {t.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
                 <button
                   type="button"
@@ -1549,6 +1910,14 @@ function ProdutosPageContent() {
                     className="input w-full py-2 text-sm focus:border-brand-blue focus:ring-brand-blue dark:focus:border-brand-blue-light dark:focus:ring-brand-blue-light"
                   />
                 </div>
+                <div className="col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-fg">Tags</label>
+                  <ProductTagInput
+                    value={formTagNames}
+                    onChange={setFormTagNames}
+                    availableTags={allTags}
+                  />
+                </div>
               </div>
 
               <div className="mt-6 flex justify-end gap-3">
@@ -1689,7 +2058,8 @@ function ProdutosPageContent() {
             <form onSubmit={handleImport} className="p-4">
               <p className="mb-4 text-sm text-fg">
                 O arquivo CSV deve conter a coluna <strong>SKU</strong> (obrigatório),
-                e opcionalmente: Titulo, Altura, Largura, Comprimento, Peso, PrecoCusto, Imposto, TaxaExtra, DespFixas, PMA.
+                e opcionalmente: Titulo, Altura, Largura, Comprimento, Peso, PrecoCusto, Imposto, TaxaExtra, DespFixas, PMA, Tags
+                (várias tags separadas por <code>;</code> ou <code>,</code>).
               </p>
               <p className="mb-4 text-sm text-fg">
                 Produtos com SKU existente serão atualizados.

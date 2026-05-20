@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 import { NextRequest, NextResponse } from "next/server";
 
 const PLANNED_VARIATION_ITEM = -1;
@@ -26,6 +27,10 @@ export async function GET(request: NextRequest) {
   const filterSku = searchParams.get("sku")?.trim() ?? "";
   const filterVariation = searchParams.get("variation") ?? "";
   const hideVariations = searchParams.get("hide_variations") === "true";
+  const tagIdsParam = searchParams.get("tags")?.trim() ?? "";
+  const tagIds = tagIdsParam
+    ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
 
   if (!accountId) {
     return NextResponse.json({ error: "accountId obrigatório" }, { status: 400 });
@@ -39,6 +44,29 @@ export async function GET(request: NextRequest) {
     .single();
   if (!account) {
     return NextResponse.json({ error: "Conta não encontrada" }, { status: 404 });
+  }
+
+  let allowedItemIds: string[] | null = null;
+  if (tagIds.length > 0) {
+    const resolved = await resolveMlItemIdsByProductTagIds(supabase, accountId, tagIds);
+    allowedItemIds = resolved ?? [];
+    if (allowedItemIds.length === 0) {
+      const headers = [
+        "item_id",
+        "variation_id",
+        "sku",
+        "titulo",
+        "preco_atual",
+        "promocao",
+        ...Array.from({ length: 5 }, (_, i) => [`atacado${i + 1}_qtd_min`, `atacado${i + 1}_preco`]).flat(),
+      ].join(";");
+      return new NextResponse(headers + "\n", {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": "attachment; filename=\"atacado_export.csv\"",
+        },
+      });
+    }
   }
 
   // Buscar todos os itens com paginação (Supabase limita a 1000 por query)
@@ -84,6 +112,9 @@ export async function GET(request: NextRequest) {
     }
     if (filter === "mlbu") {
       itemsQuery = itemsQuery.not("user_product_id", "is", null);
+    }
+    if (allowedItemIds) {
+      itemsQuery = itemsQuery.in("item_id", allowedItemIds);
     }
 
     const { data: pageItems, error: itemsError } = await itemsQuery;

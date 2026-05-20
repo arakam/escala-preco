@@ -20,6 +20,7 @@ import {
   normalizeMlPromotionTypeCode,
 } from "@/lib/mercadolivre/ml-promotion-types";
 import { OnboardingGate } from "@/components/OnboardingGate";
+import type { ProductTag } from "@/lib/db/types";
 import { PromocoesCampanhasTab } from "@/components/PromocoesCampanhasTab";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 
@@ -71,6 +72,12 @@ function campFilterFromSearchParams(searchParams: URLSearchParams): PromoCampaig
 }
 
 /** Filtro por campo `type` do seller-promotions (ex.: DEAL, SMART). */
+function tagIdsFromSearchParams(searchParams: URLSearchParams): string[] {
+  const raw = searchParams.get("tags")?.trim() ?? "";
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
 function ptypeFilterFromSearchParams(searchParams: URLSearchParams): string {
   const n = normalizeMlPromotionTypeCode(searchParams.get("ptype"));
   return n && /^[A-Z][A-Z0-9_]{0,63}$/.test(n) ? n : "";
@@ -343,6 +350,9 @@ function PromocoesContent() {
   const ptypeFromUrl = useMemo(() => ptypeFilterFromSearchParams(searchParams), [searchParams]);
   const campFromUrl = useMemo(() => campFilterFromSearchParams(searchParams), [searchParams]);
   const pmaLtePromoFromUrl = useMemo(() => pmaLtePromoFilterFromSearchParams(searchParams), [searchParams]);
+  const tagIdsFromUrl = useMemo(() => tagIdsFromSearchParams(searchParams), [searchParams]);
+  const [allTags, setAllTags] = useState<ProductTag[]>([]);
+  const [draftFilterTagIds, setDraftFilterTagIds] = useState<string[]>([]);
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
   const optionsMenuRef = useRef<HTMLDivElement>(null);
@@ -481,9 +491,31 @@ function PromocoesContent() {
     return accounts[0].id;
   }, [accounts, searchParams]);
 
+  const tagNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of allTags) m.set(t.id, t.name);
+    return m;
+  }, [allTags]);
+
+  const loadAllTags = useCallback(async () => {
+    try {
+      const res = await fetch("/api/product-tags");
+      if (res.ok) {
+        const data = await res.json();
+        setAllTags((data.tags ?? []) as ProductTag[]);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAllTags();
+  }, [loadAllTags]);
+
   const prevFilterKeyRef = useRef<string>("");
   useEffect(() => {
-    const key = `${qFromUrl}\0${linkFromUrl}\0${kindFromUrl}\0${profitFromUrl}\0${ptypeFromUrl}\0${campFromUrl}\0${pmaLtePromoFromUrl ? "1" : "0"}`;
+    const key = `${qFromUrl}\0${linkFromUrl}\0${kindFromUrl}\0${profitFromUrl}\0${ptypeFromUrl}\0${campFromUrl}\0${pmaLtePromoFromUrl ? "1" : "0"}\0${tagIdsFromUrl.join(",")}`;
     if (prevFilterKeyRef.current === key) return;
     prevFilterKeyRef.current = key;
     setDraftSearch(qFromUrl);
@@ -493,8 +525,9 @@ function PromocoesContent() {
     setDraftPtypeFilter(ptypeFromUrl);
     setDraftCampFilter(campFromUrl);
     setDraftPmaLtePromo(pmaLtePromoFromUrl);
+    setDraftFilterTagIds(tagIdsFromUrl);
     setPage(1);
-  }, [qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl]);
+  }, [qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl, tagIdsFromUrl]);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -553,6 +586,7 @@ function PromocoesContent() {
       if (ptypeFromUrl) params.set("ptype", ptypeFromUrl);
       if (campFromUrl) params.set("camp", campFromUrl);
       if (pmaLtePromoFromUrl) params.set("pmaok", "1");
+      if (tagIdsFromUrl.length > 0) params.set("tags", tagIdsFromUrl.join(","));
       const [overviewRes, alertsRes] = await Promise.all([
         fetch(`/api/mercadolivre/${accountId}/promotions-overview?${params}`),
         fetch(`/api/mercadolivre/promotion-alerts?accountId=${encodeURIComponent(accountId)}&hours=72`),
@@ -592,7 +626,7 @@ function PromocoesContent() {
     } finally {
       if (gen === loadPromoGen.current && !silent) setLoading(false);
     }
-  }, [accountId, page, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl]);
+  }, [accountId, page, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl, tagIdsFromUrl]);
 
   /** Recarrega snapshot do cache a cada 60s (dados já atualizados por webhook/join no servidor). */
   useEffect(() => {
@@ -697,7 +731,7 @@ function PromocoesContent() {
   useEffect(() => {
     setSelectedRowKeys(new Set());
     setJoinFeedback(null);
-  }, [page, accountId, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl]);
+  }, [page, accountId, qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl, tagIdsFromUrl]);
 
   const handleFilterSubmit = useCallback(
     (e: FormEvent) => {
@@ -722,6 +756,8 @@ function PromocoesContent() {
       if (draftPmaLtePromo) params.set("pmaok", "1");
       else params.delete("pmaok");
       params.delete("pma_lte");
+      if (draftFilterTagIds.length > 0) params.set("tags", draftFilterTagIds.join(","));
+      else params.delete("tags");
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
       setFiltersModalOpen(false);
     },
@@ -733,12 +769,19 @@ function PromocoesContent() {
       draftPtypeFilter,
       draftCampFilter,
       draftPmaLtePromo,
+      draftFilterTagIds,
       accountId,
       pathname,
       router,
       searchParams,
     ]
   );
+
+  const toggleDraftFilterTag = useCallback((tagId: string) => {
+    setDraftFilterTagIds((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
+    );
+  }, []);
 
   const clearFilters = useCallback(() => {
     setDraftSearch("");
@@ -759,6 +802,8 @@ function PromocoesContent() {
     params.delete("camp");
     params.delete("pmaok");
     params.delete("pma_lte");
+    params.delete("tags");
+    setDraftFilterTagIds([]);
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     setFiltersModalOpen(false);
   }, [accountId, pathname, router, searchParams]);
@@ -777,7 +822,9 @@ function PromocoesContent() {
       draftCampFilter ||
       campFromUrl ||
       draftPmaLtePromo ||
-      pmaLtePromoFromUrl
+      pmaLtePromoFromUrl ||
+      draftFilterTagIds.length > 0 ||
+      tagIdsFromUrl.length > 0
   );
 
   const appliedPromoFilterLabels = useMemo(() => {
@@ -802,8 +849,12 @@ function PromocoesContent() {
     if (campFromUrl === "past") labels.push("Prazo: encerrada");
     if (campFromUrl === "nodates") labels.push("Prazo: sem datas");
     if (pmaLtePromoFromUrl) labels.push("PMA ≤ preço promoção");
+    for (const id of tagIdsFromUrl) {
+      const name = tagNameById.get(id);
+      if (name) labels.push(`Tag: ${name}`);
+    }
     return labels;
-  }, [qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl]);
+  }, [qFromUrl, linkFromUrl, kindFromUrl, profitFromUrl, ptypeFromUrl, campFromUrl, pmaLtePromoFromUrl, tagIdsFromUrl, tagNameById]);
 
   const alertByItem = useMemo(() => {
     const m = new Map<string, PromoAlert>();
@@ -1229,6 +1280,7 @@ function PromocoesContent() {
                 setDraftPtypeFilter(ptypeFromUrl);
                 setDraftCampFilter(campFromUrl);
                 setDraftPmaLtePromo(pmaLtePromoFromUrl);
+                setDraftFilterTagIds(tagIdsFromUrl);
                 setFiltersModalOpen(true);
               }}
               className="btn btn-icon btn-sm btn-outline-secondary"
@@ -1757,7 +1809,7 @@ function PromocoesContent() {
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">Filtros</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Refine busca, vínculo, tipo e campanha.</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Refine busca, vínculo, tags de produto, tipo e campanha.</p>
               </div>
               <button
                 type="button"
@@ -1793,6 +1845,33 @@ function PromocoesContent() {
                   <option value="unlinked">Só não vinculados</option>
                 </select>
               </div>
+              {allTags.length > 0 && (
+                <div>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Tags do produto vinculado (qualquer uma)
+                  </label>
+                  <div className="flex max-h-36 flex-wrap gap-2 overflow-y-auto">
+                    {allTags.map((t) => (
+                      <label
+                        key={t.id}
+                        className={`cursor-pointer rounded border px-2 py-1 text-xs ${
+                          draftFilterTagIds.includes(t.id)
+                            ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
+                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={draftFilterTagIds.includes(t.id)}
+                          onChange={() => toggleDraftFilterTag(t.id)}
+                        />
+                        {t.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tipo</span>
                 <div className="flex flex-wrap gap-1">

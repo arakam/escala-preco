@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { parseTagNamesFromCell, setProductTagsByNames } from "@/lib/product-tags";
 
 /** PostgREST/Supabase limita ~1000 linhas por request; importar em lotes. */
 const UPSERT_BATCH_SIZE = 500;
@@ -20,6 +21,7 @@ interface ParsedProduct {
   extra_fee_percent: number | null;
   fixed_expenses: number | null;
   pma: number | null;
+  tag_names: string[];
 }
 
 function detectSeparator(headerLine: string): string {
@@ -78,11 +80,12 @@ function parsePrice(value: string): number | null {
   return parseNumber(value, 9999999999);
 }
 
-const EXPECTED_HEADERS = ["sku", "titulo", "altura", "largura", "comprimento", "peso", "precocusto", "imposto", "taxaextra", "despfixas", "pma"];
+const EXPECTED_HEADERS = ["sku", "titulo", "altura", "largura", "comprimento", "peso", "precocusto", "imposto", "taxaextra", "despfixas", "pma", "tags"];
 
 const VALID_HEADER_ALIASES: Record<string, string[]> = {
   sku: ["sku"],
   titulo: ["titulo", "title", "nome"],
+  tags: ["tags", "tag", "rotulos", "rotulo", "etiquetas", "etiqueta"],
   altura: ["altura", "height"],
   largura: ["largura", "width"],
   comprimento: ["comprimento", "length", "profundidade"],
@@ -177,6 +180,7 @@ export async function POST(request: NextRequest) {
     extra_fee_percent: normalized.get("taxaextra") ?? -1,
     fixed_expenses: normalized.get("despfixas") ?? -1,
     pma: normalized.get("pma") ?? -1,
+    tags: normalized.get("tags") ?? -1,
   };
 
   const products: ParsedProduct[] = [];
@@ -212,6 +216,8 @@ export async function POST(request: NextRequest) {
       extra_fee_percent: colIndex.extra_fee_percent >= 0 ? parseNumber(values[colIndex.extra_fee_percent], 100) : null,
       fixed_expenses: colIndex.fixed_expenses >= 0 ? parsePrice(values[colIndex.fixed_expenses]) : null,
       pma: colIndex.pma >= 0 ? parsePrice(values[colIndex.pma]) : null,
+      tag_names:
+        colIndex.tags >= 0 ? parseTagNamesFromCell(values[colIndex.tags]) : [],
     });
   }
 
@@ -230,10 +236,10 @@ export async function POST(request: NextRequest) {
   const deduplicatedProducts = Array.from(uniqueProducts.values());
   const duplicatesRemoved = products.length - deduplicatedProducts.length;
 
-  const productsWithUser = deduplicatedProducts.map((p) => ({
-    ...p,
-    user_id: user.id,
-  }));
+  const productsWithUser = deduplicatedProducts.map((p) => {
+    const { tag_names: _tags, ...rest } = p;
+    return { ...rest, user_id: user.id };
+  });
 
   let imported = 0;
   const upsertErrors: string[] = [];
@@ -260,6 +266,34 @@ export async function POST(request: NextRequest) {
       { error: "Erro ao importar produtos", details: upsertErrors },
       { status: 500 }
     );
+  }
+
+  const skusWithTags = deduplicatedProducts.filter((p) => p.tag_names.length > 0);
+  if (imported > 0 && skusWithTags.length > 0) {
+    const skuList = skusWithTags.map((p) => p.sku);
+    const { data: dbProducts, error: lookupErr } = await supabase
+      .from("products")
+      .select("id, sku")
+      .eq("user_id", user.id)
+      .in("sku", skuList);
+
+    if (lookupErr) {
+      errors.push(`Tags: erro ao localizar produtos importados (${lookupErr.message})`);
+    } else {
+      const skuToId = new Map(
+        (dbProducts ?? []).map((r) => [String(r.sku).toLowerCase(), String(r.id)])
+      );
+      for (const p of skusWithTags) {
+        const productId = skuToId.get(p.sku.toLowerCase());
+        if (!productId) continue;
+        try {
+          await setProductTagsByNames(supabase, user.id, productId, p.tag_names);
+        } catch (tagErr) {
+          const msg = tagErr instanceof Error ? tagErr.message : String(tagErr);
+          errors.push(`Tags SKU ${p.sku}: ${msg}`);
+        }
+      }
+    }
   }
 
   const allErrors = [...errors, ...upsertErrors];

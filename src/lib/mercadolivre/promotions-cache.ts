@@ -25,6 +25,7 @@ import {
   inferPromotionTypeFromAnyLabelText,
   normalizeMlPromotionTypeCode,
 } from "@/lib/mercadolivre/ml-promotion-types";
+import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 
 export const PROMOTIONS_OVERVIEW_PAGE_SIZE = 12;
 const ML_ENRICH_CONCURRENCY = 3;
@@ -118,6 +119,8 @@ export type PromotionsOverviewExtraFilters = {
   campaignPhase?: "" | PromotionCampaignPhase;
   /** Somente linhas com PMA (produto vinculado) ≤ preço promoção. */
   pmaLtePromoPrice?: boolean;
+  /** Tags do produto vinculado (OR): filtra por `item_id` do MLB. */
+  tagIds?: string[];
 };
 
 /** PMA do cadastro de produtos ≤ preço na promoção (ambos > 0). */
@@ -158,11 +161,22 @@ export function parsePromotionsOverviewFilters(searchParams: {
   const campaignPhase = parseCampaignPhaseParam(searchParams.get("camp"));
   const pmaRaw = searchParams.get("pmaok")?.trim() ?? searchParams.get("pma_lte")?.trim() ?? "";
   const pmaLtePromoPrice = pmaRaw === "1" || pmaRaw === "true" || pmaRaw === "sim";
-  return { promotionKind, profit, promotionType, campaignPhase, pmaLtePromoPrice };
+  const tagsRaw = searchParams.get("tags")?.trim() ?? "";
+  const tagIds = tagsRaw
+    ? tagsRaw.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+  return { promotionKind, profit, promotionType, campaignPhase, pmaLtePromoPrice, tagIds };
 }
 
 function hasPromotionsOverviewExtraFilters(f?: PromotionsOverviewExtraFilters): boolean {
-  return !!(f?.promotionKind || f?.profit || f?.promotionType || f?.campaignPhase || f?.pmaLtePromoPrice);
+  return !!(
+    f?.promotionKind ||
+    f?.profit ||
+    f?.promotionType ||
+    f?.campaignPhase ||
+    f?.pmaLtePromoPrice ||
+    (f?.tagIds && f.tagIds.length > 0)
+  );
 }
 
 function parseTimestampMs(v: unknown): number | null {
@@ -538,13 +552,18 @@ async function fetchMlItemIdsPage(
   accountId: string,
   norm: string,
   linkKey: PromotionsLinkFilter,
-  cachePage: number
+  cachePage: number,
+  allowedItemIds?: string[] | null
 ): Promise<string[]> {
   const from = (cachePage - 1) * PROMOTIONS_OVERVIEW_PAGE_SIZE;
   const to = from + PROMOTIONS_OVERVIEW_PAGE_SIZE - 1;
   let q = supabase.from("ml_items").select("item_id").eq("account_id", accountId);
   if (linkKey === "linked") q = q.not("product_id", "is", null);
   else if (linkKey === "unlinked") q = q.is("product_id", null);
+  if (allowedItemIds) {
+    if (allowedItemIds.length === 0) return [];
+    q = q.in("item_id", allowedItemIds);
+  }
   if (norm) {
     q = q.or(`title.ilike.%${norm}%,item_id.ilike.%${norm}%`);
   }
@@ -711,7 +730,8 @@ export async function countMlItemsForPromotionsPage(
   supabase: SupabaseClient,
   accountId: string,
   search: string,
-  linkFilter: PromotionsLinkFilter = "all"
+  linkFilter: PromotionsLinkFilter = "all",
+  allowedItemIds?: string[] | null
 ): Promise<number> {
   const norm = normalizeCacheSearch(search);
   let q = supabase
@@ -720,6 +740,10 @@ export async function countMlItemsForPromotionsPage(
     .eq("account_id", accountId);
   if (linkFilter === "linked") q = q.not("product_id", "is", null);
   else if (linkFilter === "unlinked") q = q.is("product_id", null);
+  if (allowedItemIds) {
+    if (allowedItemIds.length === 0) return 0;
+    q = q.in("item_id", allowedItemIds);
+  }
   if (norm) {
     q = q.or(`title.ilike.%${norm}%,item_id.ilike.%${norm}%`);
   }
@@ -747,6 +771,22 @@ export async function readPromotionsCache(
   const norm = normalizeCacheSearch(search);
   const cachePage = Math.max(1, page);
   const linkKey: PromotionsLinkFilter = linkFilter;
+
+  const tagIds = extraFilters?.tagIds ?? [];
+  let allowedItemIds: string[] | null = null;
+  if (tagIds.length > 0) {
+    const resolved = await resolveMlItemIdsByProductTagIds(supabase, accountId, tagIds);
+    allowedItemIds = resolved ?? [];
+    if (allowedItemIds.length === 0) {
+      return { rows: [], total: 0, snapshot_at: null };
+    }
+  }
+
+  const filterRowsByTags = (rows: PromoOverviewFlatApiRow[]) => {
+    if (!allowedItemIds) return rows;
+    const set = new Set(allowedItemIds.map((id) => id.trim().toUpperCase()));
+    return rows.filter((r) => set.has(String(r.item_id).trim().toUpperCase()));
+  };
 
   if (hasPromotionsOverviewExtraFilters(extraFilters)) {
     const buildFilteredSelect = () => {
@@ -779,7 +819,14 @@ export async function readPromotionsCache(
     const ptype = extraFilters!.promotionType;
     const campPhase = extraFilters!.campaignPhase;
 
-    const pageItemIds = await fetchMlItemIdsPage(supabase, accountId, norm, linkKey, cachePage);
+    const pageItemIds = await fetchMlItemIdsPage(
+      supabase,
+      accountId,
+      norm,
+      linkKey,
+      cachePage,
+      allowedItemIds
+    );
 
     /**
      * Sem filtro por tipo no SQL, `.limit(8000)` cortava linhas válidas: o filtro `ptype` era só em memória
@@ -860,6 +907,7 @@ export async function readPromotionsCache(
 
     let apiRows: PromoOverviewFlatApiRow[] = deduped.map(mapPromotionCacheDbRowToApi);
     apiRows = await attachPmaToPromoOverviewRows(supabase, accountId, apiRows);
+    apiRows = filterRowsByTags(apiRows);
     if (extraFilters!.pmaLtePromoPrice) {
       apiRows = apiRows.filter(rowMatchesPmaLtePromoPrice);
     }
@@ -880,7 +928,13 @@ export async function readPromotionsCache(
     return { rows: pageSlice, total: totalFiltered, snapshot_at: snapshotAt };
   }
 
-  const total = await countMlItemsForPromotionsPage(supabase, accountId, norm, linkKey);
+  const total = await countMlItemsForPromotionsPage(
+    supabase,
+    accountId,
+    norm,
+    linkKey,
+    allowedItemIds
+  );
 
   const { data: cached, error } = await supabase
     .from("promotions_cache_rows")
@@ -905,7 +959,14 @@ export async function readPromotionsCache(
    * Reaproveita linhas por `item_id` dos anúncios desta página (mesmo critério `ml_items` que o total).
    */
   if (list.length === 0 && total > 0) {
-    const pageItemIds = await fetchMlItemIdsPage(supabase, accountId, norm, linkKey, cachePage);
+    const pageItemIds = await fetchMlItemIdsPage(
+      supabase,
+      accountId,
+      norm,
+      linkKey,
+      cachePage,
+      allowedItemIds
+    );
     if (pageItemIds.length > 0) {
       const { data: fb, error: fbErr } = await supabase
         .from("promotions_cache_rows")
@@ -972,12 +1033,13 @@ export async function readPromotionsCache(
 
   let rows: PromoOverviewFlatApiRow[] = list.map(mapPromotionCacheDbRowToApi);
   rows = await attachPmaToPromoOverviewRows(supabase, accountId, rows);
+  rows = filterRowsByTags(rows);
   if (extraFilters?.pmaLtePromoPrice) {
     rows = rows.filter(rowMatchesPmaLtePromoPrice);
     return { rows, total: rows.length, snapshot_at: snapshotAt };
   }
 
-  return { rows, total, snapshot_at: snapshotAt };
+  return { rows, total: allowedItemIds ? rows.length : total, snapshot_at: snapshotAt };
 }
 
 async function fetchIsMercadoLider(

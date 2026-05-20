@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { ProductInput } from "@/lib/db/types";
+import {
+  fetchTagsGroupedByProductId,
+  setProductTagsByNames,
+} from "@/lib/product-tags";
 
 export async function GET(
   request: NextRequest,
@@ -27,7 +31,12 @@ export async function GET(
     return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
   }
 
-  return NextResponse.json({ product });
+  try {
+    const tagMap = await fetchTagsGroupedByProductId(supabase, [id]);
+    return NextResponse.json({ product: { ...product, tags: tagMap.get(id) ?? [] } });
+  } catch {
+    return NextResponse.json({ product });
+  }
 }
 
 export async function PUT(
@@ -96,6 +105,15 @@ export async function PUT(
     return NextResponse.json({ error: "Produto não encontrado" }, { status: 404 });
   }
 
+  if (body.tag_names !== undefined) {
+    try {
+      await setProductTagsByNames(supabase, user.id, id, body.tag_names);
+    } catch (e) {
+      console.error("Erro ao atualizar tags do produto:", e);
+      return NextResponse.json({ error: "Erro ao atualizar tags" }, { status: 500 });
+    }
+  }
+
   /** Recalcula `pricing_cache` para cada MLB vinculado — Promoções/Preços usam peso/dimensões do cache, não leem `products` em tempo real. */
   try {
     const [{ data: linkedItems }, { data: linkedVars }] = await Promise.all([
@@ -130,7 +148,12 @@ export async function PUT(
     console.error("[products/[id] PUT] refresh pricing_cache após atualizar produto:", e);
   }
 
-  return NextResponse.json({ product });
+  try {
+    const tagMap = await fetchTagsGroupedByProductId(supabase, [id]);
+    return NextResponse.json({ product: { ...product, tags: tagMap.get(id) ?? [] } });
+  } catch {
+    return NextResponse.json({ product });
+  }
 }
 
 export async function DELETE(

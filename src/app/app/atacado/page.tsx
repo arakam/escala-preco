@@ -3,6 +3,7 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
+import type { ProductTag } from "@/lib/db/types";
 import { TablePageSizeSelect } from "@/components/TablePageSizeSelect";
 import { OnboardingGate } from "@/components/OnboardingGate";
 import {
@@ -389,6 +390,8 @@ function AtacadoPageContent() {
   const [draftVariation, setDraftVariation] = useState<"" | "com" | "sem">("");
   const [draftFilterExtra, setDraftFilterExtra] = useState("");
   const [draftHideVariations, setDraftHideVariations] = useState(false);
+  const [draftFilterTagIds, setDraftFilterTagIds] = useState<string[]>([]);
+  const [allTags, setAllTags] = useState<ProductTag[]>([]);
   const [filtersApplied, setFiltersApplied] = useState<{
     mlb: string;
     mlbu: string;
@@ -397,6 +400,7 @@ function AtacadoPageContent() {
     variation: "" | "com" | "sem";
     filterExtra: string;
     hideVariations: boolean;
+    tagIds: string[];
   }>({
     mlb: "",
     mlbu: "",
@@ -405,6 +409,7 @@ function AtacadoPageContent() {
     variation: "",
     filterExtra: "",
     hideVariations: false,
+    tagIds: [],
   });
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -445,6 +450,28 @@ function AtacadoPageContent() {
   const [bulkDiscountModalOpen, setBulkDiscountModalOpen] = useState(false);
   const bulkActionsRef = useRef<HTMLDivElement>(null);
 
+  const tagNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of allTags) m.set(t.id, t.name);
+    return m;
+  }, [allTags]);
+
+  const loadAllTags = useCallback(async () => {
+    try {
+      const res = await fetch("/api/product-tags");
+      if (res.ok) {
+        const data = await res.json();
+        setAllTags((data.tags ?? []) as ProductTag[]);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAllTags();
+  }, [loadAllTags]);
+
   const appliedAtacadoFilterLabels = useMemo(() => {
     const chips: string[] = [];
     if (filtersApplied.mlb.trim()) chips.push(`MLB: ${filtersApplied.mlb.trim()}`);
@@ -464,8 +491,12 @@ function AtacadoPageContent() {
       chips.push(map[filtersApplied.filterExtra] ?? `Refino: ${filtersApplied.filterExtra}`);
     }
     if (filtersApplied.hideVariations) chips.push("Só anúncios (sem variações)");
+    for (const id of filtersApplied.tagIds) {
+      const name = tagNameById.get(id);
+      if (name) chips.push(`Tag: ${name}`);
+    }
     return chips;
-  }, [filtersApplied]);
+  }, [filtersApplied, tagNameById]);
 
   const searchParams = useSearchParams();
   const rowKey = (r: AtacadoRow) => `${r.item_id}:${r.variation_id ?? "item"}`;
@@ -788,6 +819,7 @@ function AtacadoPageContent() {
     if (filtersApplied.variation) params.set("variation", filtersApplied.variation);
     if (filtersApplied.filterExtra) params.set("filter", filtersApplied.filterExtra);
     if (filtersApplied.hideVariations) params.set("hide_variations", "true");
+    if (filtersApplied.tagIds.length > 0) params.set("tags", filtersApplied.tagIds.join(","));
     if (forceRefresh) params.set("_", String(Date.now()));
     const res = await fetch(`/api/atacado/rows?${params}`);
     if (res.ok) {
@@ -865,10 +897,17 @@ function AtacadoPageContent() {
       variation: draftVariation,
       filterExtra: draftFilterExtra,
       hideVariations: draftHideVariations,
+      tagIds: draftFilterTagIds,
     });
     setPage(1);
     setFiltersModalOpen(false);
-  }, [draftMlb, draftMlbu, draftTitle, draftSku, draftVariation, draftFilterExtra, draftHideVariations]);
+  }, [draftMlb, draftMlbu, draftTitle, draftSku, draftVariation, draftFilterExtra, draftHideVariations, draftFilterTagIds]);
+
+  const toggleDraftFilterTag = useCallback((tagId: string) => {
+    setDraftFilterTagIds((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
+    );
+  }, []);
 
   const clearFilters = useCallback(() => {
     setDraftMlb("");
@@ -886,7 +925,9 @@ function AtacadoPageContent() {
       variation: "",
       filterExtra: "",
       hideVariations: false,
+      tagIds: [],
     });
+    setDraftFilterTagIds([]);
     setPage(1);
     setFiltersModalOpen(false);
   }, []);
@@ -898,7 +939,9 @@ function AtacadoPageContent() {
     draftSku ||
     draftVariation ||
     draftFilterExtra ||
-    draftHideVariations
+    draftHideVariations ||
+    draftFilterTagIds.length > 0 ||
+    filtersApplied.tagIds.length > 0
   );
 
   useEffect(() => {
@@ -1432,6 +1475,7 @@ function AtacadoPageContent() {
     if (filtersApplied.variation) params.set("variation", filtersApplied.variation);
     if (filtersApplied.filterExtra) params.set("filter", filtersApplied.filterExtra);
     if (filtersApplied.hideVariations) params.set("hide_variations", "true");
+    if (filtersApplied.tagIds.length > 0) params.set("tags", filtersApplied.tagIds.join(","));
     window.open(`/api/atacado/export?${params}`, "_blank");
     setMessage({ type: "success", text: "Exportação iniciada." });
   };
@@ -1949,6 +1993,7 @@ function AtacadoPageContent() {
                 setDraftVariation(filtersApplied.variation);
                 setDraftFilterExtra(filtersApplied.filterExtra);
                 setDraftHideVariations(filtersApplied.hideVariations);
+                setDraftFilterTagIds(filtersApplied.tagIds);
                 setFiltersModalOpen(true);
               }}
               className="btn btn-icon btn-sm btn-outline-secondary"
@@ -2618,7 +2663,7 @@ function AtacadoPageContent() {
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-800">Filtros</h2>
-                <p className="text-xs text-slate-500">Refine as linhas exibidas na tabela de atacado.</p>
+                <p className="text-xs text-slate-500">Refine as linhas por MLB, SKU, tags de produto e mais.</p>
               </div>
               <button
                 type="button"
@@ -2706,6 +2751,33 @@ function AtacadoPageContent() {
                 />
                 <span className="text-xs text-slate-700">Só anúncios (ocultar variações)</span>
               </label>
+              {allTags.length > 0 && (
+                <div>
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Tags do produto vinculado (qualquer uma)
+                  </span>
+                  <div className="flex max-h-36 flex-wrap gap-2 overflow-y-auto">
+                    {allTags.map((t) => (
+                      <label
+                        key={t.id}
+                        className={`cursor-pointer rounded border px-2 py-1 text-xs ${
+                          draftFilterTagIds.includes(t.id)
+                            ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
+                            : "border-slate-200 bg-white text-slate-700"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={draftFilterTagIds.includes(t.id)}
+                          onChange={() => toggleDraftFilterTag(t.id)}
+                        />
+                        {t.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex flex-col gap-2 border-t border-slate-100 pt-3">
                 <button
                   type="submit"

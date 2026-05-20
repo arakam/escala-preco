@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { fetchTagsGroupedByProductId, formatTagsForCsv } from "@/lib/product-tags";
 
 const PAGE_SIZE = 1000;
 
@@ -14,6 +15,7 @@ export async function GET() {
   }
 
   type ProductExportRow = {
+    id: string;
     sku: string;
     title: string | null;
     description: string | null;
@@ -32,7 +34,7 @@ export async function GET() {
   while (true) {
     const { data: chunk, error } = await supabase
       .from("products")
-      .select("sku, title, description, ean, height, width, length, weight, cost_price, fixed_expenses, pma")
+      .select("id, sku, title, description, ean, height, width, length, weight, cost_price, fixed_expenses, pma")
       .eq("user_id", user.id)
       .order("sku", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
@@ -47,7 +49,12 @@ export async function GET() {
     from += PAGE_SIZE;
   }
 
-  const headers = ["SKU", "Titulo", "Descricao", "EAN", "Altura", "Largura", "Comprimento", "Peso", "PrecoCusto", "DespFixas", "PMA"];
+  const tagMap = await fetchTagsGroupedByProductId(
+    supabase,
+    products.map((p) => p.id)
+  );
+
+  const headers = ["SKU", "Titulo", "Descricao", "EAN", "Altura", "Largura", "Comprimento", "Peso", "PrecoCusto", "DespFixas", "PMA", "Tags"];
   
   const escapeCSV = (value: string | number | null | undefined): string => {
     if (value === null || value === undefined) return "";
@@ -70,6 +77,7 @@ export async function GET() {
     escapeCSV(p.cost_price),
     escapeCSV(p.fixed_expenses),
     escapeCSV(p.pma),
+    escapeCSV(formatTagsForCsv(tagMap.get(p.id) ?? [])),
   ].join(";"));
 
   const csv = [headers.join(";"), ...rows].join("\n");

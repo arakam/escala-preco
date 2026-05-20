@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { resolveProductIdsByTagIds } from "@/lib/product-tags";
 import {
   fetchAllViaRange,
   isAllPageSize,
@@ -64,8 +65,33 @@ export async function GET(req: NextRequest) {
   const orderBy = url.searchParams.get("order_by")?.trim() || "";
   const skuFilter = url.searchParams.get("sku")?.trim() || "";
   const onlyWithSales30d = url.searchParams.get("only_with_sales") === "1";
+  const tagIdsParam = url.searchParams.get("tags")?.trim() || "";
+  const tagIds = tagIdsParam
+    ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
 
   const offset = showAll ? 0 : (page - 1) * limit;
+
+  let productIdsForTags: string[] | null = null;
+  if (tagIds.length > 0) {
+    try {
+      productIdsForTags = await resolveProductIdsByTagIds(supabase, tagIds);
+      if (productIdsForTags.length === 0) {
+        return NextResponse.json({
+          listings: [],
+          total: 0,
+          page,
+          limit: fetchLimit,
+          totalPages: 0,
+          last_updated_at: null,
+          linked_row_count: 0,
+        });
+      }
+    } catch (e) {
+      console.error("Erro ao filtrar listagens por tags:", e);
+      return NextResponse.json({ error: "Erro ao filtrar por tags" }, { status: 500 });
+    }
+  }
 
   const { data: account, error: accountError } = await supabase
     .from("ml_accounts")
@@ -89,6 +115,7 @@ export async function GET(req: NextRequest) {
       if (search) q = q.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
       if (skuFilter) q = q.ilike("sku", `%${skuFilter}%`);
       if (onlyWithSales30d) q = q.gt("orders_30d", 0);
+      if (productIdsForTags) q = q.in("product_id", productIdsForTags);
       return q;
     };
 

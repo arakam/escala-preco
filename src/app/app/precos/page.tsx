@@ -19,6 +19,7 @@ import {
   ML_SELLER_CAMPAIGN_NAME_HINT,
 } from "@/lib/mercadolivre/campaign-name";
 import { splitMlActivePromotionsCell } from "@/lib/mercadolivre/seller-promotions-item";
+import type { ProductTag } from "@/lib/db/types";
 
 interface PricingListing {
   id: string;
@@ -976,6 +977,9 @@ function PrecosPageContent() {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [skuFilter, setSkuFilter] = useState("");
+  const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
+  const [draftFilterTagIds, setDraftFilterTagIds] = useState<string[]>([]);
+  const [allTags, setAllTags] = useState<ProductTag[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
   /** Filtro por vínculo com produto no cache */
   const [linkFilter, setLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
@@ -1063,6 +1067,22 @@ function PrecosPageContent() {
   const bulkRestoreOriginalBusyRef = useRef(false);
   const campaignMessageDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const loadAllTags = useCallback(async () => {
+    try {
+      const res = await fetch("/api/product-tags");
+      if (res.ok) {
+        const data = await res.json();
+        setAllTags((data.tags ?? []) as ProductTag[]);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAllTags();
+  }, [loadAllTags]);
+
   const loadReputation = useCallback(async () => {
     setReputationLoading(true);
     try {
@@ -1103,6 +1123,7 @@ function PrecosPageContent() {
     if (sortBy === "orders_desc" || sortBy === "orders_asc") params.set("order_by", sortBy);
     if (skuFilter) params.set("sku", skuFilter);
     if (onlyWithSales30d) params.set("only_with_sales", "1");
+    if (filterTagIds.length > 0) params.set("tags", filterTagIds.join(","));
 
     try {
       const [listingsRes, plannedRes] = await Promise.all([
@@ -1182,7 +1203,7 @@ function PrecosPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, onlyWithSales30d]);
+  }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, onlyWithSales30d, filterTagIds]);
 
   const fetchRefJob = useCallback(
     async (jobId: string) => {
@@ -2194,12 +2215,25 @@ function PrecosPageContent() {
     }
   }, []);
 
+  const tagNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of allTags) m.set(t.id, t.name);
+    return m;
+  }, [allTags]);
+
   const handleSearchSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     setSearch(searchInput.trim());
+    setFilterTagIds(draftFilterTagIds);
     setPage(1);
     setFiltersModalOpen(false);
-  }, [searchInput]);
+  }, [searchInput, draftFilterTagIds]);
+
+  const toggleDraftFilterTag = useCallback((tagId: string) => {
+    setDraftFilterTagIds((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
+    );
+  }, []);
 
   const appliedPrecosFilterLabels = useMemo(() => {
     const labels: string[] = [];
@@ -2231,6 +2265,10 @@ function PrecosPageContent() {
     if (profitFilter === "negative") labels.push("Lucro: prejuízo");
     if (sortBy === "orders_desc") labels.push("Ordenação: vendas ↓");
     if (sortBy === "orders_asc") labels.push("Ordenação: vendas ↑");
+    for (const id of filterTagIds) {
+      const name = tagNameById.get(id);
+      if (name) labels.push(`Tag: ${name}`);
+    }
     return labels;
   }, [
     search,
@@ -2243,12 +2281,16 @@ function PrecosPageContent() {
     semPromoMlAtiva,
     profitFilter,
     sortBy,
+    filterTagIds,
+    tagNameById,
   ]);
 
   const clearPrecosFilters = useCallback(() => {
     setSearch("");
     setSearchInput("");
     setSkuFilter("");
+    setFilterTagIds([]);
+    setDraftFilterTagIds([]);
     setStatusFilter("");
     setLinkFilter("all");
     setOnlyWithSales30d(false);
@@ -3271,6 +3313,7 @@ function PrecosPageContent() {
               onClick={() => {
                 setLastUpdatedInfoOpen(false);
                 setSearchInput(search);
+                setDraftFilterTagIds(filterTagIds);
                 setFiltersModalOpen(true);
               }}
               className="btn btn-icon btn-sm btn-outline-secondary"
@@ -4030,7 +4073,7 @@ function PrecosPageContent() {
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-800">Filtros</h2>
-                <p className="text-xs text-slate-500">Refine busca, status, vínculo e lucratividade.</p>
+                <p className="text-xs text-slate-500">Refine busca, status, vínculo, tags de produto e lucratividade.</p>
               </div>
               <button
                 type="button"
@@ -4097,6 +4140,33 @@ function PrecosPageContent() {
                   <option value="unlinked">Só não vinculados</option>
                 </select>
               </div>
+              {allTags.length > 0 && (
+                <div>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Tags do produto vinculado (qualquer uma)
+                  </label>
+                  <div className="flex max-h-36 flex-wrap gap-2 overflow-y-auto">
+                    {allTags.map((t) => (
+                      <label
+                        key={t.id}
+                        className={`cursor-pointer rounded border px-2 py-1 text-xs ${
+                          draftFilterTagIds.includes(t.id)
+                            ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
+                            : "border-slate-200 bg-white text-slate-700"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="sr-only"
+                          checked={draftFilterTagIds.includes(t.id)}
+                          onChange={() => toggleDraftFilterTag(t.id)}
+                        />
+                        {t.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               <label className="flex cursor-pointer items-center gap-2" title="Exibe apenas anúncios com pelo menos 1 venda nos últimos 30 dias">
                 <input
                   type="checkbox"
