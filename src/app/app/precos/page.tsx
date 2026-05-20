@@ -189,6 +189,95 @@ function buildCampaignIssuesCsv(rows: SellerCampaignItemResult[]): string {
   return `\uFEFF${lines.join("\r\n")}`;
 }
 
+const PRECOS_EXPORT_CSV_HEADERS = [
+  "MLB",
+  "Variacao",
+  "Titulo",
+  "SKU",
+  "Vendas 30d",
+  "Custo",
+  "Promo ML",
+  "Preco ML",
+  "Competitividade",
+  "Margem %",
+  "Promocao",
+  "Vai Receber",
+  "Lucro",
+  "Lucro %",
+  "Taxa ML",
+  "Taxa ML %",
+  "Frete",
+  "Imposto",
+  "Taxa Extra",
+  "Desp. Fixas",
+  "Link",
+] as const;
+
+function csvExportDecimal(value: number | null | undefined, digits = 2): string {
+  if (value == null || !Number.isFinite(value)) return "";
+  return value.toFixed(digits);
+}
+
+function buildPrecosExportCsv(
+  rows: ListingWithPricing[],
+  ordersData: Record<string, number>,
+  priceRefsByRow: Record<string, PriceReferenceCell>,
+  getProfitPercent: (listing: ListingWithPricing) => number | null
+): string {
+  const sep = ";";
+  const lines: string[] = [PRECOS_EXPORT_CSV_HEADERS.map((h) => escapeCsvField(h)).join(sep)];
+
+  for (const listing of rows) {
+    const ref = priceRefsByRow[priceRefRowKey(listing.item_id, listing.variation_id)];
+    const compLabel = competitivenessBadge(ref?.status ?? "none").label;
+    const promoLines = splitMlActivePromotionsCell(listing.ml_active_promotions);
+    const promoMl = promoLines.length > 0 ? promoLines.join(" | ") : "0";
+
+    const profit =
+      listing.calculated && listing.cost_price != null
+        ? listing.calculated.net_amount - listing.cost_price
+        : null;
+    const profitPercent = getProfitPercent(listing);
+
+    const mlFeeSharePct =
+      listing.calculated && listing.calculated.price > 0
+        ? (listing.calculated.fee / listing.calculated.price) * 100
+        : listing.reference_fee_percent != null && Number.isFinite(Number(listing.reference_fee_percent))
+          ? Number(listing.reference_fee_percent)
+          : null;
+
+    lines.push(
+      [
+        listing.item_id,
+        listing.variation_id ?? "",
+        listing.title ?? "",
+        listing.sku ?? "",
+        ordersData[listing.item_id] ?? "",
+        csvExportDecimal(listing.cost_price),
+        promoMl,
+        csvExportDecimal(listing.current_price),
+        compLabel,
+        csvExportDecimal(profitPercent, 1),
+        csvExportDecimal(listing.new_price),
+        csvExportDecimal(listing.calculated?.vai_receber),
+        csvExportDecimal(profit),
+        csvExportDecimal(profitPercent, 1),
+        csvExportDecimal(listing.calculated?.fee),
+        csvExportDecimal(mlFeeSharePct, 1),
+        csvExportDecimal(listing.calculated?.shipping_cost),
+        csvExportDecimal(listing.calculated?.tax_amount),
+        csvExportDecimal(listing.calculated?.extra_fee_amount),
+        csvExportDecimal(listing.calculated?.fixed_expenses_amount),
+        listing.permalink ?? "",
+      ]
+        .map(escapeCsvField)
+        .join(sep)
+    );
+  }
+
+  return `\uFEFF${lines.join("\r\n")}`;
+}
+
 /** Configuração das colunas da tabela de preços (ordem = índice na tabela). Usado para congelar colunas. */
 /** Ícone do Mercado Livre para link "Ver no ML" — usa favicon oficial */
 function MLIcon({ className }: { className?: string }) {
@@ -2717,6 +2806,24 @@ function PrecosPageContent() {
     URL.revokeObjectURL(url);
   }, [campaignIssuesForDownload]);
 
+  const handleExportPrecosCsv = useCallback(() => {
+    if (sortedListings.length === 0) return;
+    const csv = buildPrecosExportCsv(
+      sortedListings,
+      ordersData,
+      priceRefsByRow,
+      getProfitPercent
+    );
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `precos_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setOptionsMenuOpen(false);
+  }, [sortedListings, ordersData, priceRefsByRow, getProfitPercent]);
+
   if (loading && listings.length === 0) {
     return (
       <div className="adminty-precos-page space-y-5">
@@ -3337,6 +3444,19 @@ function PrecosPageContent() {
             </button>
             {optionsMenuOpen && (
               <div className="btn-dropdown-menu right-0 top-9 z-20 w-52">
+                <button
+                  type="button"
+                  onClick={handleExportPrecosCsv}
+                  disabled={sortedListings.length === 0}
+                  className="btn-dropdown-item disabled:cursor-not-allowed disabled:opacity-50"
+                  title={
+                    sortedListings.length === 0
+                      ? "Não há linhas na tabela para exportar"
+                      : "Exporta as linhas visíveis na tabela (página e filtros atuais)"
+                  }
+                >
+                  Exportar CSV
+                </button>
                 <button
                   type="button"
                   onClick={() => {
