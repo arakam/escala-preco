@@ -93,8 +93,7 @@ function PromocoesHelpContent() {
             <ul className="list-inside list-disc space-y-1">
               <li>
                 A tabela lê <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">promotions_cache_rows</code>.
-                Clique em <strong>Recarregar Promoções</strong> para buscar no Mercado Livre, recalcular e gravar{" "}
-                <strong>todos os anúncios</strong> que entram na lista atual (busca + vínculo), em todas as páginas — pode levar vários minutos em catálogos grandes.
+                Clique em <strong>Recarregar Promoções</strong> para buscar promoções via API de <strong>campanhas</strong> (mesmo caminho rápido da aba Campanhas), recalcular lucro com custo do produto e gravar no banco para todas as páginas da lista (busca + vínculo). Anúncios que só aparecem na API por item, fora de campanha, podem ficar sem promoção listada até um sync pontual (webhook ou participação).
               </li>
               <li>
                 <strong>Preço</strong> = <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">original_price</code> de cada promoção em seller-promotions/items (preço sem desconto).

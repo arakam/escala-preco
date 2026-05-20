@@ -12,6 +12,7 @@ import { normalizeMlPromotionTypeCode } from "@/lib/mercadolivre/ml-promotion-ty
 import {
   partitionSellerPromotionRowByStatus,
   sellerPromotionDisplayRowFromBankCampaignItem,
+  sellerPromotionDisplayRowFromCampaignItem,
   type SellerPromotionDisplayRow,
 } from "@/lib/mercadolivre/seller-promotions-item";
 
@@ -357,6 +358,108 @@ export async function fetchBankPixPromotionRowsForItem(
   }
 
   return { active, possible };
+}
+
+export type ItemPromotionsFromCampaigns = {
+  active: SellerPromotionDisplayRow[];
+  possible: SellerPromotionDisplayRow[];
+};
+
+const MAX_CAMPAIGN_ITEM_PAGES = 200;
+
+function mergeItemPromotionBucket(
+  map: Map<string, ItemPromotionsFromCampaigns>,
+  itemId: string,
+  row: SellerPromotionDisplayRow,
+  bucket: "active" | "possible"
+): void {
+  const key = itemId.trim().toUpperCase();
+  if (!key) return;
+  let entry = map.get(key);
+  if (!entry) {
+    entry = { active: [], possible: [] };
+    map.set(key, entry);
+  }
+  const list = bucket === "active" ? entry.active : entry.possible;
+  const dedupeKey = `${row.ml_promotion_id ?? ""}|${row.promotion_type ?? ""}|${row.label}`;
+  if (list.some((r) => `${r.ml_promotion_id ?? ""}|${r.promotion_type ?? ""}|${r.label}` === dedupeKey)) {
+    return;
+  }
+  list.push(row);
+}
+
+/**
+ * Varre campanhas do vendedor e itens de cada campanha (API agregada, como a aba Campanhas).
+ * Retorna promoções por MLB — muito menos chamadas que GET /seller-promotions/items/{id} por anúncio.
+ */
+export async function collectPromotionsByItemFromAllCampaigns(
+  mlUserId: number,
+  accessToken: string,
+  options?: {
+    onCampaignProgress?: (processed: number, totalCampaigns: number) => void | Promise<void>;
+  }
+): Promise<Map<string, ItemPromotionsFromCampaigns>> {
+  const map = new Map<string, ItemPromotionsFromCampaigns>();
+  const campaigns: MlSellerCampaignRow[] = [];
+  let offset = 0;
+  const pageSize = 50;
+
+  for (let page = 0; page < MAX_ML_CAMPAIGN_SCAN_PAGES; page++) {
+    const batch = await fetchSellerPromotionsForUser(mlUserId, accessToken, {
+      offset,
+      limit: pageSize,
+    });
+    if (!batch.ok) {
+      throw new Error(batch.message || `Erro ao listar campanhas (${batch.status})`);
+    }
+    campaigns.push(...batch.campaigns);
+    if (batch.campaigns.length < pageSize || offset + pageSize >= batch.paging.total) break;
+    offset += pageSize;
+  }
+
+  const totalCampaigns = campaigns.length;
+  let processed = 0;
+
+  for (const campaign of campaigns) {
+    processed += 1;
+    if (options?.onCampaignProgress) {
+      await options.onCampaignProgress(processed, totalCampaigns);
+    }
+
+    let searchAfter: string | null = null;
+    for (let itemPage = 0; itemPage < MAX_CAMPAIGN_ITEM_PAGES; itemPage++) {
+      const res = await fetchSellerPromotionCampaignItems({
+        promotionId: campaign.id,
+        promotionType: campaign.type,
+        accessToken,
+        limit: 50,
+        searchAfter,
+      });
+      if (!res.ok) {
+        console.warn(
+          "[collectPromotionsByItemFromAllCampaigns] items",
+          campaign.id,
+          res.status,
+          res.message
+        );
+        break;
+      }
+
+      for (const item of res.page.results) {
+        const displayRow = isBankPixCampaignType(campaign.type)
+          ? sellerPromotionDisplayRowFromBankCampaignItem(campaign, item)
+          : sellerPromotionDisplayRowFromCampaignItem(campaign, item);
+        const bucket = partitionSellerPromotionRowByStatus(displayRow, item.status);
+        mergeItemPromotionBucket(map, item.item_id, displayRow, bucket);
+      }
+
+      const next = res.page.paging.search_after;
+      if (!next) break;
+      searchAfter = next;
+    }
+  }
+
+  return map;
 }
 
 export function formatCampaignBenefitsHint(benefits: Record<string, unknown> | null): string | null {

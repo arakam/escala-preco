@@ -2,8 +2,10 @@ import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { fetchSellerPromotionsForItem, runWithConcurrency } from "@/lib/mercadolivre/client";
 import {
+  collectPromotionsByItemFromAllCampaigns,
   fetchBankPixPromotionRowsForItem,
   listBankPixCampaignsForUser,
+  type ItemPromotionsFromCampaigns,
   type MlSellerCampaignRow,
 } from "@/lib/mercadolivre/fetch-seller-campaigns";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
@@ -1005,8 +1007,20 @@ async function enrichMlItemRowsToApiRows(ctx: {
   isMercadoLider: boolean;
   mlUserId: number | null;
   rows: MlItemRow[];
+  /** Quando definido, usa promoções já coletadas via API de campanhas (sem GET por anúncio). */
+  promotionMapByItemId?: Map<string, ItemPromotionsFromCampaigns>;
 }): Promise<{ apiRows: PromoOverviewFlatApiRow[]; flat: FlatPromoInternal[]; itemIds: string[] }> {
-  const { supabase, adminSupabase, accountId, siteId, accessToken, isMercadoLider, mlUserId, rows } = ctx;
+  const {
+    supabase,
+    adminSupabase,
+    accountId,
+    siteId,
+    accessToken,
+    isMercadoLider,
+    mlUserId,
+    rows,
+    promotionMapByItemId,
+  } = ctx;
   let bankCampaignsCache: MlSellerCampaignRow[] | null = null;
   const loadBankCampaigns = async (): Promise<MlSellerCampaignRow[]> => {
     if (bankCampaignsCache) return bankCampaignsCache;
@@ -1037,32 +1051,16 @@ async function enrichMlItemRowsToApiRows(ctx: {
     }
   }
 
-  const enriched: PromoOverviewEnrichedRow[] = await runWithConcurrency(
-    rows,
-    ML_ENRICH_CONCURRENCY,
-    async (row) => {
-      const itemId = row.item_id;
-      const listPrice = row.price != null ? Number(row.price) : null;
-      const cache = cacheByItem.get(itemId) ?? null;
-      const promoRaw = await fetchSellerPromotionsForItem(itemId, accessToken);
-
-      let { active, possible } = partitionSellerPromotionsRich(promoRaw);
-      const hasBankInItemApi = [...active, ...possible].some((r) => r.promotion_type === "BANK");
-      if (!hasBankInItemApi) {
-        try {
-          const bankRows = await fetchBankPixPromotionRowsForItem(
-            itemId,
-            accessToken,
-            await loadBankCampaigns()
-          );
-          active = mergePromotionDisplayRows(active, bankRows.active);
-          possible = mergePromotionDisplayRows(possible, bankRows.possible);
-        } catch (e) {
-          console.warn("[promotions-cache] BANK/PIX supplement", itemId, e);
-        }
-      }
-      const promotionsFailed = promoRaw === null && active.length === 0 && possible.length === 0;
-
+  const buildEnrichedRow = async (row: MlItemRow): Promise<PromoOverviewEnrichedRow> => {
+    const itemId = row.item_id;
+    const listPrice = row.price != null ? Number(row.price) : null;
+    const cache = cacheByItem.get(itemId) ?? null;
+    if (promotionMapByItemId) {
+      const fromMap =
+        promotionMapByItemId.get(String(itemId).trim().toUpperCase()) ?? {
+          active: [],
+          possible: [],
+        };
       return {
         item_id: itemId,
         title: row.title,
@@ -1074,9 +1072,9 @@ async function enrichMlItemRowsToApiRows(ctx: {
         category_id: row.category_id,
         list_price: listPrice,
         active_price: null,
-        active_promotions: active,
-        possible_promotions: possible,
-        promotions_api_failed: promotionsFailed,
+        active_promotions: fromMap.active,
+        possible_promotions: fromMap.possible,
+        promotions_api_failed: false,
         cost_price: cache ? num(cache.cost_price) : null,
         weight_kg: cache ? num(cache.weight_kg) : null,
         height_cm: cache ? num(cache.height_cm) : null,
@@ -1087,7 +1085,54 @@ async function enrichMlItemRowsToApiRows(ctx: {
         fixed_expenses: cache ? num(cache.fixed_expenses) : null,
       };
     }
-  );
+
+    const promoRaw = await fetchSellerPromotionsForItem(itemId, accessToken);
+
+    let { active, possible } = partitionSellerPromotionsRich(promoRaw);
+    const hasBankInItemApi = [...active, ...possible].some((r) => r.promotion_type === "BANK");
+    if (!hasBankInItemApi) {
+      try {
+        const bankRows = await fetchBankPixPromotionRowsForItem(
+          itemId,
+          accessToken,
+          await loadBankCampaigns()
+        );
+        active = mergePromotionDisplayRows(active, bankRows.active);
+        possible = mergePromotionDisplayRows(possible, bankRows.possible);
+      } catch (e) {
+        console.warn("[promotions-cache] BANK/PIX supplement", itemId, e);
+      }
+    }
+    const promotionsFailed = promoRaw === null && active.length === 0 && possible.length === 0;
+
+    return {
+      item_id: itemId,
+      title: row.title,
+      status: row.status,
+      thumbnail: row.thumbnail,
+      permalink: row.permalink,
+      updated_at: row.updated_at,
+      listing_type_id: row.listing_type_id,
+      category_id: row.category_id,
+      list_price: listPrice,
+      active_price: null,
+      active_promotions: active,
+      possible_promotions: possible,
+      promotions_api_failed: promotionsFailed,
+      cost_price: cache ? num(cache.cost_price) : null,
+      weight_kg: cache ? num(cache.weight_kg) : null,
+      height_cm: cache ? num(cache.height_cm) : null,
+      width_cm: cache ? num(cache.width_cm) : null,
+      length_cm: cache ? num(cache.length_cm) : null,
+      tax_percent: cache ? num(cache.tax_percent) : null,
+      extra_fee_percent: cache ? num(cache.extra_fee_percent) : null,
+      fixed_expenses: cache ? num(cache.fixed_expenses) : null,
+    };
+  };
+
+  const enriched: PromoOverviewEnrichedRow[] = promotionMapByItemId
+    ? await Promise.all(rows.map((row) => buildEnrichedRow(row)))
+    : await runWithConcurrency(rows, ML_ENRICH_CONCURRENCY, (row) => buildEnrichedRow(row));
 
   const flat = flattenPromoRows(enriched);
 
@@ -1489,6 +1534,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
   isMercadoLider: boolean;
   snapshotAt: string;
   deleteItemIdsBeforeInsert: boolean;
+  promotionMapByItemId?: Map<string, ItemPromotionsFromCampaigns>;
 }): Promise<{ apiRows: PromoOverviewFlatApiRow[]; total: number; itemIds: string[] }> {
   const {
     supabase,
@@ -1504,6 +1550,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
     isMercadoLider,
     snapshotAt,
     deleteItemIdsBeforeInsert,
+    promotionMapByItemId,
   } = ctx;
 
   const from = (cachePage - 1) * PROMOTIONS_OVERVIEW_PAGE_SIZE;
@@ -1544,6 +1591,7 @@ async function writePromotionsCacheForMlItemPage(ctx: {
     isMercadoLider,
     mlUserId,
     rows,
+    promotionMapByItemId,
   });
 
   if (deleteItemIdsBeforeInsert) {
@@ -1696,6 +1744,19 @@ export async function refreshPromotionsCache(params: {
     const snapshotAt = new Date().toISOString();
     const pages = totalCount <= 0 ? 0 : Math.ceil(totalCount / PROMOTIONS_OVERVIEW_PAGE_SIZE);
 
+    /** Sync rápido: campanhas → itens (como aba Campanhas), depois lucro/produto por página do catálogo. */
+    const promotionMapByItemId = await collectPromotionsByItemFromAllCampaigns(mlUserId, accessToken, {
+      onCampaignProgress: async (processedCampaigns, totalCampaigns) => {
+        if (!params.onProgress || pages <= 0) return;
+        const phaseShare = Math.max(1, Math.ceil(pages * 0.15));
+        const mapped = Math.min(
+          phaseShare,
+          Math.ceil((processedCampaigns / Math.max(totalCampaigns, 1)) * phaseShare)
+        );
+        await params.onProgress(mapped, pages);
+      },
+    });
+
     const keptItemIds = new Set<string>();
     for (let p = 1; p <= pages; p++) {
       const { itemIds } = await writePromotionsCacheForMlItemPage({
@@ -1712,6 +1773,7 @@ export async function refreshPromotionsCache(params: {
         isMercadoLider,
         snapshotAt,
         deleteItemIdsBeforeInsert: true,
+        promotionMapByItemId,
       });
       for (const id of itemIds) keptItemIds.add(id);
       if (params.onProgress) await params.onProgress(p, pages);

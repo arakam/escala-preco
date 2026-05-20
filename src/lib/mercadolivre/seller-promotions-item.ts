@@ -485,6 +485,44 @@ function mergePromotionDisplayRows(
   return out;
 }
 
+/** Linha de exibição a partir de item em campanha (GET …/promotions/{id}/items), exceto BANK/PIX. */
+export function sellerPromotionDisplayRowFromCampaignItem(
+  campaign: MlSellerCampaignRow,
+  item: MlCampaignItemRow
+): SellerPromotionDisplayRow {
+  const typeCode =
+    normalizeMlPromotionTypeCode(campaign.type) || String(campaign.type ?? "").trim() || null;
+  const raw: Record<string, unknown> = {
+    type: typeCode ?? campaign.type,
+    name: campaign.name,
+    id: campaign.id,
+    promotion_id: campaign.id,
+    status: item.status,
+    original_price: item.original_price,
+    price: item.price,
+    meli_percentage: item.meli_percentage,
+    seller_percentage: item.seller_percentage,
+    offer_id: item.offer_id,
+    start_date: campaign.start_date,
+    finish_date: campaign.finish_date,
+    deadline_date: campaign.deadline_date,
+    benefits: campaign.benefits,
+  };
+  const promoPrice = getSellerPromotionPriceAmount(raw);
+  const label = formatSellerPromotionTitle(raw);
+  return {
+    label,
+    original_price: item.original_price,
+    promo_price: promoPrice,
+    value_hint: getSellerPromotionValueHint(raw, promoPrice),
+    meli_fee_subsidy: getSellerPromotionMeliFeeSubsidyBrl(raw),
+    promotion_type: typeCode,
+    ml_promotion_id: campaign.id,
+    campaign_start_at: campaign.start_date,
+    campaign_finish_at: campaign.finish_date,
+  };
+}
+
 /** Linha de exibição a partir de item em campanha BANK/PIX (GET …/promotions/{id}/items). */
 export function sellerPromotionDisplayRowFromBankCampaignItem(
   campaign: MlSellerCampaignRow,
