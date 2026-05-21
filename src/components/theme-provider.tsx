@@ -15,18 +15,20 @@ interface ThemeProviderProps {
   children: ReactNode;
 }
 
-function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "light";
-
+function readStoredTheme(): Theme {
   const stored = window.localStorage.getItem("escalapreco-theme");
   if (stored === "light" || stored === "dark") return stored;
-
   const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
   return prefersDark ? "dark" : "light";
 }
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
-  const [theme, setThemeState] = useState<Theme>(() => getInitialTheme());
+  /** Sempre "light" no SSR e na primeira pintura do cliente (evita hydration mismatch). */
+  const [theme, setThemeState] = useState<Theme>("light");
+
+  useEffect(() => {
+    setThemeState(readStoredTheme());
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;

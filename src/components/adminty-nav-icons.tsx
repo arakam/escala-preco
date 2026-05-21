@@ -22,14 +22,29 @@ export function AdmintyIconHome() {
   );
 }
 
+function strokeBold() {
+  return {
+    fill: "none" as const,
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+}
+
+/** Megafone (Lucide megaphone) — menu Anúncios. */
 export function AdmintyIconMegaphone() {
   return (
     <svg viewBox="0 0 24 24" className={iconBase} aria-hidden="true">
       <path
-        {...stroke()}
-        d="M4 10.5v3a1 1 0 0 0 1.2.98L9 13v5a1 1 0 0 0 1 .9h1l3-2.5V9.6L11 7H8a1 1 0 0 0-.8.4L5.2 9.52A1 1 0 0 0 4 10.5z"
+        {...strokeBold()}
+        d="M11 6a13 13 0 0 0 8.4-2.8A1 1 0 0 1 21 4v12a1 1 0 0 1-1.6.8A13 13 0 0 0 11 14H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"
       />
-      <path {...stroke()} d="M15.5 9.5a4 4 0 0 1 0 5M18 7a7 7 0 0 1 0 10" />
+      <path
+        {...strokeBold()}
+        d="M6 14a12 12 0 0 0 2.4 7.2 2 2 0 0 0 3.2-2.4A8 8 0 0 1 10 14"
+      />
+      <path {...strokeBold()} d="M8 6v8" />
     </svg>
   );
 }
@@ -62,6 +77,20 @@ export function AdmintyIconCurrency() {
   );
 }
 
+/** Carrinho de compras (estilo Feather shopping-cart) — menu Vendas. */
+export function AdmintyIconShoppingCart() {
+  return (
+    <svg viewBox="0 0 24 24" className={iconBase} aria-hidden="true">
+      <circle cx="9" cy="21" r="1" fill="currentColor" />
+      <circle cx="20" cy="21" r="1" fill="currentColor" />
+      <path
+        {...stroke()}
+        d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"
+      />
+    </svg>
+  );
+}
+
 export function AdmintyIconPromo() {
   return (
     <svg viewBox="0 0 24 24" className={iconBase} aria-hidden="true">
@@ -72,13 +101,14 @@ export function AdmintyIconPromo() {
   );
 }
 
+/** Engrenagem (estilo Feather cog) — menu Configuração. */
 export function AdmintyIconSettings() {
   return (
     <svg viewBox="0 0 24 24" className={iconBase} aria-hidden="true">
       <circle {...stroke()} cx="12" cy="12" r="3" />
       <path
         {...stroke()}
-        d="M12 1v2m0 18v2M4.2 4.2l1.4 1.4m12.8 12.8 1.4 1.4M1 12h2m18 0h2M4.2 19.8l1.4-1.4M17.4 5.8l1.4-1.4"
+        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
       />
     </svg>
   );

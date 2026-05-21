@@ -549,8 +549,8 @@ function PriceInput({
       onFocus={() => setIsFocused(true)}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
-      className={`w-24 rounded border px-2 py-1 text-right text-sm ${
-        dirty ? "border-amber-400 bg-amber-50" : "border-gray-300"
+      className={`pricing-inline-input w-24 px-2 py-1 ${
+        dirty ? "pricing-inline-input--dirty" : ""
       }`}
     />
   );
@@ -615,8 +615,8 @@ function MarginInput({
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
         title="Margem líquida sobre o preço de promoção. Ao confirmar, a promoção é ajustada pela calculadora (taxas ML, frete, impostos)."
-        className={`w-[4.25rem] rounded border px-1.5 py-1 text-right text-sm tabular-nums ${
-          dirty ? "border-amber-400 bg-amber-50" : "border-gray-300 dark:border-slate-600"
+        className={`pricing-inline-input w-[4.25rem] px-1.5 py-1 ${
+          dirty ? "pricing-inline-input--dirty" : ""
         }`}
       />
       <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">%</span>
@@ -1059,19 +1059,25 @@ function PrecosHelpContent() {
 
 function PrecosPageContent() {
   const [listings, setListings] = useState<ListingWithPricing[]>([]);
+  const listingsRef = useRef<ListingWithPricing[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [loading, setLoading] = useState(true);
+  /** Recarrega lista com filtros novos sem bloquear a tela com o overlay (já há linhas na tela). */
+  const [listingsRefetching, setListingsRefetching] = useState(false);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [skuFilter, setSkuFilter] = useState("");
+  const [draftSkuFilter, setDraftSkuFilter] = useState("");
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [draftFilterTagIds, setDraftFilterTagIds] = useState<string[]>([]);
   const [allTags, setAllTags] = useState<ProductTag[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
+  const [draftStatusFilter, setDraftStatusFilter] = useState("");
   /** Filtro por vínculo com produto no cache */
   const [linkFilter, setLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
+  const [draftLinkFilter, setDraftLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
   const [calculating, setCalculating] = useState(false);
   const [isMercadoLider, setIsMercadoLider] = useState(false);
   const [reputationLoading, setReputationLoading] = useState(true);
@@ -1079,6 +1085,7 @@ function PrecosPageContent() {
   const [saveMessage, setSaveMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   /** Filtro por % de lucro: "" = todos, "high" = >20%, "medium" = 10-20%, "low" = 0-10%, "negative" = ≤0% */
   const [profitFilter, setProfitFilter] = useState<"" | "high" | "medium" | "low" | "negative">("");
+  const [draftProfitFilter, setDraftProfitFilter] = useState<"" | "high" | "medium" | "low" | "negative">("");
   /** Quantidade vendida (soma das quantidades nos pedidos) últimos 30 dias por item_id */
   /** Número de pedidos (pagados) que contêm o item nos últimos 30 dias por item_id */
   const [ordersData, setOrdersData] = useState<Record<string, number>>({});
@@ -1099,12 +1106,16 @@ function PrecosPageContent() {
   const [sortBy, setSortBy] = useState<"" | "orders_desc" | "orders_asc">("");
   /** Mostrar somente itens com vendas nos últimos 30 dias */
   const [onlyWithSales30d, setOnlyWithSales30d] = useState(false);
+  const [draftOnlyWithSales30d, setDraftOnlyWithSales30d] = useState(false);
   /** Promoção (planejada) igual ao preço atual do anúncio — sem desconto em relação ao ML */
   const [semPromocao, setSemPromocao] = useState(false);
+  const [draftSemPromocao, setDraftSemPromocao] = useState(false);
   /** Promoção acima de 95% do preço (desconto menor que 5%) — não atendem ao mínimo da promoção ML */
   const [foraDescontoMin5Ml, setForaDescontoMin5Ml] = useState(false);
+  const [draftForaDescontoMin5Ml, setDraftForaDescontoMin5Ml] = useState(false);
   /** Sem campanhas/promoções ativas no ML (seller-promotions) no último refresh do cache */
   const [semPromoMlAtiva, setSemPromoMlAtiva] = useState(false);
+  const [draftSemPromoMlAtiva, setDraftSemPromoMlAtiva] = useState(false);
   /** Com filtros no cliente: carregar até 2000 itens de uma vez (em vez de 500) */
   const [loadAllResults, setLoadAllResults] = useState(false);
   /** Itens selecionados para criar campanha ML (por id de listing) */
@@ -1200,7 +1211,9 @@ function PrecosPageContent() {
   const pageForRequest = clientSideFiltering ? 1 : apiListPage(pageSize, page);
 
   const loadListings = useCallback(async () => {
-    setLoading(true);
+    const isRefetch = listingsRef.current.length > 0;
+    if (isRefetch) setListingsRefetching(true);
+    else setLoading(true);
     const params = new URLSearchParams({
       page: String(pageForRequest),
       limit: String(limitForRequest),
@@ -1291,6 +1304,7 @@ function PrecosPageContent() {
       // ignore
     } finally {
       setLoading(false);
+      setListingsRefetching(false);
     }
   }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, onlyWithSales30d, filterTagIds]);
 
@@ -1474,9 +1488,7 @@ function PrecosPageContent() {
 
   // Auto-calculate when listings are loaded (only once per load)
   const lastCalculatedKey = useRef<string>("");
-  const listingsRef = useRef<ListingWithPricing[]>([]);
-  
-  // Keep ref updated
+
   useEffect(() => {
     listingsRef.current = listings;
   }, [listings]);
@@ -2310,13 +2322,59 @@ function PrecosPageContent() {
     return m;
   }, [allTags]);
 
-  const handleSearchSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    setSearch(searchInput.trim());
-    setFilterTagIds(draftFilterTagIds);
-    setPage(1);
-    setFiltersModalOpen(false);
-  }, [searchInput, draftFilterTagIds]);
+  const syncFiltersDraftFromApplied = useCallback(() => {
+    setSearchInput(search);
+    setDraftSkuFilter(skuFilter);
+    setDraftStatusFilter(statusFilter);
+    setDraftLinkFilter(linkFilter);
+    setDraftFilterTagIds(filterTagIds);
+    setDraftOnlyWithSales30d(onlyWithSales30d);
+    setDraftSemPromocao(semPromocao);
+    setDraftForaDescontoMin5Ml(foraDescontoMin5Ml);
+    setDraftSemPromoMlAtiva(semPromoMlAtiva);
+    setDraftProfitFilter(profitFilter);
+  }, [
+    search,
+    skuFilter,
+    statusFilter,
+    linkFilter,
+    filterTagIds,
+    onlyWithSales30d,
+    semPromocao,
+    foraDescontoMin5Ml,
+    semPromoMlAtiva,
+    profitFilter,
+  ]);
+
+  const handleFiltersApply = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      setSearch(searchInput.trim());
+      setSkuFilter(draftSkuFilter.trim());
+      setStatusFilter(draftStatusFilter);
+      setLinkFilter(draftLinkFilter);
+      setFilterTagIds(draftFilterTagIds);
+      setOnlyWithSales30d(draftOnlyWithSales30d);
+      setSemPromocao(draftSemPromocao);
+      setForaDescontoMin5Ml(draftForaDescontoMin5Ml);
+      setSemPromoMlAtiva(draftSemPromoMlAtiva);
+      setProfitFilter(draftProfitFilter);
+      setPage(1);
+      setFiltersModalOpen(false);
+    },
+    [
+      searchInput,
+      draftSkuFilter,
+      draftStatusFilter,
+      draftLinkFilter,
+      draftFilterTagIds,
+      draftOnlyWithSales30d,
+      draftSemPromocao,
+      draftForaDescontoMin5Ml,
+      draftSemPromoMlAtiva,
+      draftProfitFilter,
+    ]
+  );
 
   const toggleDraftFilterTag = useCallback((tagId: string) => {
     setDraftFilterTagIds((prev) =>
@@ -2378,15 +2436,23 @@ function PrecosPageContent() {
     setSearch("");
     setSearchInput("");
     setSkuFilter("");
+    setDraftSkuFilter("");
     setFilterTagIds([]);
     setDraftFilterTagIds([]);
     setStatusFilter("");
+    setDraftStatusFilter("");
     setLinkFilter("all");
+    setDraftLinkFilter("all");
     setOnlyWithSales30d(false);
+    setDraftOnlyWithSales30d(false);
     setSemPromocao(false);
+    setDraftSemPromocao(false);
     setForaDescontoMin5Ml(false);
+    setDraftForaDescontoMin5Ml(false);
     setSemPromoMlAtiva(false);
+    setDraftSemPromoMlAtiva(false);
     setProfitFilter("");
+    setDraftProfitFilter("");
     setSortBy("");
     setPage(1);
     setFiltersModalOpen(false);
@@ -2827,14 +2893,12 @@ function PrecosPageContent() {
   if (loading && listings.length === 0) {
     return (
       <div className="adminty-precos-page space-y-5">
-        <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+        <div className="table-page-shell p-4">
           <p className="text-sm text-slate-500 dark:text-slate-400">Carregando…</p>
         </div>
       </div>
     );
   }
-
-  const listingsRefetching = loading && listings.length > 0;
 
   function renderPricingHeaderMenu(colIndex: number, opts?: { sortable?: boolean }) {
     if (headerMenuColumn !== colIndex) return null;
@@ -2933,7 +2997,7 @@ function PrecosPageContent() {
   const refRefreshing =
     !!refJobId && (refJob?.status === "queued" || refJob?.status === "running");
 
-  const loaderOpen = cacheRefreshing || calculating || refRefreshing || listingsRefetching;
+  const loaderOpen = cacheRefreshing || calculating || refRefreshing;
 
   const bulkMarginLoaderActive = bulkMarginLoaderProgress != null && calculating;
   const bulkDiscountLoaderActive = bulkDiscountLoaderProgress != null && calculating;
@@ -2953,13 +3017,7 @@ function PrecosPageContent() {
               "Consultando sugestões no Mercado Livre…",
               "Gravando referências para a tabela…",
             ]
-          : listingsRefetching && !cacheRefreshing
-            ? [
-                "Atualizando a lista de preços…",
-                "Buscando vínculos MLB → produto e custos no cache…",
-                "Sincronizando com o que há no servidor…",
-              ]
-            : undefined;
+          : undefined;
   const loaderPhase = cacheRefreshing ? "refresh-cache" : calculating ? "calculate" : "default";
   const loaderDeterminatePercent = (() => {
     if (bulkDiscountLoaderActive && bulkDiscountLoaderProgress != null) {
@@ -2976,16 +3034,11 @@ function PrecosPageContent() {
     if (p == null || !calculating || p.total <= 0) return null;
     return (p.done / p.total) * 100;
   })();
-  const loaderFooter =
-    bulkProgressLoaderActive
-      ? ""
-      : listingsRefetching && !cacheRefreshing && !refRefreshing
-        ? "Os dados da calculadora vêm do cache; após vincular em Produtos, esta atualização mostra os vínculos e custos mais recentes."
-        : undefined;
+  const loaderFooter = bulkProgressLoaderActive ? "" : undefined;
 
   return (
     <div className="adminty-precos-page space-y-5">
-      <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+      <div className="table-page-shell">
       <SmartLoaderOverlay
         open={loaderOpen}
         messages={loaderMessages}
@@ -3165,7 +3218,7 @@ function PrecosPageContent() {
         </div>
       )}
 
-        <div className="border-b border-slate-200 bg-white px-3 pt-3">
+        <div className="table-page-toolbar">
           <div className="flex flex-wrap items-end gap-1">
             <button
               type="button"
@@ -3201,16 +3254,16 @@ function PrecosPageContent() {
         </div>
 
         {precosTab === "como-funciona" && (
-          <div className="max-h-[min(70vh,720px)] overflow-y-auto border-b border-slate-100 bg-white px-4 py-4 dark:bg-slate-900/20">
+          <div className="table-page-filters">
             <PrecosHelpContent />
           </div>
         )}
 
         {precosTab === "calculadora" && (
         <div>
-        <div className="border-b border-slate-100 px-3 py-3">
+        <div className="border-b border-slate-100 px-3 py-3 dark:border-slate-700">
           <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 shadow-sm">
+          <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-card px-3 py-1.5 text-xs text-slate-700 shadow-sm dark:border-slate-600 dark:text-slate-200">
             <input
               type="checkbox"
               checked={isMercadoLider}
@@ -3356,20 +3409,23 @@ function PrecosPageContent() {
         </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px] text-slate-600">
-            <span className="font-semibold text-slate-700">Filtros:</span>
+        <div className="pricing-filter-bar">
+          <div className="pricing-filter-bar-meta flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px]">
+            <span className="pricing-filter-bar-label">Filtros:</span>
+            {listingsRefetching && (
+              <span className="text-[11px] font-medium text-[#0d6efd]">Atualizando lista…</span>
+            )}
             {appliedPrecosFilterLabels.length > 0 ? (
               appliedPrecosFilterLabels.map((label, idx) => (
                 <span
                   key={`${idx}-${label}`}
-                  className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                  className="table-mini-control"
                 >
                   {label}
                 </span>
               ))
             ) : (
-              <span className="text-slate-500">Nenhum filtro aplicado</span>
+              <span className="text-slate-500 dark:text-slate-400">Nenhum filtro aplicado</span>
             )}
             {appliedPrecosFilterLabels.length > 0 && (
               <button
@@ -3401,7 +3457,7 @@ function PrecosPageContent() {
                 <ClockIcon />
               </button>
               {lastUpdatedInfoOpen && (
-                <div className="absolute right-0 top-9 z-30 w-72 rounded border border-slate-200 bg-white px-3 py-2 text-left text-[11px] leading-snug text-slate-700 shadow-lg dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                <div className="absolute right-0 top-9 z-30 w-72 rounded border border-slate-200 bg-card px-3 py-2 text-left text-[11px] leading-snug text-slate-700 shadow-lg dark:border-slate-600 dark:text-slate-200">
                   {lastUpdatedAt ? (
                     <>
                       <span className="font-semibold text-slate-800 dark:text-slate-100">Última atualização</span>
@@ -3419,8 +3475,7 @@ function PrecosPageContent() {
               type="button"
               onClick={() => {
                 setLastUpdatedInfoOpen(false);
-                setSearchInput(search);
-                setDraftFilterTagIds(filterTagIds);
+                syncFiltersDraftFromApplied();
                 setFiltersModalOpen(true);
               }}
               className="btn btn-icon btn-sm btn-outline-secondary"
@@ -3561,7 +3616,7 @@ function PrecosPageContent() {
             type="button"
             onClick={() => void handleRefreshCache()}
             disabled={cacheRefreshing}
-            className="mt-3 rounded-full border border-amber-300 bg-white px-4 py-2 text-xs font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-3 rounded-full border border-amber-300 bg-card px-4 py-2 text-xs font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-950/40"
           >
             {cacheRefreshing ? "Atualizando dados..." : "Atualizar dados"}
           </button>
@@ -3578,7 +3633,7 @@ function PrecosPageContent() {
       ) : (
         <>
           <div className="pricing-table-with-sticky adminty-table-card">
-          <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
+          <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5 dark:border-slate-700">
             <p className="text-xs text-slate-600 dark:text-slate-300">
               <span className="font-medium text-slate-800 dark:text-slate-100">{sortedListings.length}</span>
               {" anúncio(s) na página"}
@@ -3614,7 +3669,7 @@ function PrecosPageContent() {
               {totalPages > 1 && (
                 <>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400">Página {page}/{totalPages}</span>
-                  <div className="inline-flex items-center gap-px rounded border border-slate-200 bg-white p-px text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-800">
+                  <div className="table-pagination-group">
                     <button
                       type="button"
                       onClick={() => setPage(1)}
@@ -3784,7 +3839,7 @@ function PrecosPageContent() {
                 return (
                   <tr
                     key={`${listing.id}-${listing.variation_id ?? "item"}`}
-                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
+                    className="table-body-row"
                   >
                     <td
                       className={`p-2 text-center ${stickyColumns.has(0) ? "sticky-col" : ""}`}
@@ -3822,7 +3877,7 @@ function PrecosPageContent() {
                           onClick={() => handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
                           onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
                           title="Clique para copiar"
-                          className="cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100"
+                          className="pricing-cell-chip font-mono text-xs"
                         >
                           {copiedCell === `mlb-${listing.id}-${listing.variation_id ?? "n"}` ? (
                             <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
@@ -3874,7 +3929,7 @@ function PrecosPageContent() {
                           onClick={() => handleCopyToClipboard(primary, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
                           onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(primary, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
                           title={listing.sku}
-                          className="cursor-pointer select-none inline-flex items-center gap-1 rounded-md bg-slate-50 px-2 py-1 text-left hover:bg-slate-100"
+                          className="pricing-cell-chip inline-flex items-center gap-1 text-left"
                         >
                           {copiedCell === `sku-${listing.id}-${listing.variation_id ?? "n"}` ? (
                             <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
@@ -4187,7 +4242,7 @@ function PrecosPageContent() {
           aria-label="Filtros"
         >
           <div
-            className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded border border-slate-200 bg-white shadow-xl"
+            className="modal-panel-scroll"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
@@ -4204,7 +4259,7 @@ function PrecosPageContent() {
                 ✕
               </button>
             </div>
-            <form onSubmit={handleSearchSubmit} className="space-y-4 p-4">
+            <form onSubmit={handleFiltersApply} className="space-y-4 p-4">
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Buscar</label>
                 <input
@@ -4212,28 +4267,25 @@ function PrecosPageContent() {
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   placeholder="Título ou MLB…"
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">SKU</label>
                 <input
                   type="text"
-                  value={skuFilter}
-                  onChange={(e) => setSkuFilter(e.target.value)}
+                  value={draftSkuFilter}
+                  onChange={(e) => setDraftSkuFilter(e.target.value)}
                   placeholder="Filtrar por SKU…"
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input font-mono text-xs"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Status</label>
                 <select
-                  value={statusFilter}
-                  onChange={(e) => {
-                    setStatusFilter(e.target.value);
-                    setPage(1);
-                  }}
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  value={draftStatusFilter}
+                  onChange={(e) => setDraftStatusFilter(e.target.value)}
+                  className="input text-xs font-medium"
                 >
                   <option value="">Todos os status</option>
                   <option value="active">Ativo</option>
@@ -4248,12 +4300,11 @@ function PrecosPageContent() {
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Vínculo MLB → produto</label>
                 <select
-                  value={linkFilter}
-                  onChange={(e) => {
-                    setLinkFilter(e.target.value as "all" | "linked" | "unlinked");
-                    setPage(1);
-                  }}
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  value={draftLinkFilter}
+                  onChange={(e) =>
+                    setDraftLinkFilter(e.target.value as "all" | "linked" | "unlinked")
+                  }
+                  className="input text-xs font-medium"
                 >
                   <option value="all">Todos</option>
                   <option value="linked">Só vinculados</option>
@@ -4272,7 +4323,7 @@ function PrecosPageContent() {
                         className={`cursor-pointer rounded border px-2 py-1 text-xs ${
                           draftFilterTagIds.includes(t.id)
                             ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
-                            : "border-slate-200 bg-white text-slate-700"
+                            : "border-slate-200 bg-card text-slate-700 dark:border-slate-600 dark:text-slate-200"
                         }`}
                       >
                         <input
@@ -4290,11 +4341,8 @@ function PrecosPageContent() {
               <label className="flex cursor-pointer items-center gap-2" title="Exibe apenas anúncios com pelo menos 1 venda nos últimos 30 dias">
                 <input
                   type="checkbox"
-                  checked={onlyWithSales30d}
-                  onChange={(e) => {
-                    setOnlyWithSales30d(e.target.checked);
-                    setPage(1);
-                  }}
+                  checked={draftOnlyWithSales30d}
+                  onChange={(e) => setDraftOnlyWithSales30d(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
                 />
                 <span className="text-xs text-slate-700">Só com vendas (30d)</span>
@@ -4305,11 +4353,8 @@ function PrecosPageContent() {
               >
                 <input
                   type="checkbox"
-                  checked={semPromocao}
-                  onChange={(e) => {
-                    setSemPromocao(e.target.checked);
-                    setPage(1);
-                  }}
+                  checked={draftSemPromocao}
+                  onChange={(e) => setDraftSemPromocao(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
                 />
                 <span className="text-xs text-slate-700">Sem promoção</span>
@@ -4320,11 +4365,8 @@ function PrecosPageContent() {
               >
                 <input
                   type="checkbox"
-                  checked={foraDescontoMin5Ml}
-                  onChange={(e) => {
-                    setForaDescontoMin5Ml(e.target.checked);
-                    setPage(1);
-                  }}
+                  checked={draftForaDescontoMin5Ml}
+                  onChange={(e) => setDraftForaDescontoMin5Ml(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
                 />
                 <span className="text-xs text-slate-700">Desconto &lt; 5% (promo ML)</span>
@@ -4335,11 +4377,8 @@ function PrecosPageContent() {
               >
                 <input
                   type="checkbox"
-                  checked={semPromoMlAtiva}
-                  onChange={(e) => {
-                    setSemPromoMlAtiva(e.target.checked);
-                    setPage(1);
-                  }}
+                  checked={draftSemPromoMlAtiva}
+                  onChange={(e) => setDraftSemPromoMlAtiva(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
                 />
                 <span className="text-xs text-slate-700">Sem Promo ML ativa</span>
@@ -4359,8 +4398,10 @@ function PrecosPageContent() {
                     <button
                       key={value || "all"}
                       type="button"
-                      onClick={() => setProfitFilter(value as "" | "high" | "medium" | "low" | "negative")}
-                      className={`btn btn-mini ${profitFilter === value ? "btn-primary" : "btn-outline-secondary"}`}
+                      onClick={() =>
+                        setDraftProfitFilter(value as "" | "high" | "medium" | "low" | "negative")
+                      }
+                      className={`btn btn-mini ${draftProfitFilter === value ? "btn-primary" : "btn-outline-secondary"}`}
                     >
                       {label}
                     </button>

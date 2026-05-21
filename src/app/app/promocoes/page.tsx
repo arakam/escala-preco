@@ -1049,7 +1049,7 @@ function PromocoesContent() {
   if ((loading || !accountsLoaded) && safeFlatRows.length === 0 && !refreshing) {
     return (
       <div className="adminty-promocoes-page space-y-5">
-        <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+        <div className="table-page-shell p-4">
           <p className="text-sm text-slate-500 dark:text-slate-400">Carregando…</p>
         </div>
       </div>
@@ -1061,10 +1061,10 @@ function PromocoesContent() {
 
   return (
     <div className="adminty-promocoes-page space-y-5">
-      <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+      <div className="table-page-shell">
         <SmartLoaderOverlay open={loaderOpen} messages={[...loaderMessages]} />
 
-        <div className="border-b border-slate-200 bg-white px-3 pt-3">
+        <div className="table-page-toolbar">
           <div className="flex flex-wrap items-end justify-between gap-2">
           <div className="flex flex-wrap items-end gap-1">
             <button
@@ -1120,7 +1120,7 @@ function PromocoesContent() {
                   params.set("accountId", v);
                   router.replace(`${pathname}?${params.toString()}`, { scroll: false });
                 }}
-                className="h-8 min-w-[10rem] rounded border border-slate-200 bg-white px-2 text-xs text-slate-800 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                className="input h-8 min-w-[10rem] px-2 text-xs"
               >
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -1134,7 +1134,7 @@ function PromocoesContent() {
         </div>
 
         {promoTab === "como-funciona" && (
-          <div className="max-h-[min(70vh,720px)] overflow-y-auto border-b border-slate-100 bg-white px-4 py-4 dark:bg-slate-900/20">
+          <div className="table-page-filters">
             <PromocoesHelpContent />
           </div>
         )}
@@ -1193,7 +1193,7 @@ function PromocoesContent() {
                     params.set("accountId", v);
                     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
                   }}
-                  className="h-8 min-w-[10rem] rounded border border-slate-200 bg-white px-2 text-xs text-slate-800 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                  className="input h-8 min-w-[10rem] px-2 text-xs"
                 >
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -1206,20 +1206,20 @@ function PromocoesContent() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px] text-slate-600">
-            <span className="font-semibold text-slate-700">Filtros:</span>
+        <div className="pricing-filter-bar">
+          <div className="pricing-filter-bar-meta flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px]">
+            <span className="pricing-filter-bar-label">Filtros:</span>
             {appliedPromoFilterLabels.length > 0 ? (
               appliedPromoFilterLabels.map((label, idx) => (
                 <span
                   key={`${idx}-${label}`}
-                  className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  className="table-mini-control"
                 >
                   {label}
                 </span>
               ))
             ) : (
-              <span className="text-slate-500">Nenhum filtro aplicado</span>
+              <span className="text-slate-500 dark:text-slate-400">Nenhum filtro aplicado</span>
             )}
             {appliedPromoFilterLabels.length > 0 && (
               <button
@@ -1251,7 +1251,7 @@ function PromocoesContent() {
                 <ClockIcon />
               </button>
               {snapshotInfoOpen && (
-                <div className="absolute right-0 top-9 z-30 w-72 rounded border border-slate-200 bg-white px-3 py-2 text-left text-[11px] leading-snug text-slate-700 shadow-lg dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                <div className="absolute right-0 top-9 z-30 w-72 rounded border border-slate-200 bg-card px-3 py-2 text-left text-[11px] leading-snug text-slate-700 shadow-lg dark:border-slate-600 dark:text-slate-200">
                   {snapshotAt ? (
                     <>
                       <span className="font-semibold text-slate-800 dark:text-slate-100">Última sincronização ML</span>
@@ -1386,7 +1386,7 @@ function PromocoesContent() {
             {totalPages > 1 && (
               <>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">Página {page}/{totalPages}</span>
-                <div className="inline-flex items-center gap-px rounded border border-slate-200 bg-white p-px text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-800">
+                <div className="table-pagination-group">
                   <button
                     type="button"
                     onClick={() => setPage(1)}
@@ -1552,7 +1552,7 @@ function PromocoesContent() {
                   className={
                     alert
                       ? "border-b border-slate-100 bg-amber-50/90 hover:bg-primary/5 dark:border-slate-700 dark:bg-amber-950/25 dark:hover:bg-primary/10"
-                      : "border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
+                      : "table-body-row"
                   }
                 >
                   <td {...cell(0, "p-2 text-center")}>
@@ -1588,7 +1588,7 @@ function PromocoesContent() {
                       <img
                         src={r.thumbnail.replace(/^http:/, "https:")}
                         alt=""
-                        className="h-10 w-10 rounded-lg border border-slate-100 bg-slate-50 object-contain"
+                        className="h-10 w-10 rounded-lg border border-slate-100 bg-slate-100 object-contain dark:border-slate-600 dark:bg-slate-800/50"
                       />
                     ) : (
                       <span className="text-xs text-slate-400">—</span>
@@ -1606,7 +1606,7 @@ function PromocoesContent() {
                         handleCopyToClipboard(String(r.item_id), `mlb-${r.rowKey ?? String(r.item_id)}`)
                       }
                       title="Clique para copiar"
-                      className="cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100"
+                      className="pricing-cell-chip font-mono text-xs"
                     >
                       {copiedCell === `mlb-${r.rowKey ?? String(r.item_id)}` ? (
                         <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
@@ -1803,7 +1803,7 @@ function PromocoesContent() {
           aria-label="Filtros de promoções"
         >
           <div
-            className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded border border-slate-200 bg-white shadow-xl dark:border-slate-600 dark:bg-slate-800"
+            className="modal-panel-scroll"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
@@ -1828,7 +1828,7 @@ function PromocoesContent() {
                   value={draftSearch}
                   onChange={(e) => setDraftSearch(e.target.value)}
                   placeholder="Título ou MLB…"
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                  className="input"
                 />
               </div>
               <div>
@@ -1838,7 +1838,7 @@ function PromocoesContent() {
                 <select
                   value={draftLinkFilter}
                   onChange={(e) => setDraftLinkFilter(e.target.value as PromoLinkFilter)}
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  className="input"
                 >
                   <option value="all">Todos</option>
                   <option value="linked">Só vinculados</option>
@@ -1857,7 +1857,7 @@ function PromocoesContent() {
                         className={`cursor-pointer rounded border px-2 py-1 text-xs ${
                           draftFilterTagIds.includes(t.id)
                             ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
-                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                            : "border-slate-200 bg-card text-slate-700 dark:border-slate-600 dark:text-slate-200"
                         }`}
                       >
                         <input
@@ -1927,7 +1927,7 @@ function PromocoesContent() {
                 <select
                   value={draftPtypeFilter}
                   onChange={(e) => setDraftPtypeFilter(e.target.value)}
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-[11px] font-medium text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  className="input text-[11px] font-medium"
                 >
                   <option value="">Todos os tipos</option>
                   {ML_PROMOTION_TYPE_CATALOG.map((e) => (
@@ -1944,7 +1944,7 @@ function PromocoesContent() {
                 <select
                   value={draftCampFilter}
                   onChange={(e) => setDraftCampFilter(e.target.value as PromoCampaignPhase)}
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  className="input"
                 >
                   <option value="">Todas</option>
                   <option value="in">Em vigência</option>
@@ -2040,7 +2040,7 @@ export default function PromocoesPage() {
     <OnboardingGate required="catalog">
       <Suspense
         fallback={
-          <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-8 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+          <div className="table-page-shell p-8">
             <p className="text-sm text-slate-500">Carregando…</p>
           </div>
         }

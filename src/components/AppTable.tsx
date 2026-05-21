@@ -46,7 +46,7 @@ export function AppTable({
         <div className="mb-3 text-sm text-secondary dark:text-slate-400">{summary}</div>
       )}
       <div
-        className="w-full overflow-x-auto overflow-y-auto rounded-app border border-stroke bg-white shadow-card dark:border-slate-700 dark:bg-slate-800"
+        className="w-full overflow-x-auto overflow-y-auto rounded-app border border-stroke bg-card shadow-card dark:border-slate-700"
         style={maxHeight ? { maxHeight } : undefined}
       >
         <table className={tableClasses} style={tableStyle}>

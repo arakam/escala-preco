@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { isDevEnvironment } from "@/lib/dev-only";
 import { aggregateSales30dFromDb } from "@/lib/mercadolivre/orders-store";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import {
@@ -10,13 +9,9 @@ import {
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * GET /api/dev/sales — diagnóstico de vendas persistidas (apenas development).
+ * GET /api/sales — vendas persistidas (pedidos, agregado 30d, lucro por linha).
  */
 export async function GET(req: NextRequest) {
-  if (!isDevEnvironment()) {
-    return NextResponse.json({ error: "Não disponível" }, { status: 404 });
-  }
-
   const supabase = await createClient();
   const {
     data: { user },
@@ -34,7 +29,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Conta ML não encontrada" }, { status: 404 });
   }
 
-  const limit = Math.min(100, Math.max(1, parseInt(req.nextUrl.searchParams.get("limit") || "30", 10)));
+  const limit = Math.min(500, Math.max(1, parseInt(req.nextUrl.searchParams.get("limit") || "200", 10)));
 
   const { data: syncState } = await supabase
     .from("ml_sales_sync_state")
@@ -45,14 +40,14 @@ export async function GET(req: NextRequest) {
   const { data: recentOrders, error: ordersErr } = await supabase
     .from("ml_orders")
     .select(
-      "ml_order_id, status, date_created, synced_at, shipping_id, shipping_cost_sender, marketplace_fee"
+      "ml_order_id, status, date_created, synced_at, shipping_id, shipping_cost_sender, marketplace_fee, tags"
     )
     .eq("account_id", account.id)
     .order("date_created", { ascending: false })
     .limit(limit);
 
   if (ordersErr) {
-    console.error("[dev/sales] orders", ordersErr);
+    console.error("[sales] orders", ordersErr);
     return NextResponse.json({ error: "Erro ao listar pedidos" }, { status: 500 });
   }
 
@@ -66,7 +61,7 @@ export async function GET(req: NextRequest) {
       .in("ml_order_id", orderIds)
       .order("line_index", { ascending: true });
     if (itemsErr) {
-      console.error("[dev/sales] items", itemsErr);
+      console.error("[sales] items", itemsErr);
     } else {
       items = (itemRows ?? []).map((row) => ({
         ml_order_id: String(row.ml_order_id),
@@ -167,7 +162,7 @@ export async function GET(req: NextRequest) {
           orderMetaById
         );
       } catch (e) {
-        console.error("[dev/sales] profit enrichment", e);
+        console.error("[sales] profit enrichment", e);
         profit_calc_note = "Erro ao calcular lucro das linhas";
       }
     } else {

@@ -247,9 +247,8 @@ body {
 /* Colunas congeladas (sticky) na tabela de preços — position/left/largura/z-index vêm do inline (page.tsx) */
 .pricing-table-with-sticky .app-table thead th.sticky-col {
   box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.08);
-  background: #f8fafc;
+  background: var(--card-bg);
 }
-.dark .pricing-table-with-sticky .app-table thead th.sticky-col { background: #1e293b; }
 
 /* Colunas fixas no cabeçalho dentro do cartão Adminty (mesmo tom do degradê da tabela) */
 .adminty-table-card.pricing-table-with-sticky .app-table thead th.sticky-col {
@@ -263,11 +262,68 @@ body {
 
 .pricing-table-with-sticky .app-table tbody td.sticky-col {
   box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.06);
-  background: #fff;
+  background: var(--card-bg);
 }
-.pricing-table-with-sticky .app-table tbody tr:hover td.sticky-col { background: #f8fafc; }
-.dark .pricing-table-with-sticky .app-table tbody td.sticky-col { background: var(--card-bg); }
+.pricing-table-with-sticky .app-table tbody tr:hover td.sticky-col { background: #f1f5f9; }
 .dark .pricing-table-with-sticky .app-table tbody tr:hover td.sticky-col { background: #334155; }
+
+/* ========== Table page shell (grids de Preços, Produtos, Anúncios, etc.) ========== */
+.table-page-shell {
+  @apply overflow-hidden rounded border border-slate-200/90 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:border-slate-700;
+}
+.table-page-toolbar {
+  @apply border-b border-slate-200 bg-card px-3 pt-3 dark:border-slate-700;
+}
+.table-page-filters {
+  @apply max-h-[min(70vh,720px)] overflow-y-auto border-b border-slate-100 bg-card px-4 py-4 dark:border-slate-700 dark:bg-slate-900/30;
+}
+.table-body-row {
+  @apply border-b border-slate-100 bg-slate-50/80 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10;
+}
+.table-mini-control {
+  @apply rounded border border-slate-200 bg-card px-2 py-1 text-[11px] text-slate-700 dark:border-slate-600 dark:text-slate-200;
+}
+.table-pagination-group {
+  @apply inline-flex items-center gap-px rounded border border-slate-200 bg-card p-px text-[11px] shadow-sm dark:border-slate-600;
+}
+.table-action-bar {
+  @apply flex flex-wrap items-center justify-between gap-3 rounded border border-slate-200 bg-card p-3 shadow-sm dark:border-slate-600;
+}
+.modal-panel {
+  @apply overflow-hidden rounded border border-slate-200 bg-card shadow-xl dark:border-slate-600;
+}
+.modal-panel-scroll {
+  @apply max-h-[85vh] w-full max-w-lg overflow-y-auto rounded border border-slate-200 bg-card shadow-xl dark:border-slate-600;
+}
+.sticky-col-surface {
+  @apply sticky z-[5] bg-card shadow-[2px_0_5px_rgba(15,23,42,0.12)];
+}
+
+/* Tabelas: barra de filtros, chips (MLB/SKU) e inputs inline */
+.pricing-filter-bar,
+.table-filter-bar {
+  @apply flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/70;
+}
+.pricing-filter-bar .pricing-filter-bar-label,
+.table-filter-bar .pricing-filter-bar-label {
+  @apply font-semibold text-slate-700 dark:text-slate-200;
+}
+.pricing-filter-bar .pricing-filter-bar-meta,
+.table-filter-bar .pricing-filter-bar-meta {
+  @apply text-slate-600 dark:text-slate-300;
+}
+.pricing-cell-chip,
+.table-cell-chip {
+  @apply cursor-pointer select-none rounded-md bg-slate-100 px-2 py-1 text-slate-800 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600;
+}
+.pricing-inline-input,
+.table-inline-input {
+  @apply rounded border border-gray-300 bg-white text-right text-sm tabular-nums text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100;
+}
+.pricing-inline-input--dirty,
+.table-inline-input--dirty {
+  @apply border-amber-400 bg-amber-50 text-amber-950 dark:border-amber-600 dark:bg-amber-950/50 dark:text-amber-100;
+}
 
 /* ========== Tabs ========== */
 .tabs-list {
@@ -373,56 +429,7 @@ body {
 }
 
 .adminty-table-card .app-table tbody tr:nth-child(odd) {
-  background-color: #fff;
-}
-.adminty-table-card .app-table tbody tr:nth-child(even) {
-  background-color: #f8fafc;
-}
-.adminty-table-card .app-table tbody tr:hover {
-  background-color: rgba(13, 110, 253, 0.06);
-}
-.dark .adminty-table-card .app-table tbody tr:nth-child(odd) {
   background-color: var(--card-bg);
-}
-.dark .adminty-table-card .app-table tbody tr:nth-child(even) {
-  background-color: rgba(30, 41, 59, 0.6);
-}
-.dark .adminty-table-card .app-table tbody tr:hover {
-  background-color: rgba(37, 99, 235, 0.14);
-}
-
-/* ========== Preview estilo Adminty (tela Anúncios) ========== */
-.adminty-shell {
-  --adminty-sidebar: #404e67;
-  --adminty-sidebar-deep: #374056;
-  --adminty-accent: #01a9ac;
-  --adminty-accent-dark: #018589;
-  --adminty-page-bg: #ecf0f5;
-}
-
-.adminty-table-card .app-table thead {
-  background: linear-gradient(180deg, #2f80ed 0%, #0d6efd 48%, #0b5ed7 100%);
-  box-shadow: 0 1px 0 0 rgba(0, 0, 0, 0.08);
-}
-.adminty-table-card .app-table thead tr {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-}
-.adminty-table-card .app-table thead th {
-  color: #fff;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 0.65rem;
-}
-.dark .adminty-table-card .app-table thead {
-  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
-}
-.dark .adminty-table-card .app-table thead th {
-  color: #eff6ff;
-}
-
-.adminty-table-card .app-table tbody tr:nth-child(odd) {
-  background-color: #fff;
 }
 .adminty-table-card .app-table tbody tr:nth-child(even) {
   background-color: #f8fafc;

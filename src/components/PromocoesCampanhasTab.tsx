@@ -341,7 +341,7 @@ export function PromocoesCampanhasTab({ accountId, onOpenItemInLista }: Props) {
               onClick={() => setCategoryInUrl(cat.id)}
               className={
                 active
-                  ? "rounded-t-md border border-b-0 border-slate-200 bg-white px-2.5 py-2 text-[12px] font-semibold text-[#0d6efd] shadow-sm dark:border-slate-600 dark:bg-slate-800"
+                  ? "rounded-t-md border border-b-0 border-slate-200 bg-card px-2.5 py-2 text-[12px] font-semibold text-[#0d6efd] shadow-sm dark:border-slate-600"
                   : "rounded-t-md px-2.5 py-2 text-[12px] font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-100"
               }
             >
@@ -390,7 +390,7 @@ export function PromocoesCampanhasTab({ accountId, onOpenItemInLista }: Props) {
                 setSelectedId(e.target.value);
                 setJoinFeedback(null);
               }}
-              className="w-full max-w-2xl rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              className="input max-w-2xl"
             >
               {campaigns.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -468,7 +468,7 @@ export function PromocoesCampanhasTab({ accountId, onOpenItemInLista }: Props) {
                       e.target.value as "" | "candidate" | "started" | "pending"
                     )
                   }
-                  className="h-8 rounded border border-slate-200 bg-white px-2 text-xs dark:border-slate-600 dark:bg-slate-800"
+                  className="input h-8 px-2 text-xs"
                 >
                   <option value="">Ativos no ML (padrão)</option>
                   <option value="candidate">Candidatos</option>

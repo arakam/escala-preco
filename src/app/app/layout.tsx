@@ -13,9 +13,11 @@ import {
   AdmintyIconMenu,
   AdmintyIconPromo,
   AdmintyIconSettings,
+  AdmintyIconShoppingCart,
   AdmintyIconTag,
 } from "@/components/adminty-nav-icons";
 import { OnboardingProvider, useOnboarding } from "@/contexts/onboarding-context";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { isPrecoAtacadoAllowed, navBlockedHref } from "@/lib/onboarding-gating";
 
 const admintyUiFont = Open_Sans({
@@ -25,7 +27,6 @@ const admintyUiFont = Open_Sans({
 });
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
-const IS_NEXT_DEV = process.env.NODE_ENV === "development";
 const ADMINTY_SIDEBAR_COLLAPSED_KEY = "escalapreco_adminty_sidebar_collapsed";
 
 interface MLAccount {
@@ -75,15 +76,29 @@ function navItemActive(pathname: string | null, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+const APP_PAGE_TITLES: Record<string, string> = {
+  anuncios: "Anúncios",
+  atacado: "Atacado",
+  produtos: "Produtos",
+  precos: "Preço",
+  promocoes: "Promoções",
+  configuracao: "Configuração",
+  vendas: "Vendas",
+  historico: "Histórico",
+};
+
+function appPageSection(pathname: string | null): string | null {
+  if (!pathname) return null;
+  const parts = pathname.split("?")[0]?.split("#")[0]?.replace(/\/$/, "").split("/").filter(Boolean) ?? [];
+  if (parts[0] !== "app") return null;
+  if (parts[1] === "dev") return parts[2] ?? null;
+  return parts[1] ?? null;
+}
+
 function appPageTitle(pathname: string | null) {
-  if (!pathname || pathname === "/app") return "Início";
-  if (pathname.startsWith("/app/anuncios")) return "Anúncios";
-  if (pathname.startsWith("/app/atacado")) return "Atacado";
-  if (pathname.startsWith("/app/produtos")) return "Produtos";
-  if (pathname.startsWith("/app/precos")) return "Preço";
-  if (pathname.startsWith("/app/promocoes")) return "Promoções";
-  if (pathname.startsWith("/app/configuracao")) return "Configuração";
-  if (pathname.startsWith("/app/dev/vendas")) return "Vendas";
+  if (!pathname || pathname === "/app" || pathname.startsWith("/app?")) return "Início";
+  const section = appPageSection(pathname);
+  if (section && APP_PAGE_TITLES[section]) return APP_PAGE_TITLES[section];
   return "Painel";
 }
 
@@ -341,14 +356,28 @@ function AdmintyDashboardShell({
               <span className={labelClass}>Promoções</span>
             </Link>
           )}
-          {IS_NEXT_DEV && (
+          {allowPrecoAtacado ? (
             <Link
-              href="/app/dev/vendas"
+              href="/app/vendas"
               onClick={() => setIsMenuOpen(false)}
-              className={sidebarLink(navItemActive(pathname, "/app/dev/vendas"), false)}
+              className={sidebarLink(navItemActive(pathname, "/app/vendas"), false)}
               title={sidebarCollapsed ? "Vendas" : undefined}
             >
-              <AdmintyIconCurrency />
+              <AdmintyIconShoppingCart />
+              <span className={labelClass}>Vendas</span>
+            </Link>
+          ) : (
+            <Link
+              href={precoAtacadoBlocked}
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(false, true)}
+              title={
+                sidebarCollapsed
+                  ? "Vendas — disponível após sincronizar"
+                  : "Disponível após sincronizar anúncios e importar produtos."
+              }
+            >
+              <AdmintyIconShoppingCart />
               <span className={labelClass}>Vendas</span>
             </Link>
           )}
@@ -403,11 +432,14 @@ function AdmintyDashboardShell({
               </p>
             </div>
           </div>
-          {accountLabel && (
-            <span className="hidden max-w-[200px] truncate rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[13px] font-medium text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 md:inline-block">
-              {accountLabel}
-            </span>
-          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {accountLabel && (
+              <span className="hidden max-w-[200px] truncate rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[13px] font-medium text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 md:inline-block">
+                {accountLabel}
+              </span>
+            )}
+            <ThemeToggle />
+          </div>
         </header>
 
         <main className="flex-1 px-3 py-4 sm:px-5 sm:py-6" style={{ color: "var(--body-text)" }}>

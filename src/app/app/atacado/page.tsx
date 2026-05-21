@@ -578,11 +578,11 @@ function AtacadoPageContent() {
     if (headerMenuColIndex !== colIndex) return null;
     const pinned = stickyColumns.has(colIndex);
     return (
-      <div className="absolute left-1 top-full z-50 mt-1 w-48 overflow-hidden rounded border border-slate-200 bg-white py-1 text-[12px] normal-case tracking-normal text-slate-700 shadow-xl">
+      <div className="absolute left-1 top-full z-50 mt-1 w-48 overflow-hidden rounded border border-slate-200 bg-card py-1 text-[12px] normal-case tracking-normal text-slate-700 shadow-xl dark:border-slate-600 dark:text-slate-200">
         <button
           type="button"
           onClick={() => toggleStickyColumn(colIndex)}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
         >
           <ColumnHeaderMenuPinIcon />
           {pinned ? "Descongelar coluna" : "Congelar coluna"}
@@ -645,7 +645,7 @@ function AtacadoPageContent() {
         {stickyTd(
           0,
           "p-2",
-          <button type="button" onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)} title="Clique para copiar" className="font-mono text-fg hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
+          <button type="button" onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)} title="Clique para copiar" className="pricing-cell-chip font-mono text-left -mx-1 py-0.5">
             {copiedCell === `${rowKey(r)}-mlb` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.item_id}
           </button>
         )}
@@ -653,7 +653,7 @@ function AtacadoPageContent() {
           1,
           "p-2",
           r.user_product_id ? (
-            <button type="button" onClick={() => copyToClipboard(r.user_product_id ?? "", `${rowKey(r)}-mlbu`)} title="Clique para copiar" className="font-mono text-fg hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer">
+            <button type="button" onClick={() => copyToClipboard(r.user_product_id ?? "", `${rowKey(r)}-mlbu`)} title="Clique para copiar" className="pricing-cell-chip font-mono text-left -mx-1 py-0.5">
               {copiedCell === `${rowKey(r)}-mlbu` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.user_product_id}
             </button>
           ) : (
@@ -718,7 +718,7 @@ function AtacadoPageContent() {
                   value={minQtyStr}
                   onChange={(e) => setEditingMinQty((prev) => ({ ...prev, [minInputKey]: e.target.value }))}
                   onBlur={(e) => commitMinQtyBlur(r, i, e.target.value)}
-                  className={`w-16 rounded border px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : "border-gray-200"}`}
+                  className={`pricing-inline-input w-16 px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : ""}`}
                 />
               )}
               {stickyTd(
@@ -740,7 +740,7 @@ function AtacadoPageContent() {
                       return next;
                     });
                   }}
-                  className={`w-20 rounded border px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : "border-gray-200"}`}
+                  className={`pricing-inline-input w-20 px-1 py-0.5 text-sm ${isInvalid ? "border-red-500" : ""}`}
                 />
               )}
             </React.Fragment>
@@ -1715,7 +1715,7 @@ function AtacadoPageContent() {
   if ((loadingRows || !accountsLoaded) && rows.length === 0) {
     return (
       <div className="adminty-atacado-page space-y-5">
-        <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+        <div className="table-page-shell p-4">
           <p className="text-sm text-slate-500 dark:text-slate-400">Carregando…</p>
         </div>
       </div>
@@ -1746,7 +1746,7 @@ function AtacadoPageContent() {
 
   return (
     <div className="adminty-atacado-page space-y-5">
-      <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+      <div className="table-page-shell">
         <SmartLoaderOverlay
         open={smartLoaderOpen}
         messages={atacadoRefetching ? [...atacadoLoaderMessages] : applyJob != null ? [...applyLoaderMessages] : [...atacadoLoaderMessages]}
@@ -1805,7 +1805,7 @@ function AtacadoPageContent() {
         )}
       </SmartLoaderOverlay>
 
-        <div className="border-b border-slate-200 bg-white px-3 pt-3">
+        <div className="table-page-toolbar">
           <div className="flex flex-wrap items-end gap-1">
             <button
               type="button"
@@ -1833,7 +1833,7 @@ function AtacadoPageContent() {
         </div>
 
         {atacadoTab === "como-funciona" && (
-          <div className="max-h-[min(70vh,720px)] overflow-y-auto border-b border-slate-100 bg-white px-4 py-4 dark:bg-slate-900/20">
+          <div className="table-page-filters">
             <AtacadoHelpContent />
           </div>
         )}
@@ -1957,20 +1957,20 @@ function AtacadoPageContent() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px] text-slate-600">
-            <span className="font-semibold text-slate-700">Filtros:</span>
+        <div className="pricing-filter-bar">
+          <div className="pricing-filter-bar-meta flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px]">
+            <span className="pricing-filter-bar-label">Filtros:</span>
             {appliedAtacadoFilterLabels.length > 0 ? (
               appliedAtacadoFilterLabels.map((label, idx) => (
                 <span
                   key={`${idx}-${label}`}
-                  className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                  className="table-mini-control"
                 >
                   {label}
                 </span>
               ))
             ) : (
-              <span className="text-slate-500">Nenhum filtro aplicado</span>
+              <span className="text-slate-500 dark:text-slate-400">Nenhum filtro aplicado</span>
             )}
             {appliedAtacadoFilterLabels.length > 0 && (
               <button
@@ -2058,7 +2058,7 @@ function AtacadoPageContent() {
             onClick={() => setBulkMinQtyModalOpen(false)}
           />
           <div
-            className="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-600 dark:bg-slate-800"
+            className="modal-panel relative w-full max-w-md p-6"
             role="dialog"
             aria-modal="true"
             aria-labelledby="bulk-minqty-title"
@@ -2126,7 +2126,7 @@ function AtacadoPageContent() {
             onClick={() => setBulkDiscountModalOpen(false)}
           />
           <div
-            className="relative max-h-[min(90vh,40rem)] w-full max-w-5xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-600 dark:bg-slate-800"
+            className="modal-panel relative max-h-[min(90vh,40rem)] w-full max-w-5xl overflow-y-auto p-6"
             role="dialog"
             aria-modal="true"
             aria-labelledby="bulk-discount-title"
@@ -2318,7 +2318,7 @@ function AtacadoPageContent() {
           aria-label="Importar CSV de atacado"
         >
           <div
-            className="max-h-[min(90vh,36rem)] w-full max-w-lg overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-600 dark:bg-slate-900"
+            className="modal-panel-scroll max-h-[min(90vh,36rem)] w-full max-w-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-600">
@@ -2401,7 +2401,7 @@ function AtacadoPageContent() {
                   {importResult.preview.map((pr) => (
                     <tr
                       key={pr.row}
-                      className={`border-t border-gray-100 ${pr.valid ? "bg-white" : "bg-red-50"}`}
+                      className={`border-t border-gray-100 dark:border-slate-700 ${pr.valid ? "bg-card" : "bg-red-50 dark:bg-red-950/30"}`}
                     >
                       <td className="p-2">{pr.row}</td>
                       <td className="p-2 font-mono text-fg">{pr.item_id || "—"}</td>
@@ -2460,7 +2460,7 @@ function AtacadoPageContent() {
               type="button"
               onClick={cancelImport}
               disabled={importConfirming}
-              className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-fg hover:bg-gray-50 disabled:opacity-50"
+              className="btn btn-secondary btn-sm disabled:opacity-50"
             >
               Cancelar
             </button>
@@ -2481,7 +2481,7 @@ function AtacadoPageContent() {
       ) : (
         <>
           <div className="pricing-table-with-sticky adminty-table-card">
-            <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
+            <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5 dark:border-slate-700">
               <p className="text-xs text-slate-600 dark:text-slate-300">
                 <span className="font-medium text-slate-800 dark:text-slate-100">{rows.length}</span>
                 {" linhas na página · total "}
@@ -2508,7 +2508,7 @@ function AtacadoPageContent() {
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">
                       Página {page}/{totalPages}
                     </span>
-                    <div className="inline-flex items-center gap-px rounded border border-slate-200 bg-white p-px text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-800">
+                    <div className="table-pagination-group">
                       <button
                         type="button"
                         onClick={() => setPage(1)}
@@ -2657,7 +2657,7 @@ function AtacadoPageContent() {
           aria-label="Filtros de atacado"
         >
           <div
-            className="w-full max-w-lg overflow-hidden rounded border border-slate-200 bg-white shadow-xl"
+            className="modal-panel w-full max-w-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
@@ -2668,7 +2668,7 @@ function AtacadoPageContent() {
               <button
                 type="button"
                 onClick={() => setFiltersModalOpen(false)}
-                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
                 aria-label="Fechar filtros"
               >
                 ✕
@@ -2682,7 +2682,7 @@ function AtacadoPageContent() {
                   value={draftMlb}
                   onChange={(e) => setDraftMlb(e.target.value)}
                   placeholder="ex: MLB1234567890"
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input font-mono text-xs"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -2692,7 +2692,7 @@ function AtacadoPageContent() {
                   value={draftMlbu}
                   onChange={(e) => setDraftMlbu(e.target.value)}
                   placeholder="ex: MLBU…"
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input font-mono text-xs"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -2702,7 +2702,7 @@ function AtacadoPageContent() {
                   value={draftTitle}
                   onChange={(e) => setDraftTitle(e.target.value)}
                   placeholder="Buscar no título…"
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -2712,7 +2712,7 @@ function AtacadoPageContent() {
                   value={draftSku}
                   onChange={(e) => setDraftSku(e.target.value)}
                   placeholder="Filtrar por SKU…"
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input font-mono text-xs"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -2720,7 +2720,7 @@ function AtacadoPageContent() {
                 <select
                   value={draftVariation}
                   onChange={(e) => setDraftVariation(e.target.value as "" | "com" | "sem")}
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input text-xs"
                 >
                   <option value="">Todas</option>
                   <option value="com">Com variação</option>
@@ -2732,7 +2732,7 @@ function AtacadoPageContent() {
                 <select
                   value={draftFilterExtra}
                   onChange={(e) => setDraftFilterExtra(e.target.value)}
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input text-xs"
                 >
                   <option value="">Nenhum</option>
                   <option value="mlbu">Só MLBU</option>
@@ -2763,7 +2763,7 @@ function AtacadoPageContent() {
                         className={`cursor-pointer rounded border px-2 py-1 text-xs ${
                           draftFilterTagIds.includes(t.id)
                             ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
-                            : "border-slate-200 bg-white text-slate-700"
+                            : "border-slate-200 bg-card text-slate-700 dark:border-slate-600 dark:text-slate-200"
                         }`}
                       >
                         <input
@@ -2833,7 +2833,7 @@ export default function AtacadoPage() {
       <Suspense
         fallback={
           <div className="adminty-atacado-page space-y-5">
-            <div className="overflow-hidden rounded border border-slate-200/90 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+            <div className="table-page-shell p-4">
               <p className="text-sm text-slate-500 dark:text-slate-400">Carregando…</p>
             </div>
           </div>

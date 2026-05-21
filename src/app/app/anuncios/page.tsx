@@ -537,7 +537,7 @@ function AnunciosPageContent() {
     if (!frozenColumns.includes(column)) return className;
     const stickyBase = header
       ? "sticky z-40 bg-[#0b5ed7] shadow-[2px_0_5px_rgba(15,23,42,0.18)]"
-      : "sticky z-[5] bg-white shadow-[2px_0_5px_rgba(15,23,42,0.12)] dark:bg-slate-800";
+      : "sticky-col-surface";
     return `${className} ${stickyBase}`;
   }
 
@@ -620,7 +620,7 @@ function AnunciosPageContent() {
 
   if (loading) {
     return (
-      <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="card p-6">
         <p className="text-slate-500">Carregando…</p>
       </div>
     );
@@ -642,8 +642,8 @@ function AnunciosPageContent() {
 
   return (
     <div className="adminty-anuncios-page space-y-5">
-      <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
-        <div className="border-b border-slate-200 bg-white px-3 pt-3">
+      <div className="table-page-shell">
+        <div className="table-page-toolbar">
           <div className="flex flex-wrap items-end gap-1">
             <button
               type="button"
@@ -671,7 +671,7 @@ function AnunciosPageContent() {
         </div>
 
         {anunciosTab === "como-funciona" && (
-          <div className="max-h-[min(70vh,720px)] overflow-y-auto border-b border-slate-100 bg-white px-4 py-4 dark:bg-slate-900/20">
+          <div className="table-page-filters">
             <AnunciosHelpContent />
           </div>
         )}
@@ -688,14 +688,14 @@ function AnunciosPageContent() {
             >
               {syncing ? "Sincronizando anúncios..." : "Importar / sincronizar todos"}
             </button>
-            <div className="flex flex-wrap items-center gap-2 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-sm">
+            <div className="flex flex-wrap items-center gap-2 rounded border border-slate-200 bg-card px-2 py-1.5 text-xs text-slate-700 shadow-sm dark:border-slate-600 dark:text-slate-200">
               <span className="text-[11px] font-medium text-slate-600">Incluir por MLB</span>
               <input
                 type="text"
                 value={singleMlb}
                 onChange={(e) => setSingleMlb(e.target.value)}
                 placeholder="MLB123456789"
-                className="w-28 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-mono text-slate-800 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                className="pricing-inline-input w-28 px-2 py-1 text-[11px] font-mono"
               />
               <button
                 type="button"
@@ -709,17 +709,17 @@ function AnunciosPageContent() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px] text-slate-600">
-            <span className="font-semibold text-slate-700">Filtros:</span>
+        <div className="pricing-filter-bar">
+          <div className="pricing-filter-bar-meta flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px]">
+            <span className="pricing-filter-bar-label">Filtros:</span>
             {appliedFilters.length > 0 ? (
               appliedFilters.map((filter) => (
-                <span key={filter} className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700">
+                <span key={filter} className="table-mini-control">
                   {filter}
                 </span>
               ))
             ) : (
-              <span className="text-slate-500">Nenhum filtro aplicado</span>
+              <span className="text-slate-500 dark:text-slate-400">Nenhum filtro aplicado</span>
             )}
             {appliedFilters.length > 0 && (
             <button
@@ -836,7 +836,7 @@ function AnunciosPageContent() {
                 {totalPages > 1 && (
                   <>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">Página {page}/{totalPages}</span>
-                  <div className="inline-flex items-center gap-px rounded border border-slate-200 bg-white p-px text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-800">
+                  <div className="table-pagination-group">
                     <button
                       type="button"
                       onClick={() => setPage(1)}
@@ -933,7 +933,7 @@ function AnunciosPageContent() {
                       title="Clique para copiar"
                       className={frozenCellClass(
                         "item_id",
-                        "cursor-pointer select-none rounded-md bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700"
+                        "pricing-cell-chip font-mono text-xs"
                       )}
                       style={frozenCellStyle("item_id")}
                     >
@@ -983,7 +983,7 @@ function AnunciosPageContent() {
                             ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
                             : item.status === "paused"
                               ? "bg-amber-50 text-amber-800 ring-1 ring-amber-100"
-                              : "bg-slate-50 text-slate-700 ring-1 ring-slate-100"
+                              : "bg-slate-100 text-slate-700 ring-1 ring-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:ring-slate-600"
                         }`}
                       >
                         {item.status ?? "—"}
@@ -1074,7 +1074,7 @@ function AnunciosPageContent() {
           aria-label="Filtros de anúncios"
         >
           <div
-            className="w-full max-w-lg overflow-hidden rounded border border-slate-200 bg-white shadow-xl"
+            className="modal-panel w-full max-w-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
@@ -1085,7 +1085,7 @@ function AnunciosPageContent() {
               <button
                 type="button"
                 onClick={() => setFiltersModalOpen(false)}
-                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
                 aria-label="Fechar filtros"
               >
                 ✕
@@ -1102,7 +1102,7 @@ function AnunciosPageContent() {
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   placeholder="Título, MLB ou família…"
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input"
                 />
               </div>
 
@@ -1117,7 +1117,7 @@ function AnunciosPageContent() {
                       setStatusFilter(e.target.value);
                       setPage(1);
                     }}
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                    className="input"
                   >
                     <option value="">Todos os status</option>
                     <option value="active">Ativo</option>
@@ -1136,7 +1136,7 @@ function AnunciosPageContent() {
                       setListingTypeFilter(e.target.value);
                       setPage(1);
                     }}
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                    className="input"
                   >
                     <option value="">Todos os tipos</option>
                     {LISTING_TYPE_FILTER_IDS.map((id) => (
@@ -1157,12 +1157,12 @@ function AnunciosPageContent() {
                     value={mlbuCodeInput}
                     onChange={(e) => setMlbuCodeInput(e.target.value)}
                     placeholder="ex: MLAU123"
-                    className="w-full rounded border border-slate-200 bg-white px-3 py-2 font-mono text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                    className="input font-mono"
                   />
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <label className="flex items-center gap-2 rounded border border-slate-200 bg-card px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200">
                 <input
                   type="checkbox"
                   checked={mlbuOnly}

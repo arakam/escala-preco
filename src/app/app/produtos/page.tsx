@@ -792,8 +792,8 @@ function ProdutosPageContent() {
 
   return (
     <div className="adminty-produtos-page space-y-5">
-      <div className="overflow-hidden rounded border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
-        <div className="border-b border-slate-200 bg-white px-3 pt-3">
+      <div className="table-page-shell">
+        <div className="table-page-toolbar">
           <div className="flex flex-wrap items-end gap-1">
             <button
               type="button"
@@ -935,20 +935,20 @@ function ProdutosPageContent() {
         </div>
 
         {(viewMode === "products" || viewMode === "stats") && (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px] text-slate-600">
-              <span className="font-semibold text-slate-700">Filtros:</span>
+          <div className="pricing-filter-bar">
+            <div className="pricing-filter-bar-meta flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px]">
+              <span className="pricing-filter-bar-label">Filtros:</span>
               {appliedListFilters.length > 0 ? (
                 appliedListFilters.map((label, idx) => (
                   <span
                     key={`${idx}-${label}`}
-                    className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                    className="table-mini-control"
                   >
                     {label}
                   </span>
                 ))
               ) : (
-                <span className="text-slate-500">Nenhum filtro aplicado</span>
+                <span className="text-slate-500 dark:text-slate-400">Nenhum filtro aplicado</span>
               )}
               {appliedListFilters.length > 0 && (
                 <button
@@ -1111,7 +1111,7 @@ function ProdutosPageContent() {
                     {tagsTabList.map((tag) => (
                       <tr
                         key={tag.id}
-                        className="border-b border-slate-100 bg-white/50 hover:bg-primary/5"
+                        className="table-body-row"
                       >
                         <td className="p-2">
                           {editingTagId === tag.id ? (
@@ -1201,7 +1201,7 @@ function ProdutosPageContent() {
               {unregisteredSkus.map((item) => (
                 <div
                   key={item.sku}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-600 dark:bg-slate-800/40"
+                  className="table-action-bar"
                 >
                   <div className="min-w-0 flex-1">
                     <span className="font-mono text-sm font-semibold text-slate-800 dark:text-slate-100">{item.sku}</span>
@@ -1257,7 +1257,7 @@ function ProdutosPageContent() {
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">
                       Página {page}/{totalPages}
                     </span>
-                    <div className="inline-flex items-center gap-px rounded border border-slate-200 bg-white p-px text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-800">
+                    <div className="table-pagination-group">
                       <button
                         type="button"
                         onClick={() => setPage(1)}
@@ -1328,7 +1328,7 @@ function ProdutosPageContent() {
                 {products.map((product) => (
                   <tr
                     key={product.id}
-                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
+                    className="table-body-row dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
                   >
                     <td className="p-2 font-mono text-xs text-slate-700 dark:text-slate-200">{product.sku}</td>
                     <td className="max-w-[240px] p-2" title={product.title}>
@@ -1430,7 +1430,7 @@ function ProdutosPageContent() {
                     <span className="text-[11px] text-slate-500 dark:text-slate-400">
                       Página {page}/{totalPages}
                     </span>
-                    <div className="inline-flex items-center gap-px rounded border border-slate-200 bg-white p-px text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-800">
+                    <div className="table-pagination-group">
                       <button
                         type="button"
                         onClick={() => setPage(1)}
@@ -1498,7 +1498,7 @@ function ProdutosPageContent() {
                 {stats.map((stat) => (
                   <tr
                     key={stat.product_id}
-                    className="border-b border-slate-100 bg-white/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
+                    className="table-body-row dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10"
                   >
                     <td className="p-2 font-mono text-xs text-slate-700 dark:text-slate-200">{stat.sku}</td>
                     <td className="max-w-[200px] p-2" title={stat.title}>
@@ -1576,7 +1576,7 @@ function ProdutosPageContent() {
                   {opRows.map((r) => (
                     <tr
                       key={r.category_key}
-                      className="border-b border-slate-100 bg-white/50 dark:border-slate-700 dark:bg-slate-800/40"
+                      className="table-body-row"
                     >
                       <td className="p-2 text-sm font-medium text-slate-900 dark:text-slate-50">{r.label}</td>
                       <td className="max-w-md p-2 text-xs text-slate-600 dark:text-slate-400">{r.examples}</td>
@@ -1661,7 +1661,7 @@ function ProdutosPageContent() {
                   {taxRows.map((r) => (
                     <tr
                       key={r.category_key}
-                      className="border-b border-slate-100 bg-white/50 dark:border-slate-700 dark:bg-slate-800/40"
+                      className="table-body-row"
                     >
                       <td className="p-2 text-sm font-medium text-slate-900 dark:text-slate-50">{r.label}</td>
                       <td className="max-w-md p-2 text-xs text-slate-600 dark:text-slate-400">{r.examples}</td>
@@ -1759,7 +1759,7 @@ function ProdutosPageContent() {
           aria-label="Filtros"
         >
           <div
-            className="w-full max-w-lg overflow-hidden rounded border border-slate-200 bg-white shadow-xl"
+            className="modal-panel w-full max-w-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
@@ -1772,7 +1772,7 @@ function ProdutosPageContent() {
               <button
                 type="button"
                 onClick={() => setFiltersModalOpen(false)}
-                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
                 aria-label="Fechar filtros"
               >
                 ✕
@@ -1786,7 +1786,7 @@ function ProdutosPageContent() {
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   placeholder="SKU, título ou fornecedor…"
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input"
                 />
               </div>
               <div>
@@ -1798,7 +1798,7 @@ function ProdutosPageContent() {
                   value={draftFilterSupplier}
                   onChange={(e) => setDraftFilterSupplier(e.target.value)}
                   placeholder="Nome ou parte do fornecedor…"
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input"
                 />
               </div>
               <div>
@@ -1810,7 +1810,7 @@ function ProdutosPageContent() {
                   onChange={(e) =>
                     setDraftFilterHasPma(e.target.value as "" | "yes" | "no")
                   }
-                  className="w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-[#0d6efd] focus:outline-none focus:ring-1 focus:ring-[#0d6efd]"
+                  className="input"
                 >
                   <option value="">Todos</option>
                   <option value="yes">Com PMA cadastrado</option>
@@ -1829,7 +1829,7 @@ function ProdutosPageContent() {
                         className={`cursor-pointer rounded border px-2 py-1 text-xs ${
                           draftFilterTagIds.includes(t.id)
                             ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
-                            : "border-slate-200 bg-white text-slate-700"
+                            : "border-slate-200 bg-card text-slate-700 dark:border-slate-600 dark:text-slate-200"
                         }`}
                       >
                         <input
@@ -1848,7 +1848,7 @@ function ProdutosPageContent() {
                 <button
                   type="button"
                   onClick={() => clearListFilters()}
-                  className="rounded border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  className="btn btn-secondary btn-sm"
                 >
                   Limpar filtros
                 </button>

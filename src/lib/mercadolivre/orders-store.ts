@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { parseMlOrderTags } from "@/lib/mercadolivre/order-tags";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 
 const ORDERS_PAGE_LIMIT = 51;
@@ -48,7 +49,21 @@ export type ParsedMlOrder = {
   status: string;
   date_created: string;
   date_last_updated: string | null;
-  items: Array<{ item_id: string; quantity: number; unit_price: number | null; line_index: number }>;
+  shipping_id: string | null;
+  /** Frete pago pelo vendedor (GET /shipments/{id}/costs → senders[].cost). */
+  shipping_cost_sender: number | null;
+  /** Comissão no pagamento (payments[].marketplace_fee), quando disponível. */
+  marketplace_fee: number | null;
+  /** Tags da venda (order.tags no ML). */
+  tags: string[];
+  items: Array<{
+    item_id: string;
+    quantity: number;
+    unit_price: number | null;
+    line_index: number;
+    /** Comissão ML da linha (order_items[].sale_fee). */
+    sale_fee: number | null;
+  }>;
 };
 
 /** Normaliza payload GET /orders/{id} ou objeto em orders/search.results[]. */
@@ -88,8 +103,33 @@ export function parseMlOrderPayload(raw: Record<string, unknown>): ParsedMlOrder
       const quantity = Number.isFinite(qty) && qty > 0 ? Math.trunc(qty) : 1;
       const up = Number(oi.unit_price);
       const unit_price = Number.isFinite(up) ? up : null;
-      items.push({ item_id, quantity, unit_price, line_index });
+      const sf = Number(oi.sale_fee);
+      const sale_fee = Number.isFinite(sf) && sf >= 0 ? sf : null;
+      items.push({ item_id, quantity, unit_price, line_index, sale_fee });
     });
+  }
+
+  let shipping_id: string | null = null;
+  const shippingRaw = raw.shipping;
+  if (shippingRaw && typeof shippingRaw === "object") {
+    const sid = (shippingRaw as Record<string, unknown>).id;
+    if (sid != null && sid !== "") shipping_id = String(sid).trim();
+  }
+
+  let marketplace_fee: number | null = null;
+  const payments = raw.payments;
+  if (Array.isArray(payments)) {
+    for (const p of payments) {
+      if (!p || typeof p !== "object") continue;
+      const po = p as Record<string, unknown>;
+      const st = String(po.status ?? "").toLowerCase();
+      if (st && st !== "approved") continue;
+      const mf = Number(po.marketplace_fee);
+      if (Number.isFinite(mf) && mf >= 0) {
+        marketplace_fee = mf;
+        break;
+      }
+    }
   }
 
   return {
@@ -97,8 +137,48 @@ export function parseMlOrderPayload(raw: Record<string, unknown>): ParsedMlOrder
     status,
     date_created,
     date_last_updated: parseMlDateIso(raw.last_updated ?? raw.date_closed),
+    shipping_id,
+    shipping_cost_sender: null,
+    marketplace_fee,
+    tags: parseMlOrderTags(raw.tags),
     items,
   };
+}
+
+/** Custo de frete do vendedor: GET /shipments/{id}/costs (doc ML — senders[].cost). */
+export async function fetchMlShipmentSenderCost(
+  accessToken: string,
+  shippingId: string
+): Promise<number | null> {
+  const id = String(shippingId).trim();
+  if (!id) return null;
+  const res = await fetch(`https://api.mercadolibre.com/shipments/${id}/costs`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "x-format-new": "true",
+    },
+  });
+  if (!res.ok) {
+    console.warn(`[ml/orders-store] GET shipments/${id}/costs ${res.status}`);
+    return null;
+  }
+  try {
+    const data = (await res.json()) as {
+      senders?: Array<{ cost?: number }>;
+    };
+    let total = 0;
+    let any = false;
+    for (const s of data.senders ?? []) {
+      const c = Number(s?.cost);
+      if (Number.isFinite(c) && c > 0) {
+        total += c;
+        any = true;
+      }
+    }
+    return any ? Math.round(total * 100) / 100 : 0;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchMlOrderById(
@@ -127,9 +207,22 @@ export async function upsertMlOrderForAccount(
   supabase: SupabaseClient,
   accountId: string,
   userId: string,
-  parsed: ParsedMlOrder
+  parsed: ParsedMlOrder,
+  options?: { accessToken?: string }
 ): Promise<void> {
   const now = new Date().toISOString();
+  let shippingCostSender = parsed.shipping_cost_sender;
+  if (
+    shippingCostSender == null &&
+    parsed.shipping_id &&
+    options?.accessToken
+  ) {
+    shippingCostSender = await fetchMlShipmentSenderCost(
+      options.accessToken,
+      parsed.shipping_id
+    );
+  }
+
   const { error: orderErr } = await supabase.from("ml_orders").upsert(
     {
       account_id: accountId,
@@ -138,6 +231,10 @@ export async function upsertMlOrderForAccount(
       status: parsed.status,
       date_created: parsed.date_created,
       date_last_updated: parsed.date_last_updated,
+      shipping_id: parsed.shipping_id,
+      shipping_cost_sender: shippingCostSender,
+      marketplace_fee: parsed.marketplace_fee,
+      tags: parsed.tags,
       synced_at: now,
     },
     { onConflict: "account_id,ml_order_id" }
@@ -161,6 +258,7 @@ export async function upsertMlOrderForAccount(
     line_index: it.line_index,
     quantity: it.quantity,
     unit_price: it.unit_price,
+    sale_fee: it.sale_fee,
     synced_at: now,
   }));
 
@@ -259,7 +357,9 @@ export async function backfillPaidOrdersLast30Days(
       for (const raw of page.results) {
         const parsed = parseMlOrderPayload(raw);
         if (!parsed) continue;
-        await upsertMlOrderForAccount(supabase, accountId, userId, parsed);
+        await upsertMlOrderForAccount(supabase, accountId, userId, parsed, {
+          accessToken,
+        });
         ordersUpserted += 1;
         itemsUpserted += parsed.items.length;
         for (const it of parsed.items) affectedItemIds.add(it.item_id);
@@ -336,7 +436,7 @@ export async function syncMlOrderFromApi(
       reason: `Resposta do ML sem date_created ou formato não reconhecido (order ${id})`,
     };
   }
-  await upsertMlOrderForAccount(supabase, accountId, userId, parsed);
+  await upsertMlOrderForAccount(supabase, accountId, userId, parsed, { accessToken });
   await supabase.from("ml_sales_sync_state").upsert(
     {
       account_id: accountId,
