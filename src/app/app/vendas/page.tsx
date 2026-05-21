@@ -548,7 +548,9 @@ function VendasPageContent() {
     for (const o of orders) {
       for (const t of o.tags ?? []) set.add(t);
     }
-    return [...set].sort((a, b) => formatMlOrderTagLabel(a).localeCompare(formatMlOrderTagLabel(b)));
+    return Array.from(set).sort((a, b) =>
+      formatMlOrderTagLabel(a).localeCompare(formatMlOrderTagLabel(b))
+    );
   }, [orders]);
 
   const ordersTotalPages = computeTotalPages(filteredOrderLines.length, ordersPageSize);
