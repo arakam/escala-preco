@@ -16,9 +16,13 @@ import {
   filterCriticalMlItemTags,
   formatMlItemHealth,
   formatMlItemTagLabel,
+  ML_ALERT_FILTER_OPTIONS,
   mlItemHealthClass,
   mlItemTagBadgeClass,
   parseMlItemTags,
+  STOCK_COMPARE_OPS,
+  stockCompareLabel,
+  type StockCompareOp,
 } from "@/lib/mercadolivre/item-tags";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
@@ -174,9 +178,10 @@ function AnunciosHelpContent() {
               status, tipo de anúncio, MLBU e o filtro “só com MLBU”.
             </li>
             <li>
-              O ícone de <strong>funil</strong> abre o modal de filtros: texto livre (título, MLB ou nome de família),
-              status do anúncio, <strong>tipo de anúncio</strong> (publicação no ML), código MLBU e opção de listar
-              apenas anúncios que possuem MLBU cadastrado no ML.
+              O ícone de <strong>funil</strong> abre o modal de filtros. Ajuste os campos e clique em{" "}
+              <strong>Aplicar filtros</strong> para recarregar a tabela (nada é aplicado ao mudar um campo). Há busca,
+              status, tipo de anúncio, MLBU, <strong>alertas ML</strong> e <strong>estoque</strong> (maior, menor, igual,
+              etc.).
             </li>
             <li>
               O menu <strong>⋮ Opções</strong> permite <strong>exportar a página atual</strong> (CSV com as linhas
@@ -264,11 +269,21 @@ function AnunciosPageContent() {
   const [loading, setLoading] = useState(true);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [listingTypeFilter, setListingTypeFilter] = useState("");
   const [mlbuOnly, setMlbuOnly] = useState(false);
-  const [mlbuCodeInput, setMlbuCodeInput] = useState("");
+  const [mlbuCodeFilter, setMlbuCodeFilter] = useState("");
+  const [mlAlertFilter, setMlAlertFilter] = useState("");
+  const [stockOpFilter, setStockOpFilter] = useState<StockCompareOp | "">("");
+  const [stockQtyFilter, setStockQtyFilter] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [statusDraft, setStatusDraft] = useState("");
+  const [listingTypeDraft, setListingTypeDraft] = useState("");
+  const [mlbuOnlyDraft, setMlbuOnlyDraft] = useState(false);
+  const [mlbuCodeDraft, setMlbuCodeDraft] = useState("");
+  const [mlAlertDraft, setMlAlertDraft] = useState("");
+  const [stockOpDraft, setStockOpDraft] = useState<StockCompareOp | "">("");
+  const [stockQtyDraft, setStockQtyDraft] = useState("");
   const [anunciosTab, setAnunciosTab] = useState<"lista" | "como-funciona">("lista");
   const [syncing, setSyncing] = useState(false);
   const [job, setJob] = useState<JobState | null>(null);
@@ -369,7 +384,15 @@ function AnunciosPageContent() {
     if (statusFilter) params.set("status", statusFilter);
     if (listingTypeFilter) params.set("listing_type_id", listingTypeFilter);
     if (mlbuOnly) params.set("mlbu", "1");
-    if (mlbuCodeInput.trim()) params.set("mlbu_code", mlbuCodeInput.trim());
+    if (mlbuCodeFilter.trim()) params.set("mlbu_code", mlbuCodeFilter.trim());
+    if (mlAlertFilter) params.set("ml_alert", mlAlertFilter);
+    if (stockOpFilter) {
+      const qty = parseInt(stockQtyFilter.trim(), 10);
+      if (Number.isFinite(qty) && qty >= 0) {
+        params.set("stock_op", stockOpFilter);
+        params.set("stock_qty", String(qty));
+      }
+    }
     const res = await fetch(`/api/mercadolivre/${account.id}/items?${params}`);
     if (res.ok) {
       const data = await res.json();
@@ -377,7 +400,39 @@ function AnunciosPageContent() {
       setTotal(data.total ?? 0);
     }
     setItemsLoading(false);
-  }, [account, page, pageSize, search, statusFilter, listingTypeFilter, mlbuOnly, mlbuCodeInput]);
+  }, [
+    account,
+    page,
+    pageSize,
+    search,
+    statusFilter,
+    listingTypeFilter,
+    mlbuOnly,
+    mlbuCodeFilter,
+    mlAlertFilter,
+    stockOpFilter,
+    stockQtyFilter,
+  ]);
+
+  const syncFilterDraftFromApplied = useCallback(() => {
+    setSearchInput(search);
+    setStatusDraft(statusFilter);
+    setListingTypeDraft(listingTypeFilter);
+    setMlbuOnlyDraft(mlbuOnly);
+    setMlbuCodeDraft(mlbuCodeFilter);
+    setMlAlertDraft(mlAlertFilter);
+    setStockOpDraft(stockOpFilter);
+    setStockQtyDraft(stockQtyFilter);
+  }, [
+    listingTypeFilter,
+    mlAlertFilter,
+    mlbuCodeFilter,
+    mlbuOnly,
+    search,
+    statusFilter,
+    stockOpFilter,
+    stockQtyFilter,
+  ]);
 
   useEffect(() => {
     if (account) loadItems();
@@ -465,9 +520,16 @@ function AnunciosPageContent() {
     }
   }
 
-  function handleSearchSubmit(e: React.FormEvent) {
+  function handleApplyFilters(e: React.FormEvent) {
     e.preventDefault();
     setSearch(searchInput.trim());
+    setStatusFilter(statusDraft);
+    setListingTypeFilter(listingTypeDraft);
+    setMlbuOnly(mlbuOnlyDraft);
+    setMlbuCodeFilter(mlbuCodeDraft.trim());
+    setMlAlertFilter(mlAlertDraft);
+    setStockOpFilter(stockOpDraft);
+    setStockQtyFilter(stockQtyDraft.trim());
     setPage(1);
     setFiltersModalOpen(false);
   }
@@ -488,17 +550,46 @@ function AnunciosPageContent() {
       filters.push(`Tipo: ${formatListingTypeLabel(listingTypeFilter)}`);
     }
     if (mlbuOnly) filters.push("Somente MLBU");
-    if (mlbuCodeInput.trim()) filters.push(`Cód. MLBU: ${mlbuCodeInput.trim()}`);
+    if (mlbuCodeFilter.trim()) filters.push(`Cód. MLBU: ${mlbuCodeFilter.trim()}`);
+    if (mlAlertFilter) {
+      const opt = ML_ALERT_FILTER_OPTIONS.find((o) => o.value === mlAlertFilter);
+      filters.push(`Alertas ML: ${opt?.label ?? mlAlertFilter}`);
+    }
+    if (stockOpFilter) {
+      const qty = parseInt(stockQtyFilter.trim(), 10);
+      if (Number.isFinite(qty) && qty >= 0) {
+        filters.push(`Estoque ${stockCompareLabel(stockOpFilter)} ${qty}`);
+      }
+    }
     return filters;
-  }, [listingTypeFilter, mlbuCodeInput, mlbuOnly, search, statusFilter]);
+  }, [
+    listingTypeFilter,
+    mlbuCodeFilter,
+    mlbuOnly,
+    mlAlertFilter,
+    search,
+    statusFilter,
+    stockOpFilter,
+    stockQtyFilter,
+  ]);
 
   function clearFilters() {
     setSearch("");
     setSearchInput("");
     setStatusFilter("");
+    setStatusDraft("");
     setListingTypeFilter("");
+    setListingTypeDraft("");
     setMlbuOnly(false);
-    setMlbuCodeInput("");
+    setMlbuOnlyDraft(false);
+    setMlbuCodeFilter("");
+    setMlbuCodeDraft("");
+    setMlAlertFilter("");
+    setMlAlertDraft("");
+    setStockOpFilter("");
+    setStockOpDraft("");
+    setStockQtyFilter("");
+    setStockQtyDraft("");
     setPage(1);
   }
 
@@ -802,7 +893,10 @@ function AnunciosPageContent() {
           <div className="btn-dropdown relative flex items-center gap-1">
             <button
               type="button"
-              onClick={() => setFiltersModalOpen(true)}
+              onClick={() => {
+                syncFilterDraftFromApplied();
+                setFiltersModalOpen(true);
+              }}
               className="btn btn-icon btn-sm btn-outline-secondary"
               title="Abrir filtros"
               aria-label="Abrir filtros"
@@ -1247,7 +1341,7 @@ function AnunciosPageContent() {
               </button>
             </div>
 
-            <form onSubmit={handleSearchSubmit} className="space-y-4 p-4">
+            <form onSubmit={handleApplyFilters} className="space-y-4 p-4">
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Buscar
@@ -1267,11 +1361,8 @@ function AnunciosPageContent() {
                     Status
                   </label>
                   <select
-                    value={statusFilter}
-                    onChange={(e) => {
-                      setStatusFilter(e.target.value);
-                      setPage(1);
-                    }}
+                    value={statusDraft}
+                    onChange={(e) => setStatusDraft(e.target.value)}
                     className="input"
                   >
                     <option value="">Todos os status</option>
@@ -1286,11 +1377,8 @@ function AnunciosPageContent() {
                     Tipo de anúncio
                   </label>
                   <select
-                    value={listingTypeFilter}
-                    onChange={(e) => {
-                      setListingTypeFilter(e.target.value);
-                      setPage(1);
-                    }}
+                    value={listingTypeDraft}
+                    onChange={(e) => setListingTypeDraft(e.target.value)}
                     className="input"
                   >
                     <option value="">Todos os tipos</option>
@@ -1309,8 +1397,8 @@ function AnunciosPageContent() {
                   </label>
                   <input
                     type="text"
-                    value={mlbuCodeInput}
-                    onChange={(e) => setMlbuCodeInput(e.target.value)}
+                    value={mlbuCodeDraft}
+                    onChange={(e) => setMlbuCodeDraft(e.target.value)}
                     placeholder="ex: MLAU123"
                     className="input font-mono"
                   />
@@ -1320,12 +1408,66 @@ function AnunciosPageContent() {
               <label className="flex items-center gap-2 rounded border border-slate-200 bg-card px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200">
                 <input
                   type="checkbox"
-                  checked={mlbuOnly}
-                  onChange={(e) => setMlbuOnly(e.target.checked)}
+                  checked={mlbuOnlyDraft}
+                  onChange={(e) => setMlbuOnlyDraft(e.target.checked)}
                   className="h-4 w-4 rounded border-slate-300 text-[#0d6efd] focus:ring-[#0d6efd]"
                 />
                 Mostrar somente anúncios com MLBU
               </label>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Alertas ML
+                </label>
+                <select
+                  value={mlAlertDraft}
+                  onChange={(e) => setMlAlertDraft(e.target.value)}
+                  className="input"
+                >
+                  <option value="">Todos</option>
+                  {ML_ALERT_FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Estoque
+                </label>
+                <div className="flex flex-nowrap items-center gap-2">
+                  <select
+                    value={stockOpDraft}
+                    onChange={(e) => setStockOpDraft(e.target.value as StockCompareOp | "")}
+                    className="input min-w-0 flex-1"
+                  >
+                    <option value="">Sem filtro de estoque</option>
+                    {STOCK_COMPARE_OPS.map((op) => (
+                      <option key={op} value={op}>
+                        {stockCompareLabel(op)}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={stockQtyDraft}
+                    onChange={(e) => setStockQtyDraft(e.target.value)}
+                    disabled={!stockOpDraft}
+                    placeholder="Qtd."
+                    className="input w-20 shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Quantidade para filtro de estoque"
+                  />
+                </div>
+                {stockOpDraft && stockQtyDraft.trim() === "" && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                    Informe a quantidade para aplicar o filtro de estoque.
+                  </p>
+                )}
+              </div>
 
               <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
                 <button

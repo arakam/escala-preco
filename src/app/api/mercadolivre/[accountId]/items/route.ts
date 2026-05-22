@@ -1,6 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 import { fetchAllViaRange, isAllPageSize } from "@/lib/table-pagination";
+import {
+  CRITICAL_ML_ITEM_TAGS,
+  CRITICAL_ML_ITEM_TAGS_LIST,
+  type StockCompareOp,
+  STOCK_COMPARE_OPS,
+} from "@/lib/mercadolivre/item-tags";
 
 const DEFAULT_PAGE_SIZE = 20;
 const PLANNED_VARIATION_ITEM = -1;
@@ -62,13 +68,54 @@ async function enrichItemsWithPlannedPrices(
     planned_price: resolvePlannedPriceForListing(item.item_id, rows),
   }));
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyStockFilter(q: any, op: StockCompareOp, qty: number) {
+  let next = q.not("available_quantity", "is", null);
+  switch (op) {
+    case "gt":
+      next = next.gt("available_quantity", qty);
+      break;
+    case "lt":
+      next = next.lt("available_quantity", qty);
+      break;
+    case "gte":
+      next = next.gte("available_quantity", qty);
+      break;
+    case "lte":
+      next = next.lte("available_quantity", qty);
+      break;
+    case "eq":
+      next = next.eq("available_quantity", qty);
+      break;
+  }
+  return next;
+}
+
+/** Filtro de alertas via tags_text (array PostgreSQL) — compatível com PostgREST. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyMlAlertFilter(q: any, mlAlert: string) {
+  const critical = [...CRITICAL_ML_ITEM_TAGS_LIST];
+
+  if (mlAlert === "any") {
+    return q.overlaps("tags_text", critical);
+  }
+  if (mlAlert === "none") {
+    return q.not("tags_text", "ov", critical);
+  }
+  if (CRITICAL_ML_ITEM_TAGS.has(mlAlert)) {
+    return q.contains("tags_text", [mlAlert]);
+  }
+  return q;
+}
+
 /** Alinhado às opções da tela Anúncios (10…1000). */
 const MAX_PAGE_SIZE = 1000;
 /** Modo família MLBU: range fixo no início da lista; limite menor por desenho da UI. */
 const MAX_PAGE_SIZE_FAMILY = 100;
 
 /**
- * GET /api/mercadolivre/{accountId}/items?search=&status=&listing_type_id=&mlbu=&mlbu_code=&page=&limit=
+ * GET /api/mercadolivre/{accountId}/items?search=&status=&listing_type_id=&mlbu=&mlbu_code=
+ *   &ml_alert=&stock_op=&stock_qty=&page=&limit=
  * Lista itens sincronizados do banco para a conta (do usuário logado).
  */
 export async function GET(
@@ -105,6 +152,16 @@ export async function GET(
   const familyId = searchParams.get("family_id")?.trim() ?? "";
   const mlbuCode = searchParams.get("mlbu_code")?.trim() ?? "";
   const listingTypeId = searchParams.get("listing_type_id")?.trim() ?? "";
+  const mlAlert = searchParams.get("ml_alert")?.trim() ?? "";
+  const stockOpRaw = searchParams.get("stock_op")?.trim() ?? "";
+  const stockOp = STOCK_COMPARE_OPS.includes(stockOpRaw as StockCompareOp)
+    ? (stockOpRaw as StockCompareOp)
+    : null;
+  const stockQtyParsed = parseInt(searchParams.get("stock_qty")?.trim() ?? "", 10);
+  const stockQty =
+    stockOp != null && Number.isFinite(stockQtyParsed) && stockQtyParsed >= 0
+      ? stockQtyParsed
+      : null;
   const limitParam = searchParams.get("limit");
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
   const parsedLimit = limitParam != null && limitParam !== "" ? parseInt(limitParam, 10) : NaN;
@@ -132,6 +189,7 @@ export async function GET(
       )
       .eq("account_id", accountId)
       .order("updated_at", { ascending: false });
+    if (mlAlert) q = applyMlAlertFilter(q, mlAlert);
     if (search) {
       q = q.or(
         `title.ilike.%${search}%,item_id.ilike.%${search}%,family_name.ilike.%${search}%,user_product_id.ilike.%${search}%`
@@ -142,6 +200,7 @@ export async function GET(
     if (familyId) q = q.eq("family_id", familyId);
     if (mlbuCode) q = q.ilike("user_product_id", `%${mlbuCode}%`);
     if (listingTypeId) q = q.eq("listing_type_id", listingTypeId);
+    if (stockOp != null && stockQty != null) q = applyStockFilter(q, stockOp, stockQty);
     return q;
   };
 

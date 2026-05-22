@@ -1,5 +1,5 @@
-/** Tags de item do ML consideradas relevantes para alerta na listagem de anúncios. */
-export const CRITICAL_ML_ITEM_TAGS = new Set([
+/** Lista fixa para SQL / filtros em array (tags_text). */
+export const CRITICAL_ML_ITEM_TAGS_LIST = [
   "incomplete_technical_specs",
   "catalog_listing_eligible",
   "catalog_boost",
@@ -14,7 +14,9 @@ export const CRITICAL_ML_ITEM_TAGS = new Set([
   "variations_migration_source",
   "poor_quality_thumbnail",
   "moderation_penalty",
-]);
+] as const;
+
+export const CRITICAL_ML_ITEM_TAGS = new Set<string>(CRITICAL_ML_ITEM_TAGS_LIST);
 
 const ML_ITEM_TAG_LABELS: Record<string, string> = {
   incomplete_technical_specs: "Ficha incompleta",
@@ -58,6 +60,31 @@ export function formatMlItemTagLabel(tag: string): string {
     .filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+}
+
+/** Opções do filtro Alertas ML na tela Anúncios. */
+export const ML_ALERT_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: "any", label: "Com qualquer alerta ML" },
+  { value: "none", label: "Sem alertas ML" },
+  ...Array.from(CRITICAL_ML_ITEM_TAGS)
+    .map((id) => ({ value: id, label: formatMlItemTagLabel(id) }))
+    .sort((a, b) => a.label.localeCompare(b.label, "pt-BR")),
+];
+
+export type StockCompareOp = "gt" | "gte" | "lt" | "lte" | "eq";
+
+export const STOCK_COMPARE_OPS: StockCompareOp[] = ["gt", "gte", "lt", "lte", "eq"];
+
+export const STOCK_COMPARE_LABELS: Record<StockCompareOp, string> = {
+  gt: "maior que (>)",
+  gte: "maior ou igual (≥)",
+  lt: "menor que (<)",
+  lte: "menor ou igual (≤)",
+  eq: "igual a (=)",
+};
+
+export function stockCompareLabel(op: StockCompareOp): string {
+  return STOCK_COMPARE_LABELS[op];
 }
 
 export function mlItemTagBadgeClass(tag: string): string {
