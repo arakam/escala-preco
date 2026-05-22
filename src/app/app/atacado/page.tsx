@@ -75,14 +75,15 @@ interface AtacadoRow {
   family_item_ids?: string[] | null;
 }
 
-const ATACADO_STICKY_STORAGE_KEY = "escalapreco.atacado.pinnedColumns.v1";
+const ATACADO_STICKY_STORAGE_KEY = "escalapreco.atacado.pinnedColumns.v2";
+/** Mesma chave do layout / Anúncios — conta ativa no painel */
+const DASHBOARD_ACCOUNT_STORAGE_KEY = "escalapreco_dashboard_account_id";
 
 /** Larguras mínimas (px): alinhadas ao `<colgroup>` para `position: sticky` e `left`. */
 const ATACADO_COLUMNS: { minWidth: number }[] = [
   { minWidth: 108 },
   { minWidth: 108 },
   { minWidth: 180 },
-  { minWidth: 80 },
   { minWidth: 120 },
   { minWidth: 88 },
   { minWidth: 96 },
@@ -273,7 +274,7 @@ function AtacadoHelpContent() {
         <section>
           <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Objetivo</h3>
           <p>
-            Aqui você cadastra e ajusta até <strong>cinco faixas de preço de atacado</strong> por anúncio (ou variação):
+            Aqui você cadastra e ajusta até <strong>cinco faixas de preço de atacado</strong> por anúncio (um MLB por linha, como na tela de Preços):
             quantidade mínima da faixa e preço em reais. Os valores ficam salvos no sistema e podem ser enviados ao
             Mercado Livre quando você <strong>aplicar</strong> as alterações.
           </p>
@@ -324,8 +325,7 @@ function AtacadoHelpContent() {
               aplicados.
             </li>
             <li>
-              O ícone de <strong>funil</strong> abre o modal (MLB, MLBU, título, SKU, tipo de variação, texto extra,
-              opção de ocultar variações).
+              O ícone de <strong>funil</strong> abre o modal (MLB, MLBU, título, SKU, refino e tags de produto).
             </li>
             <li>
               <strong>Carregar dos Anúncios</strong>, <strong>Importar CSV</strong> e <strong>Exportar CSV</strong>{" "}
@@ -376,6 +376,7 @@ function AtacadoPageContent() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [loadingRows, setLoadingRows] = useState(true);
+  const [rowsFetchError, setRowsFetchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   
   /** Modal de filtros (mesmo padrão da tela Anúncios) */
@@ -387,9 +388,7 @@ function AtacadoPageContent() {
   const [draftMlbu, setDraftMlbu] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftSku, setDraftSku] = useState("");
-  const [draftVariation, setDraftVariation] = useState<"" | "com" | "sem">("");
   const [draftFilterExtra, setDraftFilterExtra] = useState("");
-  const [draftHideVariations, setDraftHideVariations] = useState(false);
   const [draftFilterTagIds, setDraftFilterTagIds] = useState<string[]>([]);
   const [allTags, setAllTags] = useState<ProductTag[]>([]);
   const [filtersApplied, setFiltersApplied] = useState<{
@@ -397,18 +396,14 @@ function AtacadoPageContent() {
     mlbu: string;
     title: string;
     sku: string;
-    variation: "" | "com" | "sem";
     filterExtra: string;
-    hideVariations: boolean;
     tagIds: string[];
   }>({
     mlb: "",
     mlbu: "",
     title: "",
     sku: "",
-    variation: "",
     filterExtra: "",
-    hideVariations: false,
     tagIds: [],
   });
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -478,8 +473,6 @@ function AtacadoPageContent() {
     if (filtersApplied.mlbu.trim()) chips.push(`MLBU: ${filtersApplied.mlbu.trim()}`);
     if (filtersApplied.title.trim()) chips.push(`Título: ${filtersApplied.title.trim()}`);
     if (filtersApplied.sku.trim()) chips.push(`SKU: ${filtersApplied.sku.trim()}`);
-    if (filtersApplied.variation === "com") chips.push("Variação: com");
-    if (filtersApplied.variation === "sem") chips.push("Variação: sem");
     if (filtersApplied.filterExtra) {
       const map: Record<string, string> = {
         mlbu: "Refino: só MLBU",
@@ -490,7 +483,6 @@ function AtacadoPageContent() {
       };
       chips.push(map[filtersApplied.filterExtra] ?? `Refino: ${filtersApplied.filterExtra}`);
     }
-    if (filtersApplied.hideVariations) chips.push("Só anúncios (sem variações)");
     for (const id of filtersApplied.tagIds) {
       const name = tagNameById.get(id);
       if (name) chips.push(`Tag: ${name}`);
@@ -663,15 +655,6 @@ function AtacadoPageContent() {
         {stickyTd(2, "max-w-[180px] truncate p-2", <span title={r.title ?? ""}>{r.title ?? "—"}</span>)}
         {stickyTd(
           3,
-          "p-2",
-          r.has_variations ? (
-            <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800">Sim</span>
-          ) : (
-            <span className="text-fg-muted">Não</span>
-          )
-        )}
-        {stickyTd(
-          4,
           "p-2 text-fg",
           r.sku ? (
             <button type="button" onClick={() => copyToClipboard(r.sku ?? "", `${rowKey(r)}-sku`)} title="Clique para copiar" className="hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer max-w-full truncate block">
@@ -683,9 +666,9 @@ function AtacadoPageContent() {
             </span>
           )
         )}
-        {stickyTd(5, "p-2 tabular-nums", r.current_price != null ? Number(r.current_price).toFixed(2) : "—")}
+        {stickyTd(4, "p-2 tabular-nums", r.current_price != null ? Number(r.current_price).toFixed(2) : "—")}
         {stickyTd(
-          6,
+          5,
           "p-2 text-right tabular-nums",
           r.planned_price != null && !Number.isNaN(Number(r.planned_price)) ? Number(r.planned_price).toFixed(2) : "—"
         )}
@@ -704,8 +687,8 @@ function AtacadoPageContent() {
               : slots5[i]?.min_qty != null
                 ? String(slots5[i]!.min_qty)
                 : "";
-          const minCol = 7 + i * 2;
-          const priceCol = 8 + i * 2;
+          const minCol = 6 + i * 2;
+          const priceCol = 7 + i * 2;
           return (
             <React.Fragment key={i}>
               {stickyTd(
@@ -747,12 +730,12 @@ function AtacadoPageContent() {
           );
         })}
         {stickyTd(
-          17,
+          16,
           "p-2",
           <span className={`rounded px-2 py-0.5 text-xs ${cur.status === "error" ? "bg-red-200 text-red-800" : cur.status === "edited" ? "bg-amber-200 text-amber-800" : "bg-green-100 text-green-800"}`}>{cur.status === "error" ? "erro" : cur.status === "edited" ? "alterado" : "salvo"}</span>
         )}
         {stickyTd(
-          18,
+          17,
           "p-2",
           <div className="flex flex-wrap items-center justify-end gap-0.5">
             <AtacadoIconButton label="Salvar linha" onClick={() => saveRow(r)} disabled={saving} className="text-primary hover:bg-primary/10 dark:hover:bg-primary/20">
@@ -795,18 +778,38 @@ function AtacadoPageContent() {
     const res = await fetch("/api/mercadolivre/accounts");
     if (res.ok) {
       const data = await res.json();
-      const accs = data.accounts ?? [];
+      const accs: MLAccount[] = data.accounts ?? [];
       setAccounts(accs);
       if (accs.length > 0 && !accountId) {
-        setAccountId(accs[0].id);
+        const fromUrl = searchParams.get("accountId");
+        const fromStorage =
+          typeof window !== "undefined"
+            ? localStorage.getItem(DASHBOARD_ACCOUNT_STORAGE_KEY)
+            : null;
+        const owned = new Set(accs.map((a) => a.id));
+        const candidate = fromUrl ?? fromStorage ?? accs[0].id;
+        const next = owned.has(candidate) ? candidate : accs[0].id;
+        setAccountId(next);
+        if (typeof window !== "undefined" && next) {
+          localStorage.setItem(DASHBOARD_ACCOUNT_STORAGE_KEY, next);
+        }
       }
     }
     setAccountsLoaded(true);
-  }, [accountId]);
+  }, [accountId, searchParams]);
 
   const loadRows = useCallback(async (forceRefresh = false) => {
     if (!accountId) return;
+    if (accounts.length > 0 && !accounts.some((a) => a.id === accountId)) {
+      setRows([]);
+      setTotal(0);
+      setTotalItems(0);
+      setRowsFetchError("Conta selecionada não está disponível. Escolha outra conta no menu superior.");
+      setLoadingRows(false);
+      return;
+    }
     setLoadingRows(true);
+    setRowsFetchError(null);
     const params = new URLSearchParams({
       accountId,
       page: String(apiListPage(pageSize, page)),
@@ -816,23 +819,34 @@ function AtacadoPageContent() {
     if (filtersApplied.mlbu.trim()) params.set("mlbu_code", filtersApplied.mlbu.trim());
     if (filtersApplied.title.trim()) params.set("title", filtersApplied.title.trim());
     if (filtersApplied.sku.trim()) params.set("sku", filtersApplied.sku.trim());
-    if (filtersApplied.variation) params.set("variation", filtersApplied.variation);
     if (filtersApplied.filterExtra) params.set("filter", filtersApplied.filterExtra);
-    if (filtersApplied.hideVariations) params.set("hide_variations", "true");
     if (filtersApplied.tagIds.length > 0) params.set("tags", filtersApplied.tagIds.join(","));
     if (forceRefresh) params.set("_", String(Date.now()));
-    const res = await fetch(`/api/atacado/rows?${params}`);
-    if (res.ok) {
-      const data = await res.json();
-      setRows(data.rows ?? []);
-      setTotal(data.total ?? 0);
-      setTotalItems(data.totalItems ?? 0);
-      setEdits({});
-      setEditingMinQty({});
-      setEditingPrice({});
+    try {
+      const res = await fetch(`/api/atacado/rows?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setRows(data.rows ?? []);
+        setTotal(data.total ?? 0);
+        setTotalItems(data.totalItems ?? 0);
+        setEdits({});
+        setEditingMinQty({});
+        setEditingPrice({});
+      } else {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setRows([]);
+        setTotal(0);
+        setTotalItems(0);
+        setRowsFetchError(data.error ?? `Erro ao carregar atacado (${res.status}).`);
+      }
+    } catch {
+      setRows([]);
+      setTotal(0);
+      setTotalItems(0);
+      setRowsFetchError("Erro de conexão ao carregar anúncios.");
     }
     setLoadingRows(false);
-  }, [accountId, page, pageSize, filtersApplied]);
+  }, [accountId, accounts, page, pageSize, filtersApplied]);
 
   useEffect(() => {
     loadAccounts();
@@ -845,13 +859,18 @@ function AtacadoPageContent() {
     }
   }, [accountsLoaded, accounts.length]);
 
-  const urlAccountId = searchParams.get("accountId");
   const urlFilter = searchParams.get("filter");
   useEffect(() => {
-    if (urlAccountId && accounts.some((a) => a.id === urlAccountId)) {
-      setAccountId(urlAccountId);
+    const fromUrl = searchParams.get("accountId");
+    if (fromUrl && fromUrl !== accountId) {
+      if (accounts.length === 0 || accounts.some((a) => a.id === fromUrl)) {
+        setAccountId(fromUrl);
+        if (typeof window !== "undefined") {
+          localStorage.setItem(DASHBOARD_ACCOUNT_STORAGE_KEY, fromUrl);
+        }
+      }
     }
-  }, [urlAccountId, accounts]);
+  }, [searchParams, accounts, accountId]);
   useEffect(() => {
     if (
       urlFilter === "price_high" ||
@@ -894,14 +913,12 @@ function AtacadoPageContent() {
       mlbu: draftMlbu.trim(),
       title: draftTitle.trim(),
       sku: draftSku.trim(),
-      variation: draftVariation,
       filterExtra: draftFilterExtra,
-      hideVariations: draftHideVariations,
       tagIds: draftFilterTagIds,
     });
     setPage(1);
     setFiltersModalOpen(false);
-  }, [draftMlb, draftMlbu, draftTitle, draftSku, draftVariation, draftFilterExtra, draftHideVariations, draftFilterTagIds]);
+  }, [draftMlb, draftMlbu, draftTitle, draftSku, draftFilterExtra, draftFilterTagIds]);
 
   const toggleDraftFilterTag = useCallback((tagId: string) => {
     setDraftFilterTagIds((prev) =>
@@ -914,17 +931,13 @@ function AtacadoPageContent() {
     setDraftMlbu("");
     setDraftTitle("");
     setDraftSku("");
-    setDraftVariation("");
     setDraftFilterExtra("");
-    setDraftHideVariations(false);
     setFiltersApplied({
       mlb: "",
       mlbu: "",
       title: "",
       sku: "",
-      variation: "",
       filterExtra: "",
-      hideVariations: false,
       tagIds: [],
     });
     setDraftFilterTagIds([]);
@@ -937,9 +950,7 @@ function AtacadoPageContent() {
     draftMlbu ||
     draftTitle ||
     draftSku ||
-    draftVariation ||
     draftFilterExtra ||
-    draftHideVariations ||
     draftFilterTagIds.length > 0 ||
     filtersApplied.tagIds.length > 0
   );
@@ -1472,9 +1483,7 @@ function AtacadoPageContent() {
     if (filtersApplied.mlbu.trim()) params.set("mlbu_code", filtersApplied.mlbu.trim());
     if (filtersApplied.title.trim()) params.set("title", filtersApplied.title.trim());
     if (filtersApplied.sku.trim()) params.set("sku", filtersApplied.sku.trim());
-    if (filtersApplied.variation) params.set("variation", filtersApplied.variation);
     if (filtersApplied.filterExtra) params.set("filter", filtersApplied.filterExtra);
-    if (filtersApplied.hideVariations) params.set("hide_variations", "true");
     if (filtersApplied.tagIds.length > 0) params.set("tags", filtersApplied.tagIds.join(","));
     window.open(`/api/atacado/export?${params}`, "_blank");
     setMessage({ type: "success", text: "Exportação iniciada." });
@@ -1725,7 +1734,7 @@ function AtacadoPageContent() {
   const atacadoRefetching = loadingRows && rows.length > 0;
   const atacadoLoaderMessages = [
     "Carregando anúncios…",
-    "Buscando itens e variações no banco…",
+    "Buscando anúncios no banco…",
     "Mesclando rascunhos de atacado…",
     "Montando a grade de preços…",
   ] as const;
@@ -1990,9 +1999,7 @@ function AtacadoPageContent() {
                 setDraftMlbu(filtersApplied.mlbu);
                 setDraftTitle(filtersApplied.title);
                 setDraftSku(filtersApplied.sku);
-                setDraftVariation(filtersApplied.variation);
                 setDraftFilterExtra(filtersApplied.filterExtra);
-                setDraftHideVariations(filtersApplied.hideVariations);
                 setDraftFilterTagIds(filtersApplied.tagIds);
                 setFiltersModalOpen(true);
               }}
@@ -2471,13 +2478,34 @@ function AtacadoPageContent() {
       {loadingRows ? (
         <p className="px-3 py-6 text-sm text-slate-500 dark:text-slate-400">Atualizando lista…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-slate-500">
-          Nenhum item encontrado. Sincronize anúncios em{" "}
-          <a href="/app/anuncios" className="text-brand-blue hover:underline">
-            Anúncios
-          </a>
-          .
-        </p>
+        <div className="px-3 py-6 text-sm text-slate-600 dark:text-slate-300">
+          {rowsFetchError ? (
+            <p className="text-red-700 dark:text-red-400">{rowsFetchError}</p>
+          ) : (
+            <>
+              <p>
+                Nenhum item encontrado
+                {accounts.find((a) => a.id === accountId)?.ml_nickname
+                  ? ` na conta «${accounts.find((a) => a.id === accountId)?.ml_nickname}».`
+                  : "."}
+              </p>
+              {appliedAtacadoFilterLabels.length > 0 ? (
+                <p className="mt-2 text-slate-500 dark:text-slate-400">
+                  Há filtros ativos — use <strong>Limpar</strong> na barra de filtros ou confira se a conta no menu
+                  superior é a mesma em que os anúncios foram sincronizados.
+                </p>
+              ) : (
+                <p className="mt-2 text-slate-500 dark:text-slate-400">
+                  Confira se a conta no menu superior é a correta. Se os anúncios aparecem em{" "}
+                  <a href="/app/anuncios" className="text-brand-blue hover:underline">
+                    Anúncios
+                  </a>{" "}
+                  mas não aqui, troque a conta no cabeçalho e atualize a tabela (menu ▾ → Atualizar tabela).
+                </p>
+              )}
+            </>
+          )}
+        </div>
       ) : (
         <>
           <div className="pricing-table-with-sticky adminty-table-card">
@@ -2569,21 +2597,18 @@ function AtacadoPageContent() {
                     title: "Código User Product (MLBU)",
                   })}
                   {renderAtacadoColumnHeader(2, "Título")}
-                  {renderAtacadoColumnHeader(3, "Variação", "", {
-                    title: "Indica se o anúncio possui variações",
-                  })}
-                  {renderAtacadoColumnHeader(4, "SKU", "", {
+                  {renderAtacadoColumnHeader(3, "SKU", "", {
                     title:
                       "SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.",
                   })}
-                  {renderAtacadoColumnHeader(5, "Preço R$", "tabular-nums")}
-                  {renderAtacadoColumnHeader(6, "Promoção R$", "tabular-nums", {
+                  {renderAtacadoColumnHeader(4, "Preço R$", "tabular-nums")}
+                  {renderAtacadoColumnHeader(5, "Promoção R$", "tabular-nums", {
                     title: "Valor salvo na calculadora (Preços / planned_prices)",
                   })}
                   {[1, 2, 3, 4, 5].map((n) => {
                     const t = n - 1;
-                    const minIdx = 7 + t * 2;
-                    const priceIdx = 8 + t * 2;
+                    const minIdx = 6 + t * 2;
+                    const priceIdx = 7 + t * 2;
                     return (
                       <React.Fragment key={n}>
                         {renderAtacadoColumnHeader(minIdx, <>Qt. Atac. {n}</>, "whitespace-nowrap")}
@@ -2591,8 +2616,8 @@ function AtacadoPageContent() {
                       </React.Fragment>
                     );
                   })}
-                  {renderAtacadoColumnHeader(17, "Status")}
-                  {renderAtacadoColumnHeader(18, "Ações")}
+                  {renderAtacadoColumnHeader(16, "Status")}
+                  {renderAtacadoColumnHeader(17, "Ações")}
                 </tr>
               </thead>
               <tbody>
@@ -2716,18 +2741,6 @@ function AtacadoPageContent() {
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Variação</span>
-                <select
-                  value={draftVariation}
-                  onChange={(e) => setDraftVariation(e.target.value as "" | "com" | "sem")}
-                  className="input text-xs"
-                >
-                  <option value="">Todas</option>
-                  <option value="com">Com variação</option>
-                  <option value="sem">Sem variação</option>
-                </select>
-              </div>
-              <div className="flex flex-col gap-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Refino</span>
                 <select
                   value={draftFilterExtra}
@@ -2742,15 +2755,6 @@ function AtacadoPageContent() {
                   <option value="price_high">Preço alto (ref.)</option>
                 </select>
               </div>
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={draftHideVariations}
-                  onChange={(e) => setDraftHideVariations(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-[#0d6efd] focus:ring-[#0d6efd]"
-                />
-                <span className="text-xs text-slate-700">Só anúncios (ocultar variações)</span>
-              </label>
               {allTags.length > 0 && (
                 <div>
                   <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">

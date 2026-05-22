@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 /**
  * GET /api/mercadolivre/sync-settings
- * Lista contas ML do usuário com a flag de sync automático via webhook (items).
+ * Lista contas ML do usuário com flags de sincronização.
  */
 export async function GET() {
   const supabase = await createClient();
@@ -16,7 +16,9 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("ml_accounts")
-    .select("id, ml_user_id, ml_nickname, site_id, auto_sync_items_webhook")
+    .select(
+      "id, ml_user_id, ml_nickname, site_id, auto_sync_items_webhook, auto_create_products_on_sync"
+    )
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -30,7 +32,7 @@ export async function GET() {
 
 /**
  * PATCH /api/mercadolivre/sync-settings
- * Body: { account_id: string, auto_sync_items_webhook: boolean }
+ * Body: { account_id, auto_sync_items_webhook?, auto_create_products_on_sync? }
  */
 export async function PATCH(request: NextRequest) {
   const supabase = await createClient();
@@ -41,7 +43,11 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   }
 
-  let body: { account_id?: string; auto_sync_items_webhook?: boolean };
+  let body: {
+    account_id?: string;
+    auto_sync_items_webhook?: boolean;
+    auto_create_products_on_sync?: boolean;
+  };
   try {
     body = await request.json();
   } catch {
@@ -52,19 +58,24 @@ export async function PATCH(request: NextRequest) {
   if (!accountId || typeof accountId !== "string") {
     return NextResponse.json({ error: "account_id é obrigatório" }, { status: 400 });
   }
-  if (typeof body.auto_sync_items_webhook !== "boolean") {
-    return NextResponse.json(
-      { error: "auto_sync_items_webhook deve ser true ou false" },
-      { status: 400 }
-    );
+
+  const patch: Record<string, boolean> = {};
+  if (typeof body.auto_sync_items_webhook === "boolean") {
+    patch.auto_sync_items_webhook = body.auto_sync_items_webhook;
+  }
+  if (typeof body.auto_create_products_on_sync === "boolean") {
+    patch.auto_create_products_on_sync = body.auto_create_products_on_sync;
+  }
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: "Informe ao menos uma flag para atualizar" }, { status: 400 });
   }
 
   const { data, error } = await supabase
     .from("ml_accounts")
-    .update({ auto_sync_items_webhook: body.auto_sync_items_webhook })
+    .update(patch)
     .eq("id", accountId)
     .eq("user_id", user.id)
-    .select("id, ml_user_id, ml_nickname, auto_sync_items_webhook")
+    .select("id, ml_user_id, ml_nickname, auto_sync_items_webhook, auto_create_products_on_sync")
     .single();
 
   if (error || !data) {

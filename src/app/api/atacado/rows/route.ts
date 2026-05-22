@@ -65,7 +65,6 @@ export async function GET(request: NextRequest) {
   const filterTitle = searchParams.get("title")?.trim() ?? "";
   const filterSku = searchParams.get("sku")?.trim() ?? "";
   const filterVariation = searchParams.get("variation") ?? ""; // "com" | "sem" | ""
-  const hideVariations = searchParams.get("hide_variations") === "true"; // Mostrar só anúncios, sem expandir variações
   const tagIdsParam = searchParams.get("tags")?.trim() ?? "";
   const tagIds = tagIdsParam
     ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean)
@@ -347,6 +346,57 @@ export async function GET(request: NextRequest) {
     return v != null && !Number.isNaN(v) ? v : null;
   }
 
+  function resolvePlannedPriceForItem(
+    itemId: string,
+    fallbackPrice: number,
+    variationIds: number[]
+  ): number | null {
+    const atItem = getPlannedPrice(itemId, null);
+    if (atItem != null) return atItem;
+    for (const vid of variationIds) {
+      const p = getPlannedPrice(itemId, vid);
+      if (p != null) return p;
+    }
+    return Number.isFinite(fallbackPrice) && fallbackPrice > 0 ? fallbackPrice : null;
+  }
+
+  function resolveSkuForItem(
+    item: { raw_json?: unknown; seller_custom_field?: string | null },
+    itemVariations: VariationRow[]
+  ): string | null {
+    const parent = getSku(item, null);
+    if (parent) return parent;
+    for (const v of itemVariations) {
+      const s = getSku(item, v);
+      if (s) return s;
+    }
+    const scf = item.seller_custom_field;
+    return scf != null && String(scf).trim() !== "" ? String(scf).trim() : null;
+  }
+
+  function resolveDraftForItem(
+    itemId: string,
+    variationIds: number[]
+  ): { tiers: unknown[]; updated_at: string } | undefined {
+    const atItem = getDraftForKey(itemId, null);
+    if (atItem) return atItem;
+    for (const vid of variationIds) {
+      const d = getDraftForKey(itemId, vid);
+      if (d) return d;
+    }
+    return undefined;
+  }
+
+  function resolveRefForItem(itemId: string, variationIds: number[]): PriceRefRow | undefined {
+    const atItem = getRef(itemId, null);
+    if (atItem) return atItem;
+    for (const vid of variationIds) {
+      const r = getRef(itemId, vid);
+      if (r) return r;
+    }
+    return undefined;
+  }
+
   // Criar mapa de variações por item_id para lookup O(1)
   const variationsByItemId = new Map<string, VariationRow[]>();
   for (const v of variations) {
@@ -441,90 +491,50 @@ export async function GET(request: NextRequest) {
 
   for (const item of items) {
     const itemVariations = variationsByItemId.get(item.item_id) ?? [];
-
-    if (item.has_variations && itemVariations.length > 0 && !hideVariations) {
-      // Expandir variações (comportamento padrão)
-      for (const v of itemVariations) {
-        const draft = getDraftForKey(item.item_id, v.variation_id);
-        const ref = getRef(item.item_id, v.variation_id);
-        const tiers = Array.isArray(draft?.tiers)
-          ? (draft!.tiers as { min_qty: number; price: number }[]).filter(
-              (t) => typeof t?.min_qty === "number" && typeof t?.price === "number"
-            )
-          : [];
-        const familyItemIds = item.family_id ? (familyToItemIds.get(item.family_id) ?? null) : null;
-        rows.push({
-          item_id: item.item_id,
-          variation_id: v.variation_id,
-          sku: getSku(item, v),
-          title: item.title ?? null,
-          current_price: v.price != null ? Number(v.price) : null,
-          planned_price: getPlannedPrice(item.item_id, v.variation_id),
-          listing_type_id: item.listing_type_id ?? null,
-          category_id: item.category_id ?? null,
-          tiers,
-          has_draft: !!draft,
-          has_variations: true,
-          draft_updated_at: draft?.updated_at ?? null,
-          price_reference_status: (ref?.status as "competitive" | "attention" | "high" | "none") ?? "none",
-          reference_summary: ref
-            ? {
-                suggested_price: ref.suggested_price ?? null,
-                min_reference_price: ref.min_reference_price ?? null,
-                max_reference_price: ref.max_reference_price ?? null,
-                status: ref.status,
-                explanation: ref.explanation ?? "",
-                updated_at: ref.updated_at ?? null,
-              }
-            : null,
-          family_name: item.family_name ?? null,
-          is_user_product: !!item.user_product_id,
-          user_product_id: item.user_product_id ?? null,
-          family_id: item.family_id ?? null,
-          family_item_ids: familyItemIds,
-        });
-      }
-    } else {
-      // Mostrar apenas o item (sem expandir variações, ou item sem variações)
-      const draft = getDraftForKey(item.item_id, null);
-      const ref = getRef(item.item_id, null);
-      const tiers = Array.isArray(draft?.tiers)
-        ? (draft!.tiers as { min_qty: number; price: number }[]).filter(
-            (t) => typeof t?.min_qty === "number" && typeof t?.price === "number"
-          )
-        : [];
-      const familyItemIds = item.family_id ? (familyToItemIds.get(item.family_id) ?? null) : null;
-      rows.push({
-        item_id: item.item_id,
-        variation_id: null,
-        sku: getSku(item, null),
-        title: item.title ?? null,
-        current_price: item.price != null ? Number(item.price) : null,
-        planned_price: getPlannedPrice(item.item_id, null),
-        listing_type_id: item.listing_type_id ?? null,
-        category_id: item.category_id ?? null,
-        tiers,
-        has_draft: !!draft,
-        has_variations: false,
-        draft_updated_at: draft?.updated_at ?? null,
-        price_reference_status: (ref?.status as "competitive" | "attention" | "high" | "none") ?? "none",
-        reference_summary: ref
-          ? {
-              suggested_price: ref.suggested_price ?? null,
-              min_reference_price: ref.min_reference_price ?? null,
-              max_reference_price: ref.max_reference_price ?? null,
-              status: ref.status,
-              explanation: ref.explanation ?? "",
-              updated_at: ref.updated_at ?? null,
-            }
-          : null,
-        family_name: item.family_name ?? null,
-        is_user_product: !!item.user_product_id,
-        user_product_id: item.user_product_id ?? null,
-        family_id: item.family_id ?? null,
-        family_item_ids: familyItemIds,
-      });
-    }
+    const variationIds = itemVariations.map((v) => v.variation_id);
+    const draft = resolveDraftForItem(item.item_id, variationIds);
+    const ref = resolveRefForItem(item.item_id, variationIds);
+    const tiers = Array.isArray(draft?.tiers)
+      ? (draft.tiers as { min_qty: number; price: number }[]).filter(
+          (t) => typeof t?.min_qty === "number" && typeof t?.price === "number"
+        )
+      : [];
+    const familyItemIds = item.family_id ? (familyToItemIds.get(item.family_id) ?? null) : null;
+    const currentPrice = item.price != null ? Number(item.price) : null;
+    rows.push({
+      item_id: item.item_id,
+      variation_id: null,
+      sku: resolveSkuForItem(item, itemVariations),
+      title: item.title ?? null,
+      current_price: currentPrice,
+      planned_price: resolvePlannedPriceForItem(
+        item.item_id,
+        currentPrice ?? 0,
+        variationIds
+      ),
+      listing_type_id: item.listing_type_id ?? null,
+      category_id: item.category_id ?? null,
+      tiers,
+      has_draft: !!draft,
+      has_variations: !!item.has_variations,
+      draft_updated_at: draft?.updated_at ?? null,
+      price_reference_status: (ref?.status as "competitive" | "attention" | "high" | "none") ?? "none",
+      reference_summary: ref
+        ? {
+            suggested_price: ref.suggested_price ?? null,
+            min_reference_price: ref.min_reference_price ?? null,
+            max_reference_price: ref.max_reference_price ?? null,
+            status: ref.status,
+            explanation: ref.explanation ?? "",
+            updated_at: ref.updated_at ?? null,
+          }
+        : null,
+      family_name: item.family_name ?? null,
+      is_user_product: !!item.user_product_id,
+      user_product_id: item.user_product_id ?? null,
+      family_id: item.family_id ?? null,
+      family_item_ids: familyItemIds,
+    });
   }
 
   // Filtros pós-processamento

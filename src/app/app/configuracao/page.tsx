@@ -23,11 +23,11 @@ interface SyncSettingsAccount {
   ml_nickname: string | null;
   site_id: string | null;
   auto_sync_items_webhook: boolean;
+  auto_create_products_on_sync: boolean;
 }
 
-/** Subopções da sync automática (UI; ações ainda não implementadas). */
+/** Subopções da sync automática via webhook (UI; ações futuras). */
 const AUTO_SYNC_NESTED_OPTIONS = [
-  { id: "produtos_peso_medidas", label: "Atualizar Peso e Medidas em Produtos" },
   { id: "atacado_valores", label: "Atualizar Valores em Atacado" },
   { id: "preco_valores", label: "Atualizar Valores em Preço" },
   { id: "promocao_valores", label: "Atualizar Valores em Promoção" },
@@ -233,6 +233,40 @@ function ConfiguracaoContent() {
         return;
       }
       setSyncSettings((prev) => prev.map((a) => ({ ...a, auto_sync_items_webhook: enabled })));
+    } finally {
+      setSyncSettingsSaving(false);
+    }
+  }
+
+  async function handleToggleAutoCreateProducts(enabled: boolean) {
+    if (syncSettings.length === 0) return;
+    setSyncSettingsSaving(true);
+    setSyncSettingsError(null);
+    try {
+      const results = await Promise.all(
+        syncSettings.map(async (acc) => {
+          const res = await fetch("/api/mercadolivre/sync-settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              account_id: acc.id,
+              auto_create_products_on_sync: enabled,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          return { ok: res.ok, data };
+        })
+      );
+      const failed = results.find((r) => !r.ok);
+      if (failed) {
+        setSyncSettingsError(
+          (failed.data as { error?: string }).error || "Não foi possível salvar. Tente novamente."
+        );
+        return;
+      }
+      setSyncSettings((prev) =>
+        prev.map((a) => ({ ...a, auto_create_products_on_sync: enabled }))
+      );
     } finally {
       setSyncSettingsSaving(false);
     }
@@ -749,8 +783,29 @@ function ConfiguracaoContent() {
             <div className="space-y-3">
               {(() => {
                 const autoSyncEnabled = syncSettings.every((a) => a.auto_sync_items_webhook);
+                const autoCreateProductsEnabled = syncSettings.every(
+                  (a) => a.auto_create_products_on_sync !== false
+                );
                 return (
                   <>
+                    <label className="flex cursor-pointer items-center gap-3">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        checked={autoCreateProductsEnabled}
+                        disabled={syncSettingsSaving}
+                        onChange={(e) => void handleToggleAutoCreateProducts(e.target.checked)}
+                      />
+                      <span className="text-sm font-medium text-fg-strong">
+                        Criar produto ao sincronizar anúncios (SKU + peso e medidas)
+                      </span>
+                    </label>
+                    <p className="ml-7 text-xs text-gray-600 dark:text-slate-400">
+                      Na importação em Anúncios ou na sync automática: se o MLB tiver SKU, altura,
+                      largura, comprimento e peso, cadastra o produto (ou atualiza medidas) e vincula
+                      o anúncio.
+                    </p>
+
                     <label className="flex cursor-pointer items-center gap-3">
                       <input
                         type="checkbox"
@@ -760,7 +815,7 @@ function ConfiguracaoContent() {
                         onChange={(e) => void handleToggleAutoSync(e.target.checked)}
                       />
                       <span className="text-sm font-medium text-fg-strong">
-                        Sincronizar anúncios automaticamente
+                        Sincronizar anúncios automaticamente (webhook)
                       </span>
                       {syncSettingsSaving ? (
                         <span className="text-xs text-gray-500 dark:text-slate-400">Salvando…</span>

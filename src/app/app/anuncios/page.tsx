@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
 import { TablePageSizeSelect } from "@/components/TablePageSizeSelect";
@@ -12,6 +12,14 @@ import {
 } from "@/lib/table-pagination";
 import { SingleAnuncioImportBar, SyncImportProgress } from "@/components/SyncImportProgress";
 import { useOnboarding } from "@/contexts/onboarding-context";
+import {
+  filterCriticalMlItemTags,
+  formatMlItemHealth,
+  formatMlItemTagLabel,
+  mlItemHealthClass,
+  mlItemTagBadgeClass,
+  parseMlItemTags,
+} from "@/lib/mercadolivre/item-tags";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
 const FROZEN_COLUMNS_STORAGE_KEY = "escalapreco_anuncios_frozen_columns";
@@ -47,16 +55,12 @@ const COLUMN_ORDER: ColumnKey[] = [
   "category",
   "status",
   "price",
-  "wholesale_amount_0",
-  "wholesale_qty_0",
-  "wholesale_amount_1",
-  "wholesale_qty_1",
-  "wholesale_amount_2",
-  "wholesale_qty_2",
-  "wholesale_amount_3",
-  "wholesale_qty_3",
-  "wholesale_amount_4",
-  "wholesale_qty_4",
+  "planned_price",
+  "stock",
+  "sold_quantity",
+  "health",
+  "mlbu",
+  "ml_tags",
   "variations",
   "updated_at",
   "link",
@@ -69,17 +73,13 @@ const COLUMN_WIDTHS: Record<ColumnKey, number> = {
   listing_type: 120,
   category: 140,
   status: 100,
-  price: 100,
-  wholesale_amount_0: 96,
-  wholesale_qty_0: 88,
-  wholesale_amount_1: 96,
-  wholesale_qty_1: 88,
-  wholesale_amount_2: 96,
-  wholesale_qty_2: 88,
-  wholesale_amount_3: 96,
-  wholesale_qty_3: 88,
-  wholesale_amount_4: 96,
-  wholesale_qty_4: 88,
+  price: 108,
+  planned_price: 128,
+  stock: 88,
+  sold_quantity: 88,
+  health: 72,
+  mlbu: 120,
+  ml_tags: 200,
   variations: 104,
   updated_at: 170,
   link: 72,
@@ -90,21 +90,21 @@ interface MLAccount {
   ml_nickname: string | null;
 }
 
-interface WholesaleTier {
-  min_purchase_unit: number;
-  amount: number;
-}
-
 interface ItemRow {
   item_id: string;
   title: string | null;
   status: string | null;
   price: number | null;
+  planned_price?: number | null;
+  available_quantity?: number | null;
+  sold_quantity?: number | null;
+  health?: number | null;
+  tags_json?: string[] | null;
+  user_product_id?: string | null;
   has_variations: boolean;
   thumbnail: string | null;
   permalink: string | null;
   updated_at: string;
-  wholesale_prices_json?: WholesaleTier[] | null;
   listing_type_id?: string | null;
   category_id?: string | null;
 }
@@ -125,6 +125,11 @@ type SortField =
   | "category_id"
   | "status"
   | "price"
+  | "planned_price"
+  | "available_quantity"
+  | "sold_quantity"
+  | "health"
+  | "user_product_id"
   | "updated_at";
 type ColumnKey = string;
 
@@ -137,8 +142,9 @@ function AnunciosHelpContent() {
           <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Objetivo</h3>
           <p>
             Esta tela mostra os <strong>anúncios do Mercado Livre</strong> já sincronizados no seu banco de dados para a
-            conta selecionada. Aqui você consulta dados, copia MLB, vê tipo de publicação e categoria, preços e faixas
-            de atacado vindas do cache e dispara novas importações quando precisar atualizar tudo ou só um anúncio.
+            conta selecionada. Aqui você consulta dados, copia MLB, vê tipo de publicação e categoria, preço no ML,
+            preço trabalhado na calculadora, estoque e dispara novas importações quando precisar atualizar tudo ou só um
+            anúncio.
           </p>
         </section>
         <section>
@@ -200,9 +206,34 @@ function AnunciosHelpContent() {
               ), por exemplo MLB1051.
             </li>
             <li>
-              Colunas de <strong>atacado</strong> (preço R$ e quantidade mínima por faixa) são exibidas como leitura a
-              partir do que está salvo no cache; o cadastro e envio ao ML de preços de atacado é feito na tela{" "}
-              <strong>Atacado</strong>.
+              <strong>Preço ML</strong> — valor atual do anúncio no Mercado Livre (
+              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">price</code>).
+            </li>
+            <li>
+              <strong>Preço trabalhado</strong> — preço salvo na calculadora (
+              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">planned_prices</code>); cadastre ou altere
+              na tela <strong>Preços</strong>. Faixas de atacado ficam na tela <strong>Atacado</strong>.
+            </li>
+            <li>
+              <strong>Estoque</strong> — quantidade disponível para venda (
+              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">available_quantity</code>) conforme última
+              sincronização.
+            </li>
+            <li>
+              <strong>Vendidos</strong> — unidades vendidas no anúncio (
+              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">sold_quantity</code>).
+            </li>
+            <li>
+              <strong>Saúde</strong> — indicador de qualidade do ML (
+              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">health</code>, 0–100%).
+            </li>
+            <li>
+              <strong>MLBU</strong> — código User Product (
+              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">user_product_id</code>); clique para copiar.
+            </li>
+            <li>
+              <strong>Alertas ML</strong> — chips com tags críticas do Mercado Livre (ficha incompleta, catálogo,
+              migração UP, etc.).
             </li>
             <li>
               <strong>Link</strong> — abre o anúncio no site do Mercado Livre.
@@ -245,6 +276,7 @@ function AnunciosPageContent() {
   const [singleSyncing, setSingleSyncing] = useState(false);
   const [singleError, setSingleError] = useState<string | null>(null);
   const [copiedMlb, setCopiedMlb] = useState<string | null>(null);
+  const [copiedMlbu, setCopiedMlbu] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>("updated_at");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
@@ -258,6 +290,13 @@ function AnunciosPageContent() {
     navigator.clipboard.writeText(itemId).then(() => {
       setCopiedMlb(itemId);
       setTimeout(() => setCopiedMlb(null), 1800);
+    });
+  }, []);
+
+  const copyMlbu = useCallback((code: string) => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopiedMlbu(code);
+      setTimeout(() => setCopiedMlbu(null), 1800);
     });
   }, []);
 
@@ -464,16 +503,39 @@ function AnunciosPageContent() {
   }
 
   function exportCurrentRows() {
-    const headers = ["MLB", "Título", "Tipo de anúncio", "Categoria", "Status", "Preço", "Atualizado"];
-    const rows = sortedItems.map((item) => [
+    const headers = [
+      "MLB",
+      "Título",
+      "Tipo de anúncio",
+      "Categoria",
+      "Status",
+      "Preço ML",
+      "Preço trabalhado",
+      "Estoque",
+      "Vendidos",
+      "Saúde",
+      "MLBU",
+      "Alertas ML",
+      "Atualizado",
+    ];
+    const rows = sortedItems.map((item) => {
+      const criticalTags = filterCriticalMlItemTags(parseMlItemTags(item.tags_json));
+      return [
       item.item_id,
       item.title ?? "",
       formatListingTypeLabel(item.listing_type_id) || (item.listing_type_id ?? ""),
       item.category_id ?? "",
       item.status ?? "",
       item.price != null ? Number(item.price).toFixed(2) : "",
+      item.planned_price != null ? Number(item.planned_price).toFixed(2) : "",
+      item.available_quantity != null ? String(item.available_quantity) : "",
+      item.sold_quantity != null ? String(item.sold_quantity) : "",
+      formatMlItemHealth(item.health),
+      item.user_product_id ?? "",
+      criticalTags.map(formatMlItemTagLabel).join(", "),
       item.updated_at ? new Date(item.updated_at).toLocaleString() : "",
-    ]);
+    ];
+    });
     const csv = [headers, ...rows]
       .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(";"))
       .join("\n");
@@ -498,7 +560,13 @@ function AnunciosPageContent() {
       if (av == null) return 1 * dir;
       if (bv == null) return -1 * dir;
 
-      if (sortField === "price") {
+      if (
+        sortField === "price" ||
+        sortField === "planned_price" ||
+        sortField === "available_quantity" ||
+        sortField === "sold_quantity" ||
+        sortField === "health"
+      ) {
         return (Number(av) - Number(bv)) * dir;
       }
 
@@ -892,17 +960,18 @@ function AnunciosPageContent() {
                   {renderColumnHeader("listing_type", "Tipo de anúncio", "listing_type_id")}
                   {renderColumnHeader("category", "Categoria", "category_id")}
                   {renderColumnHeader("status", "Status", "status")}
-                  {renderColumnHeader("price", "Preço R$", "price", "whitespace-nowrap")}
-                  {renderColumnHeader("wholesale_amount_0", "R$ Atac. 1", undefined, "whitespace-nowrap")}
-                  {renderColumnHeader("wholesale_qty_0", "Qt. Atac. 1", undefined, "whitespace-nowrap")}
-                  {renderColumnHeader("wholesale_amount_1", "R$ Atac. 2", undefined, "whitespace-nowrap")}
-                  {renderColumnHeader("wholesale_qty_1", "Qt. Atac. 2", undefined, "whitespace-nowrap")}
-                  {renderColumnHeader("wholesale_amount_2", "R$ Atac. 3", undefined, "whitespace-nowrap")}
-                  {renderColumnHeader("wholesale_qty_2", "Qt. Atac. 3", undefined, "whitespace-nowrap")}
-                  {renderColumnHeader("wholesale_amount_3", "R$ Atac. 4", undefined, "whitespace-nowrap")}
-                  {renderColumnHeader("wholesale_qty_3", "Qt. Atac. 4", undefined, "whitespace-nowrap")}
-                  {renderColumnHeader("wholesale_amount_4", "R$ Atac. 5", undefined, "whitespace-nowrap")}
-                  {renderColumnHeader("wholesale_qty_4", "Qt. Atac. 5", undefined, "whitespace-nowrap")}
+                  {renderColumnHeader("price", "Preço ML", "price", "whitespace-nowrap")}
+                  {renderColumnHeader(
+                    "planned_price",
+                    "Preço trab.",
+                    "planned_price",
+                    "whitespace-nowrap"
+                  )}
+                  {renderColumnHeader("stock", "Estoque", "available_quantity", "whitespace-nowrap")}
+                  {renderColumnHeader("sold_quantity", "Vendidos", "sold_quantity", "whitespace-nowrap")}
+                  {renderColumnHeader("health", "Saúde", "health", "whitespace-nowrap")}
+                  {renderColumnHeader("mlbu", "MLBU", "user_product_id")}
+                  {renderColumnHeader("ml_tags", "Alertas ML")}
                   {renderColumnHeader("variations", "Variações")}
                   {renderColumnHeader("updated_at", "Atualizado", "updated_at")}
                   {renderColumnHeader("link", "Link")}
@@ -990,30 +1059,116 @@ function AnunciosPageContent() {
                       </span>
                     </td>
                     <td
-                      className={frozenCellClass("price", "p-2 text-right text-sm font-medium tabular-nums text-slate-800 dark:text-slate-100")}
+                      className={frozenCellClass("price", "p-2 text-right text-sm tabular-nums text-slate-600 dark:text-slate-300")}
                       style={frozenCellStyle("price")}
+                      title="Preço atual no Mercado Livre"
                     >
                       {item.price != null ? Number(item.price).toFixed(2) : "—"}
                     </td>
-                    {[0, 1, 2, 3, 4].map((i) => {
-                      const tier = item.wholesale_prices_json?.[i];
-                      return (
-                        <Fragment key={`atacado-${i}`}>
-                          <td
-                            className={frozenCellClass(`wholesale_amount_${i}`, "p-2 text-right text-sm tabular-nums text-slate-800 dark:text-slate-100")}
-                            style={frozenCellStyle(`wholesale_amount_${i}`)}
-                          >
-                            {tier?.amount != null ? Number(tier.amount).toFixed(2) : "—"}
-                          </td>
-                          <td
-                            className={frozenCellClass(`wholesale_qty_${i}`, "p-2 text-right text-sm tabular-nums text-slate-800 dark:text-slate-100")}
-                            style={frozenCellStyle(`wholesale_qty_${i}`)}
-                          >
-                            {tier?.min_purchase_unit != null ? tier.min_purchase_unit : "—"}
-                          </td>
-                        </Fragment>
-                      );
-                    })}
+                    <td
+                      className={frozenCellClass(
+                        "planned_price",
+                        `p-2 text-right text-sm font-semibold tabular-nums ${
+                          item.planned_price != null &&
+                          item.price != null &&
+                          Number(item.planned_price) !== Number(item.price)
+                            ? "text-[#018589] dark:text-teal-300"
+                            : "text-slate-800 dark:text-slate-100"
+                        }`
+                      )}
+                      style={frozenCellStyle("planned_price")}
+                      title="Preço salvo na calculadora (Preços)"
+                    >
+                      {item.planned_price != null ? Number(item.planned_price).toFixed(2) : "—"}
+                    </td>
+                    <td
+                      className={frozenCellClass(
+                        "stock",
+                        `p-2 text-right text-sm font-medium tabular-nums ${
+                          item.available_quantity === 0
+                            ? "text-amber-700 dark:text-amber-300"
+                            : "text-slate-800 dark:text-slate-100"
+                        }`
+                      )}
+                      style={frozenCellStyle("stock")}
+                      title="Quantidade disponível no ML"
+                    >
+                      {item.available_quantity != null ? item.available_quantity : "—"}
+                    </td>
+                    <td
+                      className={frozenCellClass(
+                        "sold_quantity",
+                        "p-2 text-right text-sm tabular-nums text-slate-700 dark:text-slate-200"
+                      )}
+                      style={frozenCellStyle("sold_quantity")}
+                      title="Unidades vendidas no Mercado Livre"
+                    >
+                      {item.sold_quantity != null ? item.sold_quantity : "—"}
+                    </td>
+                    <td
+                      className={frozenCellClass(
+                        "health",
+                        `p-2 text-right text-sm tabular-nums ${mlItemHealthClass(item.health)}`
+                      )}
+                      style={frozenCellStyle("health")}
+                      title="Qualidade do anúncio no ML (health)"
+                    >
+                      {formatMlItemHealth(item.health)}
+                    </td>
+                    <td
+                      role={item.user_product_id ? "button" : undefined}
+                      tabIndex={item.user_product_id ? 0 : undefined}
+                      onClick={
+                        item.user_product_id ? () => copyMlbu(item.user_product_id!) : undefined
+                      }
+                      onKeyDown={
+                        item.user_product_id
+                          ? (e) => e.key === "Enter" && copyMlbu(item.user_product_id!)
+                          : undefined
+                      }
+                      className={frozenCellClass(
+                        "mlbu",
+                        `max-w-[140px] p-2 font-mono text-xs ${
+                          item.user_product_id ? "pricing-cell-chip cursor-pointer" : ""
+                        }`
+                      )}
+                      style={frozenCellStyle("mlbu")}
+                      title={item.user_product_id ? "Clique para copiar MLBU" : undefined}
+                    >
+                      {item.user_product_id ? (
+                        copiedMlbu === item.user_product_id ? (
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">Copiado!</span>
+                        ) : (
+                          <span className="truncate">{item.user_product_id}</span>
+                        )
+                      ) : (
+                        <span className="text-slate-400 dark:text-slate-500">—</span>
+                      )}
+                    </td>
+                    <td
+                      className={frozenCellClass("ml_tags", "max-w-[220px] p-2")}
+                      style={frozenCellStyle("ml_tags")}
+                    >
+                      {(() => {
+                        const critical = filterCriticalMlItemTags(parseMlItemTags(item.tags_json));
+                        if (critical.length === 0) {
+                          return <span className="text-xs text-slate-400 dark:text-slate-500">—</span>;
+                        }
+                        return (
+                          <div className="flex flex-wrap gap-1">
+                            {critical.map((tag) => (
+                              <span
+                                key={tag}
+                                title={tag}
+                                className={`inline-flex max-w-full truncate rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight ${mlItemTagBadgeClass(tag)}`}
+                              >
+                                {formatMlItemTagLabel(tag)}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td
                       className={frozenCellClass("variations", "p-2 text-xs text-slate-700 dark:text-slate-200")}
                       style={frozenCellStyle("variations")}

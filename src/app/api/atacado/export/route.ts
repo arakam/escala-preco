@@ -26,7 +26,6 @@ export async function GET(request: NextRequest) {
   const filterTitle = searchParams.get("title")?.trim() ?? "";
   const filterSku = searchParams.get("sku")?.trim() ?? "";
   const filterVariation = searchParams.get("variation") ?? "";
-  const hideVariations = searchParams.get("hide_variations") === "true";
   const tagIdsParam = searchParams.get("tags")?.trim() ?? "";
   const tagIds = tagIdsParam
     ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean)
@@ -327,59 +326,65 @@ export async function GET(request: NextRequest) {
   }
   const dataRows: CsvRow[] = [];
 
+  function tiersForItem(itemId: string, variationIds: number[]): { min_qty: number; price: number }[] {
+    const itemKey = `${itemId}:item`;
+    const direct = draftsByKey.get(itemKey);
+    if (direct?.length) return direct;
+    for (const vid of variationIds) {
+      const t = draftsByKey.get(`${itemId}:${vid}`);
+      if (t?.length) return t;
+    }
+    return [];
+  }
+
+  function plannedForItem(itemId: string, fallback: number, variationIds: number[]): number | null {
+    const atItem = getPlannedPrice(itemId, null);
+    if (atItem != null) return atItem;
+    for (const vid of variationIds) {
+      const p = getPlannedPrice(itemId, vid);
+      if (p != null) return p;
+    }
+    return fallback > 0 ? fallback : null;
+  }
+
+  function skuForItem(
+    item: { item_id: string; raw_json?: unknown; seller_custom_field?: string | null },
+    itemVariations: typeof allVariations
+  ): string {
+    const parent = getSku(item, null);
+    if (parent) return parent;
+    for (const v of itemVariations) {
+      const s = getSku(item, v);
+      if (s) return s;
+    }
+    return "";
+  }
+
   for (const item of items ?? []) {
     const itemVariations = (variations ?? []).filter((v) => v.item_id === item.item_id);
-
-    if (item.has_variations && itemVariations.length > 0 && !hideVariations) {
-      for (const v of itemVariations) {
-        const key = `${item.item_id}:${v.variation_id}`;
-        const tiers = draftsByKey.get(key) ?? [];
-        const price = v.price != null ? Number(v.price) : item.price;
-        const sku = getSku(item, v);
-        const values = [
-          escapeCsv(item.item_id),
-          String(v.variation_id),
-          sku,
-          escapeCsv(item.title ?? ""),
-          formatPriceCsv(price ?? undefined),
-          formatPriceCsv(getPlannedPrice(item.item_id, Number(v.variation_id)) ?? undefined),
-          ...Array.from({ length: 5 }, (_, i) => {
-            const t = tiers[i];
-            return t ? [String(t.min_qty), formatPriceCsv(t.price)] : ["", ""];
-          }).flat(),
-        ];
-        dataRows.push({
-          values,
-          hasDraft: tiers.length > 0,
-          sku: sku || null,
-          title: item.title,
-          userProductId: item.user_product_id,
-        });
-      }
-    } else {
-      const key = `${item.item_id}:item`;
-      const tiers = draftsByKey.get(key) ?? [];
-      const sku = getSku(item, null);
-      const values = [
-        escapeCsv(item.item_id),
-        "",
-        sku,
-        escapeCsv(item.title ?? ""),
-        formatPriceCsv(item.price ?? undefined),
-        formatPriceCsv(getPlannedPrice(item.item_id, null) ?? undefined),
-        ...Array.from({ length: 5 }, (_, i) => {
-          const t = tiers[i];
-          return t ? [String(t.min_qty), formatPriceCsv(t.price)] : ["", ""];
-        }).flat(),
-      ];
-      dataRows.push({
-        values,
-        hasDraft: tiers.length > 0,
-        sku: sku || null,
-        title: item.title,
-        userProductId: item.user_product_id,
-      });
-    }
+    const variationIds = itemVariations.map((v) => Number(v.variation_id));
+    const tiers = tiersForItem(item.item_id, variationIds);
+    const sku = skuForItem(item, itemVariations);
+    const price = item.price != null ? Number(item.price) : null;
+    const values = [
+      escapeCsv(item.item_id),
+      "",
+      sku,
+      escapeCsv(item.title ?? ""),
+      formatPriceCsv(price ?? undefined),
+      formatPriceCsv(plannedForItem(item.item_id, price ?? 0, variationIds) ?? undefined),
+      ...Array.from({ length: 5 }, (_, i) => {
+        const t = tiers[i];
+        return t ? [String(t.min_qty), formatPriceCsv(t.price)] : ["", ""];
+      }).flat(),
+    ];
+    dataRows.push({
+      values,
+      hasDraft: tiers.length > 0,
+      sku: sku || null,
+      title: item.title,
+      userProductId: item.user_product_id,
+    });
   }
 
   // Aplicar filtros pós-processamento

@@ -63,6 +63,10 @@ export interface MLItemDetail {
   currency_id: string;
   available_quantity: number;
   sold_quantity: number;
+  /** Qualidade do anúncio (0–1) quando retornado pela API. */
+  health?: number | null;
+  /** Tags de alerta / catálogo / migração UP etc. */
+  tags?: string[];
   condition: string;
   shipping: unknown;
   seller_custom_field: string | null;

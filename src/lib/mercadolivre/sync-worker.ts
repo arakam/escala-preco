@@ -58,6 +58,10 @@ function mapItemToRow(accountId: string, item: MLItemDetail) {
     currency_id: item.currency_id ?? null,
     available_quantity: item.available_quantity ?? null,
     sold_quantity: item.sold_quantity ?? null,
+    health: item.health != null && !Number.isNaN(Number(item.health)) ? Number(item.health) : null,
+    tags_json: Array.isArray(item.tags)
+      ? item.tags.filter((t): t is string => typeof t === "string")
+      : null,
     condition: item.condition ?? null,
     shipping_json: item.shipping != null ? (item.shipping as object) : null,
     seller_custom_field: item.seller_custom_field ?? null,
@@ -359,6 +363,19 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     syncLog(jobId, "job finalizado", { finalStatus, ok, errors, total });
 
     if (finalStatus !== "failed") {
+      try {
+        const { autoCreateProductsFromMlSync } = await import("@/lib/products/auto-create-from-ml-sync");
+        const autoProd = await autoCreateProductsFromMlSync(accountId);
+        if (autoProd.ok && !autoProd.skipped_disabled) {
+          syncLog(jobId, "produtos auto (SKU + medidas)", {
+            created: autoProd.products_created,
+            updated: autoProd.products_updated,
+            linked: autoProd.items_linked + autoProd.variations_linked,
+          });
+        }
+      } catch (err) {
+        console.error(`[sync:${jobId}] auto-create products`, err);
+      }
       syncLog(jobId, "disparando refreshPricingCache em background");
       const { refreshPricingCache } = await import("@/lib/pricing-cache");
       refreshPricingCache(accountId).catch((err) =>
@@ -467,6 +484,18 @@ export async function syncSingleItem(
           onConflict: "account_id,item_id,variation_id",
         });
       }
+    }
+    try {
+      const { autoCreateProductsFromMlSync } = await import("@/lib/products/auto-create-from-ml-sync");
+      await autoCreateProductsFromMlSync(accountId, [itemIdClean]);
+    } catch (err) {
+      console.error(`[sync:${logId}] auto-create products`, err);
+    }
+    try {
+      const { refreshPricingCacheByItemId } = await import("@/lib/pricing-cache");
+      await refreshPricingCacheByItemId(accountId, itemIdClean);
+    } catch (err) {
+      console.error(`[sync:${logId}] pricing cache refresh`, err);
     }
     if (syncLogVerbose()) {
       syncLog(logId, "sincronização unitária OK", {
