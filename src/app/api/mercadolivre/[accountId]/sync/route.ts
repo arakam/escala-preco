@@ -1,7 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import { getActiveJob, createJob } from "@/lib/jobs";
-import { runSyncInBackground } from "@/lib/server/after-response";
-import { runSyncJob } from "@/lib/mercadolivre/sync-worker";
+import { getActiveJob, createJob, needsSyncWorkerRestart } from "@/lib/jobs";
+import { kickSyncJob, restartSyncJobIfStuck } from "@/lib/mercadolivre/schedule-sync";
 import { NextRequest, NextResponse } from "next/server";
 
 /**
@@ -37,11 +36,14 @@ export async function POST(
 
   const active = await getActiveJob(supabase, accountId);
   if (active) {
+    if (needsSyncWorkerRestart(active)) {
+      restartSyncJobIfStuck(active.id, accountId);
+    }
     return NextResponse.json({ job_id: active.id, message: "Sincronização já em andamento" });
   }
 
   const { id: jobId } = await createJob(supabase, accountId);
-  runSyncInBackground(() => runSyncJob(jobId, accountId));
+  await kickSyncJob(jobId, accountId);
 
   return NextResponse.json({ job_id: jobId });
 }

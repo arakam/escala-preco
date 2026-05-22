@@ -1,5 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
-import { getJobWithLogs, updateJob } from "@/lib/jobs";
+import {
+  expireStaleJobsForAccount,
+  getJobWithLogs,
+  needsSyncWorkerRestart,
+  updateJob,
+} from "@/lib/jobs";
+import { restartSyncJobIfStuck } from "@/lib/mercadolivre/schedule-sync";
 import { NextRequest, NextResponse } from "next/server";
 
 async function getJobAndCheckOwnership(
@@ -49,7 +55,13 @@ export async function GET(
     return NextResponse.json({ error: "Job não encontrado" }, { status: 404 });
   }
 
+  const accountId = job.account_id;
+  await expireStaleJobsForAccount(supabase, accountId, "sync_items");
+
   const { job: fullJob, logs } = await getJobWithLogs(supabase, jobId);
+  if (fullJob && fullJob.type === "sync_items" && needsSyncWorkerRestart(fullJob)) {
+    restartSyncJobIfStuck(jobId, accountId);
+  }
   return NextResponse.json({
     job: fullJob,
     logs,

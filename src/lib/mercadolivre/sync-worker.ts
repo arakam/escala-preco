@@ -199,11 +199,7 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       verbose: syncLogVerbose(),
       heartbeatMs: syncHeartbeatMs(),
     });
-    await updateJob(supabase, jobId, {
-      total,
-      status: "running",
-      started_at: now,
-    });
+    await updateJob(supabase, jobId, { total });
 
     let processed = 0;
     let ok = 0;

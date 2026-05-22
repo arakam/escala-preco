@@ -28,6 +28,15 @@ export interface JobRow {
 /** Jobs presos após crash do processo, timeout de proxy ou deploy (VPS/serverless). */
 const STALE_RUNNING_MS = 8 * 60 * 1000;
 const STALE_QUEUED_MS = 5 * 60 * 1000;
+/** Fila sem worker (ex.: setImmediate não rodou) — reagendar após este intervalo. */
+export const STUCK_QUEUED_RESTART_MS = 30 * 1000;
+
+/** Job em fila que nunca recebeu `started_at` e já passou do tempo de reagendar o worker. */
+export function needsSyncWorkerRestart(job: Pick<JobRow, "status" | "started_at" | "created_at">): boolean {
+  if (job.status !== "queued" || job.started_at) return false;
+  const ageMs = Date.now() - new Date(job.created_at).getTime();
+  return ageMs >= STUCK_QUEUED_RESTART_MS;
+}
 
 /**
  * Marca como failed jobs running há muito tempo ou queued cujo worker nunca iniciou.

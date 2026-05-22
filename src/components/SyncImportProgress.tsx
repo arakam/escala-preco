@@ -51,6 +51,10 @@ export function SyncImportProgress({ job, actions, tone = "app" }: SyncImportPro
   const pct = showCounts ? Math.min(100, Math.round((processed / Math.max(1, total)) * 100)) : 0;
   const preparing =
     (status === "queued" || status === "running") && total === 0;
+  const preparingMessage =
+    status === "queued"
+      ? "Aguardando início da importação…"
+      : "Buscando lista de anúncios no Mercado Livre…";
 
   const shell =
     tone === "app"
@@ -84,9 +88,7 @@ export function SyncImportProgress({ job, actions, tone = "app" }: SyncImportPro
             )}
           </div>
           {preparing ? (
-            <p className={`text-xs ${muted}`}>
-              Buscando lista de anúncios no Mercado Livre…
-            </p>
+            <p className={`text-xs ${muted}`}>{preparingMessage}</p>
           ) : null}
           <div
             className={`h-2 w-full overflow-hidden rounded-full ${tone === "app" ? "bg-slate-200/90 dark:bg-slate-600/80" : "bg-slate-200 dark:bg-slate-600/80"}`}

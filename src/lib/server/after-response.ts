@@ -1,11 +1,11 @@
 /**
- * Agenda trabalho pesado após o handler responder (próximo tick do event loop).
- * Em VPS com `next start`, o processo Node permanece ativo até o job concluir.
+ * Inicia trabalho pesado sem bloquear a resposta HTTP.
+ * Em `next dev` / `next start` o processo Node segue vivo até o job terminar.
+ *
+ * Não usar setImmediate: no App Router o callback pode não rodar antes do handler encerrar.
  */
 export function runSyncInBackground(start: () => Promise<unknown>): void {
-  setImmediate(() => {
-    void start().catch((e) => {
-      console.error("[sync] worker error:", e);
-    });
+  void start().catch((e) => {
+    console.error("[sync] worker error:", e);
   });
 }
