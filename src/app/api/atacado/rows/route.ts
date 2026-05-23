@@ -124,7 +124,8 @@ export async function GET(request: NextRequest) {
 
   const ITEM_SELECT =
     "item_id, title, has_variations, price, listing_type_id, category_id, seller_custom_field, family_name, family_id, user_product_id";
-  const ITEM_SELECT_WITH_RAW = `${ITEM_SELECT}, raw_json`;
+  const ITEM_SELECT_WITH_RAW =
+    "item_id, title, has_variations, price, listing_type_id, category_id, seller_custom_field, family_name, family_id, user_product_id, raw_json";
 
   const needsFullScan =
     showAll ||
@@ -133,10 +134,8 @@ export async function GET(request: NextRequest) {
     filter === "sem_rascunho" ||
     filter === "price_high";
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function applyItemFilters<T extends { eq: (...args: any[]) => T; ilike: (...args: any[]) => T; not: (...args: any[]) => T; in: (...args: any[]) => T }>(
-    query: T
-  ): T {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- evita TS2589 com tipos profundos do Supabase
+  function applyItemFilters(query: any): any {
     let q = query;
     if (filterMlb) {
       if (filterMlb.toUpperCase().startsWith("MLB") && filterMlb.length >= 10) {
@@ -175,19 +174,28 @@ export async function GET(request: NextRequest) {
     let hasMore = true;
 
     while (hasMore) {
-      let query = applyItemFilters(
-        supabase
-          .from("ml_items")
-          .select(includeRawJson ? ITEM_SELECT_WITH_RAW : ITEM_SELECT)
-          .eq("account_id", accountId)
-          .order("updated_at", { ascending: false })
-          .range(offset, offset + batchSize - 1)
-      );
+      const rangeEnd = offset + batchSize - 1;
+      const { data, error } = includeRawJson
+        ? await applyItemFilters(
+            supabase
+              .from("ml_items")
+              .select(ITEM_SELECT_WITH_RAW)
+              .eq("account_id", accountId)
+              .order("updated_at", { ascending: false })
+              .range(offset, rangeEnd)
+          )
+        : await applyItemFilters(
+            supabase
+              .from("ml_items")
+              .select(ITEM_SELECT)
+              .eq("account_id", accountId)
+              .order("updated_at", { ascending: false })
+              .range(offset, rangeEnd)
+          );
 
-      const { data, error } = await query;
       if (error) throw error;
 
-      const batch = (data ?? []) as ItemRow[];
+      const batch = (data ?? []) as unknown as ItemRow[];
       allItems = [...allItems, ...batch];
       hasMore = batch.length === batchSize;
       offset += batchSize;
