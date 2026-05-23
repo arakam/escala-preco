@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
 import type { ProductTag } from "@/lib/db/types";
@@ -266,100 +266,230 @@ interface BulkDiscountConditional {
   discountBase: "current" | "promotion";
 }
 
+function HelpFieldBadge({ kind }: { kind: "required" | "optional" }) {
+  return (
+    <span
+      className={
+        kind === "required"
+          ? "inline-flex shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white bg-rose-600 ring-1 ring-inset ring-rose-700 dark:bg-rose-700 dark:ring-rose-500"
+          : "inline-flex shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white bg-emerald-600 ring-1 ring-inset ring-emerald-700 dark:bg-emerald-700 dark:ring-emerald-500"
+      }
+    >
+      {kind === "required" ? "Obrigatório" : "Opcional"}
+    </span>
+  );
+}
+
+function HelpFieldRow({
+  name,
+  kind,
+  children,
+}: {
+  name: string;
+  kind: "required" | "optional";
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex gap-3 rounded-lg border border-slate-200/90 bg-white px-3 py-2.5 dark:border-slate-600 dark:bg-slate-800/50">
+      <div className="pt-0.5">
+        <HelpFieldBadge kind={kind} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-slate-900 dark:text-slate-100">{name}</p>
+        <p className="mt-0.5 text-slate-600 dark:text-slate-300">{children}</p>
+      </div>
+    </div>
+  );
+}
+
 function AtacadoHelpContent() {
   return (
-    <div className="space-y-4 text-sm text-slate-700 dark:text-slate-300">
-      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Como funciona a tela Atacado</h2>
-      <div className="space-y-4">
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Objetivo</h3>
-          <p>
-            Aqui você cadastra e ajusta até <strong>cinco faixas de preço de atacado</strong> por anúncio (um MLB por linha, como na tela de Preços):
-            quantidade mínima da faixa e preço em reais. Os valores ficam salvos no sistema e podem ser enviados ao
-            Mercado Livre quando você <strong>aplicar</strong> as alterações.
+    <div className="space-y-6 text-sm text-slate-700 dark:text-slate-300">
+      <div
+        className="flex gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sky-950 shadow-sm dark:border-sky-800 dark:bg-sky-950/60 dark:text-sky-100"
+        role="note"
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-200 text-lg dark:bg-sky-800" aria-hidden>
+          💡
+        </span>
+        <div>
+          <p className="font-semibold text-sky-900 dark:text-sky-50">Leia antes de começar</p>
+          <p className="mt-1 text-sky-800/95 dark:text-sky-200/95">
+            Evita erros comuns e retrabalho. Salvar rascunho no sistema não altera o Mercado Livre; só{" "}
+            <strong>Aplicar no Mercado Livre</strong> envia os preços. Reserve 2 minutos nesta aba antes de importar ou
+            aplicar em massa.
           </p>
-        </section>
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Salvar e aplicar no Mercado Livre</h3>
-          <ul className="list-inside list-disc space-y-1">
-            <li>
-              <strong>Salvar alterações</strong> — grava no banco as edições da página atual (linhas com mudança). Ao
-              aplicar no ML, alterações ainda não salvas são salvas automaticamente antes do envio.
-            </li>
-            <li>
-              <strong>Aplicar no Mercado Livre</strong> — envia ao ML os preços de atacado salvos para os itens
-              elegíveis. Pode abrir um painel de progresso com totais e erros por linha.
-            </li>
-            <li>
-              A lista depende dos anúncios já sincronizados; se não houver linhas, sincronize primeiro na tela{" "}
-              <a href="/app/anuncios" className="font-medium text-[#0d6efd] underline hover:no-underline">
-                Anúncios
-              </a>
-              .
-            </li>
-          </ul>
-        </section>
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Importar CSV</h3>
-          <p>
-            Use <strong>Importar CSV</strong> para carregar um arquivo com colunas de atacado em lote. O arquivo deve
-            usar separador <strong>;</strong> (ponto e vírgula) e a primeira linha deve ser exatamente o cabeçalho do
-            arquivo gerado por <strong>Exportar CSV</strong>. O sistema mostra um preview com linhas válidas e erros
-            antes de você <strong>confirmar a importação</strong>.
-          </p>
-        </section>
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Importar do Mercado Livre</h3>
-          <p>
-            O botão <strong>Importar do ML</strong> traz para o rascunho as faixas de atacado que estão hoje no{" "}
-            <strong>Mercado Livre</strong>, <strong>substituindo</strong> os valores que você tinha editado nesta tela
-            (com confirmação).
-          </p>
-        </section>
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Filtros e opções</h3>
-          <ul className="list-inside list-disc space-y-1">
-            <li>
-              A linha <strong>Filtros:</strong> mostra o que está ativo; <strong>Limpar</strong> remove os filtros
-              aplicados.
-            </li>
-            <li>
-              O ícone de <strong>funil</strong> abre o modal (MLB, MLBU, título, SKU, refino e tags de produto).
-            </li>
-            <li>
-              <strong>Importar do ML</strong>, <strong>Importar CSV</strong> e <strong>Exportar CSV</strong>{" "}
-              ficam na barra superior — o arquivo exportado segue o mesmo modelo para editar e voltar a importar. O
-              menu <strong>⋮</strong> continua a oferecer <strong>Exportar CSV</strong> e{" "}
-              <strong>Atualizar tabela</strong> (recarrega do servidor com os mesmos filtros).
-            </li>
-          </ul>
-        </section>
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Ações em massa</h3>
-          <p>
-            No dropdown <strong>Ações em massa</strong> você pode definir quantidade mínima de uma faixa para todas as
-            linhas da página, aplicar preço com desconto percentual (com regras opcionais) ou limpar todas as colunas de
-            atacado da página.
-          </p>
-        </section>
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Tabela</h3>
-          <ul className="list-inside list-disc space-y-1">
-            <li>
-              Edite diretamente os campos de <strong>Atacado 1–5</strong> (quantidade mínima e preço). Colunas de
-              preço atual e promoção ajudam na referência.
-            </li>
-            <li>
-              Use o menu <strong>▾</strong> no título da coluna para <strong>congelar</strong> colunas à esquerda ao
-              rolar horizontalmente.
-            </li>
-            <li>
-              Em <strong>Ações</strong>, conforme disponível, é possível abrir estimativas de recebível por unidade
-              (taxas ML) para cenários de preço.
-            </li>
-          </ul>
-        </section>
+        </div>
       </div>
+
+      <section className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#0d6efd]/10 text-lg dark:bg-[#0d6efd]/25"
+            aria-hidden
+          >
+            📦
+          </span>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Para que serve esta tela</h2>
+        </div>
+        <p>
+          A tela <strong>Atacado</strong> cadastra e ajusta até <strong>cinco faixas de preço por quantidade</strong>{" "}
+          por anúncio (um MLB por linha): quantidade mínima em <strong>Qt. Atac.</strong> e preço em{" "}
+          <strong>R$ Atac.</strong>
+        </p>
+        <p>
+          Ao clicar em <strong>Salvar alterações</strong>, os valores ficam gravados como rascunho no sistema. Ao clicar
+          em <strong>Aplicar no Mercado Livre</strong>, os preços salvos são enviados ao ML (alterações ainda não salvas
+          são salvas automaticamente antes do envio).
+        </p>
+        <p className="text-slate-600 dark:text-slate-400">
+          <strong>Pré-requisito:</strong> anúncios já sincronizados na conta ativa. Se a tabela estiver vazia, abra a
+          aba <strong>Anúncios</strong> e use <strong>Importar / sincronizar todos</strong>, ou confira a conta no menu
+          superior.
+        </p>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Passo a passo</h2>
+        <ol className="list-decimal space-y-2.5 pl-5 marker:font-semibold marker:text-[#0d6efd]">
+          <li>
+            Abra a aba <strong>Atacado</strong> e confirme a conta ML no menu superior. Use o ícone de{" "}
+            <strong>funil</strong>, preencha o modal <strong>Filtros</strong> se quiser refinar e clique em{" "}
+            <strong>Aplicar filtros</strong>.
+          </li>
+          <li>
+            Edite <strong>Qt. Atac. 1–5</strong> e <strong>R$ Atac. 1–5</strong> na tabela (cada quantidade preenchida
+            deve ser maior que a da coluna à esquerda). Use <strong>Preço R$</strong> e <strong>Promoção R$</strong> só
+            como referência.
+          </li>
+          <li>
+            Clique em <strong>Salvar alterações</strong> para gravar os rascunhos das linhas alteradas nesta página.
+          </li>
+          <li>
+            Clique em <strong>Aplicar no Mercado Livre</strong> para enviar ao ML os preços de atacado já salvos nos
+            itens elegíveis.
+          </li>
+          <li>
+            Para trabalhar em lote, clique em <strong>Importar CSV</strong>, depois em{" "}
+            <strong>Selecionar arquivo…</strong>, revise o preview e clique em <strong>Confirmar Importação</strong>; ou
+            use <strong>Exportar CSV</strong> para editar na planilha.
+          </li>
+          <li>
+            Para trazer faixas do ML para o rascunho (substituindo edições locais), clique em{" "}
+            <strong>Importar do ML</strong> e confirme. No menu <strong>⋮</strong>, use{" "}
+            <strong>Atualizar tabela</strong> para recarregar a lista com os mesmos filtros.
+          </li>
+        </ol>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Campos e o que significam</h2>
+
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Barra de ações (aba Atacado)
+          </h3>
+          <div className="space-y-2">
+            <HelpFieldRow kind="required" name="Salvar alterações">
+              Grava no banco as edições da página atual; só linhas com status alterado. Não envia nada ao Mercado Livre.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Importar CSV">
+              Abre o modal de importação; arquivo UTF-8 com separador <strong>;</strong> e cabeçalho igual ao de{" "}
+              <strong>Exportar CSV</strong>.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Exportar CSV">
+              Baixa planilha com MLB, SKU, preços de referência e colunas de atacado 1–5 da conta/filtros atuais.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Importar do ML">
+              Substitui os rascunhos pelas faixas que estão hoje no Mercado Livre (confirmação obrigatória).
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Aplicar no Mercado Livre">
+              Envia ao ML os preços de atacado salvos; pode exibir painel de progresso com erros por linha.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Ações em massa">
+              Menu com <strong>Editar quantidade mínima…</strong>, <strong>Preço com desconto %…</strong> e{" "}
+              <strong>Limpar todas as colunas de atacado…</strong> — afeta só as linhas visíveis nesta página.
+            </HelpFieldRow>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Modal Filtros (ícone de funil)
+          </h3>
+          <div className="space-y-2">
+            <HelpFieldRow kind="optional" name="MLB">
+              Código do anúncio (ex.: MLB1234567890); busca parcial ou exata se o código estiver completo.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="MLBU">
+              Código User Product; busca parcial no campo sincronizado.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Título">
+              Texto livre no título do anúncio; correspondência parcial.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="SKU">
+              Filtra pelo SKU (atributo SELLER_SKU do item ou variação).
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Refino">
+              Opções: Nenhum, Só MLBU, Com família, Com rascunho, Sem rascunho, Preço alto (ref.).
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Tags do produto vinculado (qualquer uma)">
+              Exibe linhas cujo produto vinculado tenha pelo menos uma das tags marcadas.
+            </HelpFieldRow>
+            <HelpFieldRow kind="required" name="Aplicar filtros">
+              Confirma o modal e recarrega a tabela; sem este clique, nada do modal entra em vigor.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Limpar filtros">
+              Zera filtros aplicados e campos do modal (botão no rodapé do modal, quando visível).
+            </HelpFieldRow>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Colunas editáveis (tabela)
+          </h3>
+          <div className="space-y-2">
+            <HelpFieldRow kind="optional" name="Qt. Atac. 1–5">
+              Quantidade mínima inteira ≥ 2; cada coluna preenchida deve ser maior que todas à esquerda. Pode ficar vazia
+              se a faixa não for usada.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="R$ Atac. 1–5">
+              Preço unitário da faixa; use vírgula ou ponto para decimais. Obrigatório &gt; 0 quando a quantidade da mesma
+              faixa estiver preenchida.
+            </HelpFieldRow>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Colunas de referência e ações por linha
+          </h3>
+          <div className="space-y-2">
+            <HelpFieldRow kind="optional" name="MLB">
+              Código do anúncio; clique na célula para copiar.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Preço R$">
+              Preço atual no Mercado Livre (somente leitura).
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Promoção R$">
+              Preço planejado na calculadora (<strong>Preços</strong>); referência para descontos em massa.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Status">
+              Indica se a linha está salva, alterada ou com erro de validação.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Salvar linha (ícone)">
+              Grava só aquela linha, equivalente a <strong>Salvar alterações</strong> para um MLB.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Reverter alterações desta linha (ícone)">
+              Descarta edições locais e restaura o último rascunho salvo.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Ver recebível (ícone)">
+              Abre estimativa de taxas ML e valor líquido por cenário de preço/atacado.
+            </HelpFieldRow>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
