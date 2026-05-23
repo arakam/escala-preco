@@ -162,6 +162,12 @@ type SellerCampaignItemResult =
   | { item_id: string; variation_id: number | null; status: "skipped_no_planned_price" }
   | { item_id: string; variation_id: number | null; status: "error"; error: string };
 
+/** Resposta por item em POST /api/mercadolivre/update-item-prices */
+type UpdatePriceItemResult =
+  | { item_id: string; variation_id: number | null; status: "ok"; price: number; warnings?: string[] }
+  | { item_id: string; variation_id: number | null; status: "skipped_invalid_price" }
+  | { item_id: string; variation_id: number | null; status: "error"; error: string };
+
 function escapeCsvField(value: string | number | null | undefined): string {
   const s = value == null ? "" : String(value);
   if (/[",\r\n;]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -186,6 +192,26 @@ function buildCampaignIssuesCsv(rows: SellerCampaignItemResult[]): string {
           "sem_preco_salvo",
           "Sem preço planejado gravado (planned_price) para esta linha",
         ]
+          .map(escapeCsvField)
+          .join(sep)
+      );
+    }
+  }
+  return `\uFEFF${lines.join("\r\n")}`;
+}
+
+function buildUpdatePriceIssuesCsv(rows: UpdatePriceItemResult[]): string {
+  const sep = ";";
+  const header = ["item_id", "variation_id", "situacao", "mensagem"];
+  const lines: string[] = [header.map(escapeCsvField).join(sep)];
+  for (const r of rows) {
+    if (r.status === "ok") continue;
+    const vid = r.variation_id == null ? "" : String(r.variation_id);
+    if (r.status === "error") {
+      lines.push([r.item_id, vid, "erro_api", r.error].map(escapeCsvField).join(sep));
+    } else {
+      lines.push(
+        [r.item_id, vid, "promocao_invalida", "Promoção inválida ou zero na linha selecionada"]
           .map(escapeCsvField)
           .join(sep)
       );
@@ -1135,6 +1161,13 @@ function PrecosPageContent() {
   const [campaignMessage, setCampaignMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   /** Itens com erro ou sem preço salvo após criar campanha (para CSV). */
   const [campaignIssuesForDownload, setCampaignIssuesForDownload] = useState<SellerCampaignItemResult[] | null>(null);
+  const [updatePriceOpen, setUpdatePriceOpen] = useState(false);
+  const [updatePriceLoading, setUpdatePriceLoading] = useState(false);
+  const [updatePriceMessage, setUpdatePriceMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+  const [updatePriceIssuesForDownload, setUpdatePriceIssuesForDownload] = useState<UpdatePriceItemResult[] | null>(
+    null
+  );
+  const updatePriceMessageDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Modal de filtros (padrão Adminty) */
   const [filtersModalOpen, setFiltersModalOpen] = useState(false);
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
@@ -2770,7 +2803,116 @@ function PrecosPageContent() {
       setCampaignName(`EP ${month}-${year}`);
     }
     setCampaignOpen(true);
-  }, [campaignName, selectedIds, listings]);
+  }, [campaignName, campaignStart, campaignFinish, selectedIds, listings]);
+
+  const handleOpenUpdatePrice = useCallback(() => {
+    if (selectedIds.size === 0) {
+      setUpdatePriceMessage({ type: "error", text: "Selecione pelo menos um anúncio." });
+      return;
+    }
+    const selectedListings = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
+    const invalid = selectedListings.filter((l) => !(l.new_price > 0));
+    if (invalid.length > 0) {
+      const names = invalid.map((l) => l.title || l.item_id).slice(0, 5);
+      const more = invalid.length > 5 ? ` e mais ${invalid.length - 5}` : "";
+      setUpdatePriceMessage({
+        type: "error",
+        text: `${invalid.length} item(ns) selecionado(s) sem promoção válida (> 0): ${names.join(", ")}${more}.`,
+      });
+      return;
+    }
+    setUpdatePriceMessage(null);
+    setUpdatePriceOpen(true);
+  }, [selectedIds, listings]);
+
+  const handleConfirmUpdatePrice = useCallback(async () => {
+    const selectedListings = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
+    if (selectedListings.length === 0) {
+      setUpdatePriceMessage({ type: "error", text: "Selecione pelo menos um anúncio." });
+      return;
+    }
+
+    const items = selectedListings.map((l) => ({
+      item_id: l.item_id,
+      variation_id: l.variation_id,
+      promotion_price: l.new_price,
+    }));
+
+    setUpdatePriceLoading(true);
+    setUpdatePriceMessage(null);
+    setUpdatePriceIssuesForDownload(null);
+    if (updatePriceMessageDismissRef.current) {
+      clearTimeout(updatePriceMessageDismissRef.current);
+      updatePriceMessageDismissRef.current = null;
+    }
+
+    try {
+      const res = await fetch("/api/mercadolivre/update-item-prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setUpdatePriceIssuesForDownload(null);
+        setUpdatePriceMessage({
+          type: "error",
+          text: (data as { error?: string }).error ?? "Erro ao atualizar preços no Mercado Livre.",
+        });
+        return;
+      }
+
+      const itemsRaw = (data as { items?: UpdatePriceItemResult[] }).items ?? [];
+      const issues = itemsRaw.filter((i) => i.status !== "ok");
+      setUpdatePriceIssuesForDownload(issues.length > 0 ? issues : null);
+
+      const summary = (data as { summary?: { applied?: number; skipped_invalid_price?: number; errors?: number } })
+        .summary || {};
+      const applied = summary.applied ?? 0;
+      const skipped = summary.skipped_invalid_price ?? 0;
+      const errors = summary.errors ?? 0;
+      const csvHint =
+        issues.length > 0
+          ? ` Baixe o CSV abaixo para ver ${issues.length} linha(s) com erro ou promoção inválida.`
+          : "";
+
+      setUpdatePriceMessage({
+        type: applied > 0 && errors === 0 ? "ok" : applied > 0 ? "ok" : "error",
+        text: `Preço atualizado no ML: ${applied} anúncio(s), ${skipped} com promoção inválida, ${errors} com erro.${csvHint}`,
+      });
+      setSelectedIds(new Set());
+      setUpdatePriceOpen(false);
+      await loadListings();
+
+      const dismissMs = issues.length > 0 ? 45000 : 8000;
+      updatePriceMessageDismissRef.current = setTimeout(() => {
+        updatePriceMessageDismissRef.current = null;
+        setUpdatePriceMessage(null);
+        setUpdatePriceIssuesForDownload(null);
+      }, dismissMs);
+    } catch {
+      setUpdatePriceIssuesForDownload(null);
+      setUpdatePriceMessage({
+        type: "error",
+        text: "Erro de rede ao atualizar preços no Mercado Livre.",
+      });
+    } finally {
+      setUpdatePriceLoading(false);
+    }
+  }, [selectedIds, listings, loadListings]);
+
+  const handleDownloadUpdatePriceIssuesCsv = useCallback(() => {
+    if (!updatePriceIssuesForDownload?.length) return;
+    const csv = buildUpdatePriceIssuesCsv(updatePriceIssuesForDownload);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    a.download = `precos-ml-nao-atualizados-${stamp}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [updatePriceIssuesForDownload]);
 
   const handleCreateCampaign = useCallback(async () => {
     if (!campaignName.trim()) {
@@ -3218,6 +3360,65 @@ function PrecosPageContent() {
         </div>
       )}
 
+      {updatePriceOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => !updatePriceLoading && setUpdatePriceOpen(false)}
+          />
+          <div className="relative w-full max-w-lg rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
+            <h2 className="mb-4 text-lg font-semibold">Atualizar preço no Mercado Livre</h2>
+            <div className="space-y-3 text-sm text-fg">
+              <p>
+                Serão atualizados <strong>{selectedCount}</strong> anúncio(s) selecionado(s). O valor enviado é o da
+                coluna <strong>Promoção</strong> de cada linha.
+              </p>
+              <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+                <p className="mb-2 font-medium">Impactos no Mercado Livre</p>
+                <ul className="list-inside list-disc space-y-1">
+                  <li>
+                    Se houver promoção ativa e o novo preço ficar <strong>abaixo</strong> dela, a promoção pode ser
+                    removida.
+                  </li>
+                  <li>
+                    Promoções programadas (DEALS) não mudam até a data de início; o preço standard é alterado agora.
+                  </li>
+                  <li>
+                    Anúncios com <strong>automatização de preços</strong> ativa podem rejeitar a alteração ou ignorar o
+                    valor — verifique no ML.
+                  </li>
+                  <li>
+                    Em categorias com desconto de frete automático (MLB), alterar o preço pode remover o benefício se
+                    ficar abaixo do mínimo.
+                  </li>
+                </ul>
+              </div>
+              <p className="text-xs text-fg-muted">
+                Após sucesso, o anúncio é sincronizado e a coluna Preço ML é atualizada na tabela.
+              </p>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setUpdatePriceOpen(false)}
+                className="btn btn-secondary px-4 py-2 text-sm"
+                disabled={updatePriceLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmUpdatePrice()}
+                disabled={updatePriceLoading}
+                className="btn btn-primary text-sm disabled:opacity-50"
+              >
+                {updatePriceLoading ? "Atualizando…" : "Atualizar preço no ML"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {bulkDiscountModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
@@ -3444,6 +3645,15 @@ function PrecosPageContent() {
             className="btn btn-primary btn-sm disabled:cursor-not-allowed"
           >
             Criar campanha ML ({selectedCount})
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenUpdatePrice}
+            disabled={listings.length === 0 || selectedCount === 0 || updatePriceLoading}
+            className="btn btn-sm border-2 border-yellow-400 bg-white text-amber-950 shadow-sm hover:bg-yellow-50 focus:ring-yellow-400/40 disabled:cursor-not-allowed disabled:opacity-50 dark:border-yellow-500 dark:bg-slate-900 dark:text-yellow-100 dark:hover:bg-yellow-950/40"
+            title="Envia o valor da coluna Promoção como preço standard do anúncio no Mercado Livre (PUT /items)"
+          >
+            {updatePriceLoading ? "Atualizando…" : `Atualizar preço ML (${selectedCount})`}
           </button>
           <div className="btn-dropdown relative" ref={bulkActionsRef}>
             <button
@@ -3672,6 +3882,27 @@ function PrecosPageContent() {
               className="mt-3 rounded border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-800 shadow-sm hover:bg-blue-50 dark:border-blue-700 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-slate-800"
             >
               Baixar CSV — {campaignIssuesForDownload.length} não incluído(s) (erro ou sem preço salvo)
+            </button>
+          )}
+        </div>
+      )}
+
+      {updatePriceMessage && (
+        <div
+          className={`mb-4 rounded p-3 text-sm ${
+            updatePriceMessage.type === "ok"
+              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+              : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200"
+          }`}
+        >
+          <p>{updatePriceMessage.text}</p>
+          {updatePriceIssuesForDownload && updatePriceIssuesForDownload.length > 0 && (
+            <button
+              type="button"
+              onClick={handleDownloadUpdatePriceIssuesCsv}
+              className="mt-3 rounded border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 dark:border-emerald-700 dark:bg-slate-900 dark:text-emerald-200 dark:hover:bg-slate-800"
+            >
+              Baixar CSV — {updatePriceIssuesForDownload.length} não atualizado(s)
             </button>
           )}
         </div>
