@@ -20,6 +20,11 @@ import {
 } from "@/lib/mercadolivre/campaign-name";
 import { splitMlActivePromotionsCell } from "@/lib/mercadolivre/seller-promotions-item";
 import type { ProductTag } from "@/lib/db/types";
+import {
+  PRECOS_IMPORT_CSV_TEMPLATE_HEADER,
+  type PrecosImportPreviewRow,
+  type PrecosImportRowValid,
+} from "@/lib/precos-import-csv";
 
 interface PricingListing {
   id: string;
@@ -1166,6 +1171,19 @@ function PrecosPageContent() {
   const [bulkRestoreLoaderProgress, setBulkRestoreLoaderProgress] = useState<BulkBatchLoaderProgress | null>(null);
   const bulkRestoreOriginalBusyRef = useRef(false);
   const campaignMessageDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const precosImportFileInputRef = useRef<HTMLInputElement>(null);
+  const [precosImportCsvModalOpen, setPrecosImportCsvModalOpen] = useState(false);
+  const [precosImportLoading, setPrecosImportLoading] = useState(false);
+  const [precosImportConfirming, setPrecosImportConfirming] = useState(false);
+  const [precosImportResult, setPrecosImportResult] = useState<{
+    ok?: boolean;
+    total_rows: number;
+    valid_rows: number;
+    error_rows: number;
+    errors?: Array<{ row: number; field?: string; message: string }>;
+    preview: PrecosImportPreviewRow[];
+    valid_items?: PrecosImportRowValid[];
+  } | null>(null);
 
   const loadAllTags = useCallback(async () => {
     try {
@@ -2890,6 +2908,92 @@ function PrecosPageContent() {
     setOptionsMenuOpen(false);
   }, [sortedListings, ordersData, priceRefsByRow, getProfitPercent]);
 
+  const openPrecosImportCsv = useCallback(() => {
+    setPrecosImportResult(null);
+    setPrecosImportCsvModalOpen(true);
+    setOptionsMenuOpen(false);
+  }, []);
+
+  const onPrecosImportFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setPrecosImportCsvModalOpen(false);
+    setPrecosImportLoading(true);
+    setPrecosImportResult(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/pricing/import", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) {
+        setSaveMessage({ type: "error", text: data.error ?? "Erro ao processar CSV." });
+        setTimeout(() => setSaveMessage(null), 6000);
+        return;
+      }
+      setPrecosImportResult(data);
+      if (data.ok === false && (data.errors?.length || data.headerError)) {
+        setSaveMessage({
+          type: "error",
+          text: data.errors?.[0]?.message ?? data.headerError ?? "Erro no CSV.",
+        });
+        setTimeout(() => setSaveMessage(null), 6000);
+      }
+    } catch {
+      setSaveMessage({ type: "error", text: "Erro de conexão ao importar CSV." });
+      setTimeout(() => setSaveMessage(null), 6000);
+    } finally {
+      setPrecosImportLoading(false);
+    }
+  }, []);
+
+  const cancelPrecosImport = useCallback(() => {
+    setPrecosImportResult(null);
+  }, []);
+
+  const confirmPrecosImport = useCallback(async () => {
+    const items = precosImportResult?.valid_items;
+    if (!items?.length) {
+      setSaveMessage({ type: "error", text: "Nada a confirmar (sem linhas válidas no CSV)." });
+      setTimeout(() => setSaveMessage(null), 5000);
+      return;
+    }
+    setPrecosImportConfirming(true);
+    setSaveMessage(null);
+    try {
+      const res = await fetch("/api/pricing/import/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items, is_mercado_lider: isMercadoLider }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        saved?: number;
+        errors?: Array<{ item_id: string; variation_id: number | null; error: string }>;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok) {
+        setSaveMessage({ type: "error", text: data.error ?? "Erro ao confirmar importação." });
+        setTimeout(() => setSaveMessage(null), 7000);
+        return;
+      }
+      const saved = data.saved ?? 0;
+      const errCount = data.errors?.length ?? 0;
+      let msg = `Importação concluída: ${saved} preço(s) atualizado(s) por MLB.`;
+      if (errCount > 0) msg += ` ${errCount} linha(s) com aviso ou erro.`;
+      setSaveMessage({ type: saved > 0 && errCount === 0 ? "ok" : saved > 0 ? "ok" : "error", text: msg });
+      setTimeout(() => setSaveMessage(null), 9000);
+      setPrecosImportResult(null);
+      await loadListings();
+    } catch {
+      setSaveMessage({ type: "error", text: "Erro de conexão ao confirmar importação." });
+      setTimeout(() => setSaveMessage(null), 6000);
+    } finally {
+      setPrecosImportConfirming(false);
+    }
+  }, [precosImportResult, isMercadoLider, loadListings]);
+
   if (loading && listings.length === 0) {
     return (
       <div className="adminty-precos-page space-y-5">
@@ -3261,6 +3365,13 @@ function PrecosPageContent() {
 
         {precosTab === "calculadora" && (
         <div>
+        <input
+          ref={precosImportFileInputRef}
+          type="file"
+          accept=".csv"
+          className="hidden"
+          onChange={onPrecosImportFileChange}
+        />
         <div className="border-b border-slate-100 px-3 py-3 dark:border-slate-700">
           <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-card px-3 py-1.5 text-xs text-slate-700 shadow-sm dark:border-slate-600 dark:text-slate-200">
@@ -3501,6 +3612,14 @@ function PrecosPageContent() {
               <div className="btn-dropdown-menu right-0 top-9 z-20 w-52">
                 <button
                   type="button"
+                  onClick={openPrecosImportCsv}
+                  disabled={precosImportLoading}
+                  className="btn-dropdown-item disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {precosImportLoading ? "Processando CSV…" : "Importar CSV"}
+                </button>
+                <button
+                  type="button"
                   onClick={handleExportPrecosCsv}
                   disabled={sortedListings.length === 0}
                   className="btn-dropdown-item disabled:cursor-not-allowed disabled:opacity-50"
@@ -3563,6 +3682,164 @@ function PrecosPageContent() {
               Baixar CSV — {campaignIssuesForDownload.length} não incluído(s) (erro ou sem preço salvo)
             </button>
           )}
+        </div>
+      )}
+
+      {precosImportCsvModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setPrecosImportCsvModalOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Importar CSV de preços"
+        >
+          <div
+            className="modal-panel-scroll max-h-[min(90vh,36rem)] w-full max-w-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-600">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Importar CSV de preços</h2>
+              <button
+                type="button"
+                onClick={() => setPrecosImportCsvModalOpen(false)}
+                className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                aria-label="Fechar"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-4 p-4 text-sm text-slate-700 dark:text-slate-300">
+              <p>
+                O arquivo deve estar em <strong>UTF-8</strong>, com separador <strong>;</strong> (ponto e vírgula). A
+                referência de cada linha é a coluna <strong>MLB</strong>.
+              </p>
+              <p>
+                Preencha <strong>Promocao</strong> (preço em R$) ou <strong>Margem %</strong> (margem líquida alvo) em
+                cada linha — pelo menos uma delas. Se ambas estiverem preenchidas, usa-se <strong>Promocao</strong>.
+                Também aceita o CSV exportado por esta tela (edite só MLB + Promoção ou Margem %).
+              </p>
+              <p>
+                Para margem, o anúncio precisa ter custo vinculado. A opção <strong>Mercado Líder</strong> afeta o
+                cálculo de frete na importação.
+              </p>
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Modelo mínimo (1ª linha do arquivo)
+                </p>
+                <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all rounded border border-slate-200 bg-slate-50 p-2 text-[11px] leading-snug text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200">
+                  {PRECOS_IMPORT_CSV_TEMPLATE_HEADER}
+                </pre>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-600">
+                <button
+                  type="button"
+                  onClick={() => setPrecosImportCsvModalOpen(false)}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => precosImportFileInputRef.current?.click()}
+                  disabled={precosImportLoading}
+                  className="rounded-lg bg-brand-blue px-4 py-2 text-xs font-semibold text-white hover:bg-brand-blue-dark disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Selecionar arquivo…
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {precosImportResult && (
+        <div className="mb-6 rounded-lg border-2 border-gray-300 bg-gray-50 p-4 dark:border-slate-600 dark:bg-slate-900/40">
+          <h2 className="mb-3 text-lg font-semibold">Preview da importação</h2>
+          <div className="mb-3 flex flex-wrap gap-4 text-sm">
+            <span className="font-medium">Total de linhas: {precosImportResult.total_rows}</span>
+            <span className="text-green-700 dark:text-green-400">Válidas: {precosImportResult.valid_rows}</span>
+            <span className="text-red-700 dark:text-red-400">Com erro: {precosImportResult.error_rows}</span>
+          </div>
+          {precosImportResult.preview.length > 0 && (
+            <div className="mb-4">
+              <AppTable
+                summary={`Preview: ${precosImportResult.valid_rows} válidas, ${precosImportResult.error_rows} com erro`}
+                maxHeight="20rem"
+              >
+                <thead>
+                  <tr>
+                    <th className="p-2 font-medium">Linha</th>
+                    <th className="p-2 font-medium">MLB</th>
+                    <th className="p-2 font-medium">Variacao</th>
+                    <th className="p-2 font-medium">Promocao</th>
+                    <th className="p-2 font-medium">Margem %</th>
+                    <th className="p-2 font-medium">Modo</th>
+                    <th className="p-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {precosImportResult.preview.map((pr) => (
+                    <tr
+                      key={pr.row}
+                      className={`border-t border-gray-100 dark:border-slate-700 ${pr.valid ? "bg-card" : "bg-red-50 dark:bg-red-950/30"}`}
+                    >
+                      <td className="p-2">{pr.row}</td>
+                      <td className="p-2 font-mono text-fg">{pr.item_id || "—"}</td>
+                      <td className="p-2">{pr.variation_id || "—"}</td>
+                      <td className="p-2">{pr.promocao?.trim() ? pr.promocao : "—"}</td>
+                      <td className="p-2">{pr.margem?.trim() ? pr.margem : "—"}</td>
+                      <td className="p-2">{pr.mode === "promocao" ? "Promoção" : pr.mode === "margem" ? "Margem" : "—"}</td>
+                      <td className="p-2">
+                        {pr.valid ? (
+                          <span className="rounded bg-green-200 px-2 py-0.5 text-green-800 dark:bg-green-900/50 dark:text-green-200">
+                            OK
+                          </span>
+                        ) : (
+                          <span className="rounded bg-red-200 px-2 py-0.5 text-red-800 dark:bg-red-900/50 dark:text-red-200" title={pr.error}>
+                            Erro
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </AppTable>
+            </div>
+          )}
+          {(precosImportResult.errors?.length ?? 0) > 0 && (
+            <div className="mb-4 max-h-40 overflow-auto rounded border border-red-200 bg-red-50 p-2 text-sm dark:border-red-900/50 dark:bg-red-950/40">
+              <p className="mb-2 font-medium text-red-800 dark:text-red-200">Erros por linha:</p>
+              <ul className="list-inside list-disc space-y-1 text-red-700 dark:text-red-300">
+                {(precosImportResult.errors ?? []).slice(0, 50).map((err, idx) => (
+                  <li key={idx}>
+                    Linha {err.row}
+                    {err.field ? ` (${err.field})` : ""}: {err.message}
+                  </li>
+                ))}
+                {(precosImportResult.errors?.length ?? 0) > 50 && (
+                  <li>… e mais {(precosImportResult.errors?.length ?? 0) - 50} erros.</li>
+                )}
+              </ul>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={confirmPrecosImport}
+              disabled={precosImportConfirming || precosImportResult.valid_rows === 0}
+              className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
+            >
+              {precosImportConfirming ? "Importando…" : "Confirmar importação"}
+            </button>
+            <button
+              type="button"
+              onClick={cancelPrecosImport}
+              disabled={precosImportConfirming}
+              className="btn btn-secondary btn-sm disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       )}
 
