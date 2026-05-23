@@ -3346,14 +3346,6 @@ function PrecosPageContent() {
             >
               Como funciona?
             </button>
-            <button
-              type="button"
-              disabled
-              className="cursor-not-allowed border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-400"
-              title="Em breve"
-            >
-              Histórico
-            </button>
           </div>
         </div>
 
