@@ -87,7 +87,10 @@ export function stockCompareLabel(op: StockCompareOp): string {
   return STOCK_COMPARE_LABELS[op];
 }
 
+/** Chips de alerta ML — fundos sólidos no escuro (evita bg-*-100 “branco” com texto claro). */
 export function mlItemTagBadgeClass(tag: string): string {
+  const base =
+    "ml-item-tag inline-flex shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight ring-1 ring-inset";
   const t = tag.toLowerCase();
   if (
     t === "incomplete_technical_specs" ||
@@ -97,12 +100,12 @@ export function mlItemTagBadgeClass(tag: string): string {
     t === "catalog_listing_required" ||
     t === "catalog_required"
   ) {
-    return "bg-red-100 text-red-800 ring-1 ring-red-200/80 dark:bg-red-900/40 dark:text-red-200 dark:ring-red-800/50";
+    return `${base} bg-red-100 text-red-900 ring-red-300/90 dark:bg-red-950 dark:text-red-100 dark:ring-red-700/90`;
   }
   if (t === "variations_migration_pending" || t === "catalog_only_restricted" || t === "opt_obey") {
-    return "bg-amber-100 text-amber-900 ring-1 ring-amber-200/80 dark:bg-amber-900/40 dark:text-amber-200 dark:ring-amber-800/50";
+    return `${base} bg-amber-100 text-amber-950 ring-amber-300/90 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-700/90`;
   }
-  return "bg-blue-100 text-blue-800 ring-1 ring-blue-200/80 dark:bg-blue-900/40 dark:text-blue-200 dark:ring-blue-800/50";
+  return `${base} bg-sky-100 text-sky-900 ring-sky-300/90 dark:bg-sky-950 dark:text-sky-100 dark:ring-sky-700/90`;
 }
 
 /** Exibe saúde 0–1 do ML como percentual. */

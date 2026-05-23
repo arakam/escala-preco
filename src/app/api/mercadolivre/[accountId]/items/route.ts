@@ -91,6 +91,29 @@ function applyStockFilter(q: any, op: StockCompareOp, qty: number) {
   return next;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applySoldFilter(q: any, op: StockCompareOp, qty: number) {
+  let next = q.not("sold_quantity", "is", null);
+  switch (op) {
+    case "gt":
+      next = next.gt("sold_quantity", qty);
+      break;
+    case "lt":
+      next = next.lt("sold_quantity", qty);
+      break;
+    case "gte":
+      next = next.gte("sold_quantity", qty);
+      break;
+    case "lte":
+      next = next.lte("sold_quantity", qty);
+      break;
+    case "eq":
+      next = next.eq("sold_quantity", qty);
+      break;
+  }
+  return next;
+}
+
 /** Filtro de alertas via tags_text (array PostgreSQL) — compatível com PostgREST. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function applyMlAlertFilter(q: any, mlAlert: string) {
@@ -115,7 +138,7 @@ const MAX_PAGE_SIZE_FAMILY = 100;
 
 /**
  * GET /api/mercadolivre/{accountId}/items?search=&status=&listing_type_id=&mlbu=&mlbu_code=
- *   &ml_alert=&stock_op=&stock_qty=&page=&limit=
+ *   &ml_alert=&stock_op=&stock_qty=&sold_op=&sold_qty=&page=&limit=
  * Lista itens sincronizados do banco para a conta (do usuário logado).
  */
 export async function GET(
@@ -162,6 +185,15 @@ export async function GET(
     stockOp != null && Number.isFinite(stockQtyParsed) && stockQtyParsed >= 0
       ? stockQtyParsed
       : null;
+  const soldOpRaw = searchParams.get("sold_op")?.trim() ?? "";
+  const soldOp = STOCK_COMPARE_OPS.includes(soldOpRaw as StockCompareOp)
+    ? (soldOpRaw as StockCompareOp)
+    : null;
+  const soldQtyParsed = parseInt(searchParams.get("sold_qty")?.trim() ?? "", 10);
+  const soldQty =
+    soldOp != null && Number.isFinite(soldQtyParsed) && soldQtyParsed >= 0
+      ? soldQtyParsed
+      : null;
   const limitParam = searchParams.get("limit");
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
   const parsedLimit = limitParam != null && limitParam !== "" ? parseInt(limitParam, 10) : NaN;
@@ -201,6 +233,7 @@ export async function GET(
     if (mlbuCode) q = q.ilike("user_product_id", `%${mlbuCode}%`);
     if (listingTypeId) q = q.eq("listing_type_id", listingTypeId);
     if (stockOp != null && stockQty != null) q = applyStockFilter(q, stockOp, stockQty);
+    if (soldOp != null && soldQty != null) q = applySoldFilter(q, soldOp, soldQty);
     return q;
   };
 

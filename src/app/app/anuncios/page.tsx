@@ -24,6 +24,11 @@ import {
   stockCompareLabel,
   type StockCompareOp,
 } from "@/lib/mercadolivre/item-tags";
+import {
+  formatMlItemStatusLabel,
+  mlItemStatusBadgeClass,
+  ML_ITEM_STATUS_FILTER_OPTIONS,
+} from "@/lib/mercadolivre/item-status";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
 const FROZEN_COLUMNS_STORAGE_KEY = "escalapreco_anuncios_frozen_columns";
@@ -76,7 +81,7 @@ const COLUMN_WIDTHS: Record<ColumnKey, number> = {
   title: 280,
   listing_type: 120,
   category: 140,
-  status: 100,
+  status: 112,
   price: 108,
   planned_price: 128,
   stock: 88,
@@ -180,8 +185,8 @@ function AnunciosHelpContent() {
             <li>
               O ícone de <strong>funil</strong> abre o modal de filtros. Ajuste os campos e clique em{" "}
               <strong>Aplicar filtros</strong> para recarregar a tabela (nada é aplicado ao mudar um campo). Há busca,
-              status, tipo de anúncio, MLBU, <strong>alertas ML</strong> e <strong>estoque</strong> (maior, menor, igual,
-              etc.).
+              status, tipo de anúncio, MLBU, <strong>alertas ML</strong>, <strong>estoque</strong> e{" "}
+              <strong>vendidos</strong> (maior, menor, igual, etc.).
             </li>
             <li>
               O menu <strong>⋮ Opções</strong> permite <strong>exportar a página atual</strong> (CSV com as linhas
@@ -276,6 +281,8 @@ function AnunciosPageContent() {
   const [mlAlertFilter, setMlAlertFilter] = useState("");
   const [stockOpFilter, setStockOpFilter] = useState<StockCompareOp | "">("");
   const [stockQtyFilter, setStockQtyFilter] = useState("");
+  const [soldOpFilter, setSoldOpFilter] = useState<StockCompareOp | "">("");
+  const [soldQtyFilter, setSoldQtyFilter] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [statusDraft, setStatusDraft] = useState("");
   const [listingTypeDraft, setListingTypeDraft] = useState("");
@@ -284,6 +291,8 @@ function AnunciosPageContent() {
   const [mlAlertDraft, setMlAlertDraft] = useState("");
   const [stockOpDraft, setStockOpDraft] = useState<StockCompareOp | "">("");
   const [stockQtyDraft, setStockQtyDraft] = useState("");
+  const [soldOpDraft, setSoldOpDraft] = useState<StockCompareOp | "">("");
+  const [soldQtyDraft, setSoldQtyDraft] = useState("");
   const [anunciosTab, setAnunciosTab] = useState<"lista" | "como-funciona">("lista");
   const [syncing, setSyncing] = useState(false);
   const [job, setJob] = useState<JobState | null>(null);
@@ -393,6 +402,13 @@ function AnunciosPageContent() {
         params.set("stock_qty", String(qty));
       }
     }
+    if (soldOpFilter) {
+      const qty = parseInt(soldQtyFilter.trim(), 10);
+      if (Number.isFinite(qty) && qty >= 0) {
+        params.set("sold_op", soldOpFilter);
+        params.set("sold_qty", String(qty));
+      }
+    }
     const res = await fetch(`/api/mercadolivre/${account.id}/items?${params}`);
     if (res.ok) {
       const data = await res.json();
@@ -412,6 +428,8 @@ function AnunciosPageContent() {
     mlAlertFilter,
     stockOpFilter,
     stockQtyFilter,
+    soldOpFilter,
+    soldQtyFilter,
   ]);
 
   const syncFilterDraftFromApplied = useCallback(() => {
@@ -423,6 +441,8 @@ function AnunciosPageContent() {
     setMlAlertDraft(mlAlertFilter);
     setStockOpDraft(stockOpFilter);
     setStockQtyDraft(stockQtyFilter);
+    setSoldOpDraft(soldOpFilter);
+    setSoldQtyDraft(soldQtyFilter);
   }, [
     listingTypeFilter,
     mlAlertFilter,
@@ -432,6 +452,8 @@ function AnunciosPageContent() {
     statusFilter,
     stockOpFilter,
     stockQtyFilter,
+    soldOpFilter,
+    soldQtyFilter,
   ]);
 
   useEffect(() => {
@@ -530,6 +552,8 @@ function AnunciosPageContent() {
     setMlAlertFilter(mlAlertDraft);
     setStockOpFilter(stockOpDraft);
     setStockQtyFilter(stockQtyDraft.trim());
+    setSoldOpFilter(soldOpDraft);
+    setSoldQtyFilter(soldQtyDraft.trim());
     setPage(1);
     setFiltersModalOpen(false);
   }
@@ -540,11 +564,7 @@ function AnunciosPageContent() {
     const filters: string[] = [];
     if (search) filters.push(`Busca: ${search}`);
     if (statusFilter) {
-      filters.push(
-        `Status: ${
-          statusFilter === "active" ? "Ativo" : statusFilter === "paused" ? "Pausado" : "Fechado"
-        }`
-      );
+      filters.push(`Status: ${formatMlItemStatusLabel(statusFilter)}`);
     }
     if (listingTypeFilter) {
       filters.push(`Tipo: ${formatListingTypeLabel(listingTypeFilter)}`);
@@ -561,6 +581,12 @@ function AnunciosPageContent() {
         filters.push(`Estoque ${stockCompareLabel(stockOpFilter)} ${qty}`);
       }
     }
+    if (soldOpFilter) {
+      const qty = parseInt(soldQtyFilter.trim(), 10);
+      if (Number.isFinite(qty) && qty >= 0) {
+        filters.push(`Vendidos ${stockCompareLabel(soldOpFilter)} ${qty}`);
+      }
+    }
     return filters;
   }, [
     listingTypeFilter,
@@ -571,6 +597,8 @@ function AnunciosPageContent() {
     statusFilter,
     stockOpFilter,
     stockQtyFilter,
+    soldOpFilter,
+    soldQtyFilter,
   ]);
 
   function clearFilters() {
@@ -590,6 +618,10 @@ function AnunciosPageContent() {
     setStockOpDraft("");
     setStockQtyFilter("");
     setStockQtyDraft("");
+    setSoldOpFilter("");
+    setSoldOpDraft("");
+    setSoldQtyFilter("");
+    setSoldQtyDraft("");
     setPage(1);
   }
 
@@ -616,7 +648,7 @@ function AnunciosPageContent() {
       item.title ?? "",
       formatListingTypeLabel(item.listing_type_id) || (item.listing_type_id ?? ""),
       item.category_id ?? "",
-      item.status ?? "",
+      formatMlItemStatusLabel(item.status),
       item.price != null ? Number(item.price).toFixed(2) : "",
       item.planned_price != null ? Number(item.planned_price).toFixed(2) : "",
       item.available_quantity != null ? String(item.available_quantity) : "",
@@ -787,8 +819,8 @@ function AnunciosPageContent() {
 
   if (!account) {
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 shadow-sm">
-        <p className="text-amber-800">
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 shadow-sm dark:border-amber-800 dark:bg-amber-950/50">
+        <p className="text-amber-800 dark:text-amber-100">
           Conecte sua conta do Mercado Livre em{" "}
           <a href="/app/configuracao" className="font-medium underline">
             Configuração
@@ -1140,16 +1172,8 @@ function AnunciosPageContent() {
                       )}
                     </td>
                     <td className={frozenCellClass("status", "p-2")} style={frozenCellStyle("status")}>
-                      <span
-                        className={`rounded px-2 py-0.5 text-xs font-medium ${
-                          item.status === "active"
-                            ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
-                            : item.status === "paused"
-                              ? "bg-amber-50 text-amber-800 ring-1 ring-amber-100"
-                              : "bg-slate-100 text-slate-700 ring-1 ring-slate-200 dark:bg-slate-700 dark:text-slate-200 dark:ring-slate-600"
-                        }`}
-                      >
-                        {item.status ?? "—"}
+                      <span className={mlItemStatusBadgeClass(item.status)} title={item.status ?? undefined}>
+                        {formatMlItemStatusLabel(item.status)}
                       </span>
                     </td>
                     <td
@@ -1254,7 +1278,7 @@ function AnunciosPageContent() {
                               <span
                                 key={tag}
                                 title={tag}
-                                className={`inline-flex max-w-full truncate rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight ${mlItemTagBadgeClass(tag)}`}
+                                className={mlItemTagBadgeClass(tag)}
                               >
                                 {formatMlItemTagLabel(tag)}
                               </span>
@@ -1268,7 +1292,7 @@ function AnunciosPageContent() {
                       style={frozenCellStyle("variations")}
                     >
                       {item.has_variations ? (
-                        <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">
+                        <span className="inline-flex items-center rounded bg-sky-100 px-1.5 py-0.5 text-xs font-medium text-sky-900 ring-1 ring-inset ring-sky-300/90 dark:bg-sky-950 dark:text-sky-100 dark:ring-sky-700/90">
                           Sim
                         </span>
                       ) : (
@@ -1366,9 +1390,11 @@ function AnunciosPageContent() {
                     className="input"
                   >
                     <option value="">Todos os status</option>
-                    <option value="active">Ativo</option>
-                    <option value="paused">Pausado</option>
-                    <option value="closed">Fechado</option>
+                    {ML_ITEM_STATUS_FILTER_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -1434,14 +1460,22 @@ function AnunciosPageContent() {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Estoque
-                </label>
-                <div className="flex flex-nowrap items-center gap-2">
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="anuncios-stock-op"
+                    className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                  >
+                    Condição
+                  </label>
                   <select
+                    id="anuncios-stock-op"
                     value={stockOpDraft}
                     onChange={(e) => setStockOpDraft(e.target.value as StockCompareOp | "")}
-                    className="input min-w-0 flex-1"
+                    className="input w-full"
                   >
                     <option value="">Sem filtro de estoque</option>
                     {STOCK_COMPARE_OPS.map((op) => (
@@ -1450,23 +1484,85 @@ function AnunciosPageContent() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="anuncios-stock-qty"
+                    className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                  >
+                    Quantidade
+                  </label>
                   <input
+                    id="anuncios-stock-qty"
                     type="number"
                     min={0}
                     step={1}
                     value={stockQtyDraft}
                     onChange={(e) => setStockQtyDraft(e.target.value)}
                     disabled={!stockOpDraft}
-                    placeholder="Qtd."
-                    className="input w-20 shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
-                    aria-label="Quantidade para filtro de estoque"
+                    placeholder={stockOpDraft ? "Ex.: 10" : "Escolha a condição"}
+                    className="input w-full disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
                 {stockOpDraft && stockQtyDraft.trim() === "" && (
-                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                  <p className="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2">
                     Informe a quantidade para aplicar o filtro de estoque.
                   </p>
                 )}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Vendidos
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="anuncios-sold-op"
+                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                    >
+                      Condição
+                    </label>
+                    <select
+                      id="anuncios-sold-op"
+                      value={soldOpDraft}
+                      onChange={(e) => setSoldOpDraft(e.target.value as StockCompareOp | "")}
+                      className="input w-full"
+                    >
+                      <option value="">Sem filtro de vendidos</option>
+                      {STOCK_COMPARE_OPS.map((op) => (
+                        <option key={op} value={op}>
+                          {stockCompareLabel(op)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="anuncios-sold-qty"
+                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                    >
+                      Quantidade
+                    </label>
+                    <input
+                      id="anuncios-sold-qty"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={soldQtyDraft}
+                      onChange={(e) => setSoldQtyDraft(e.target.value)}
+                      disabled={!soldOpDraft}
+                      placeholder={soldOpDraft ? "Ex.: 5" : "Escolha a condição"}
+                      className="input w-full disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  </div>
+                  {soldOpDraft && soldQtyDraft.trim() === "" && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2">
+                      Informe a quantidade para aplicar o filtro de vendidos.
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
