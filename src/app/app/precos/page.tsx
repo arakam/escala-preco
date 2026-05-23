@@ -25,6 +25,7 @@ import {
   type PrecosImportPreviewRow,
   type PrecosImportRowValid,
 } from "@/lib/precos-import-csv";
+import { PrecosHelpContent } from "./precos-help-content";
 
 interface PricingListing {
   id: string;
@@ -982,110 +983,6 @@ async function fetchPricingCalculateBatches(
     onProgress?.(doneCount, totalCount, null);
   }
   return { results, errors };
-}
-
-function PrecosHelpContent() {
-  return (
-    <div className="space-y-4 text-sm text-fg">
-      <h2 className="text-lg font-semibold text-fg-strong">Como funciona a Calculadora de Preços</h2>
-      <div className="space-y-4">
-          <section>
-            <h3 className="mb-2 font-medium text-fg-strong">Objetivo</h3>
-            <p>
-              Esta ferramenta permite simular preços de venda em massa para seus anúncios do Mercado Livre,
-              calculando automaticamente as taxas e o valor líquido que você receberá.
-            </p>
-          </section>
-
-          <section>
-            <h3 className="mb-2 font-medium text-fg-strong">Colunas da tabela</h3>
-            <ul className="list-inside list-disc space-y-1">
-              <li><strong>SKU:</strong> Código do produto vinculado ao anúncio</li>
-              <li><strong>Vendas 30d:</strong> Número de pedidos pagos que contêm o item nos últimos 30 dias. Clique no cabeçalho para ordenar.</li>
-              <li><strong>Custo:</strong> Preço de custo do produto (cadastrado em Produtos)</li>
-              <li><strong>Preço:</strong> Valor atual do anúncio no Mercado Livre</li>
-              <li><strong>Competitividade:</strong> Indicador da referência de preço do ML (sugestão / faixa), ao lado do preço. No menu <strong>Ações</strong>, use <strong>Atualizar referência</strong> para buscar dados novos sem refazer o cache de anúncios.</li>
-              <li><strong>Margem:</strong> Percentual (lucro líquido) ÷ preço da coluna Promoção — o mesmo lucro da coluna Lucro. Editável: ao confirmar, recalcula a promoção. Sem custo cadastrado fica indisponível.</li>
-              <li><strong>Promoção:</strong> Valor bruto de referência (planned_price); campo editável — usado como base para taxa ML, frete, impostos e Vai receber</li>
-              <li><strong>Vai Receber:</strong> valor bruto (Promoção) − taxa ML − frete</li>
-              <li><strong>Lucro:</strong> Vai receber − custo − imposto − taxa extra − desp. fixas</li>
-              <li>
-                <strong>Taxa ML:</strong> Comissão do Mercado Livre em R$ sobre a <strong>Promoção</strong>; abaixo do valor,
-                o percentual (taxa ÷ Promoção), no mesmo estilo da coluna Lucro — ou a referência por categoria após sync se
-                ainda não houver cálculo.
-              </li>
-              <li><strong>Frete:</strong> Custo de frete (apenas para contas Mercado Líder)</li>
-              <li><strong>Imposto:</strong> Valor do imposto calculado sobre o preço (% cadastrado no produto)</li>
-              <li><strong>Taxa Extra:</strong> Taxa extra calculada sobre o preço (% cadastrado no produto)</li>
-              <li><strong>Desp. Fixas:</strong> Despesas fixas em R$ (valor cadastrado no produto, descontado do líquido)</li>
-            </ul>
-          </section>
-
-          <section>
-            <h3 className="mb-2 font-medium text-fg-strong">Como usar</h3>
-            <ol className="list-inside list-decimal space-y-1">
-              <li>Os anúncios são carregados automaticamente ao abrir a página</li>
-              <li>Edite &quot;Promoção&quot; ou &quot;Margem&quot; (com custo e tipo de anúncio): em ambos, confirme com Enter ou clique fora para recalcular</li>
-              <li>No menu <strong>Ações</strong>, use <strong>Calcular Todos</strong> para recalcular taxas e valores líquidos de todas as linhas de uma vez</li>
-              <li>
-                Ao confirmar a &quot;Promoção&quot; ou a &quot;Margem&quot; (Enter ou ao sair do campo), ou ao usar ações em massa, o
-                preço planejado é gravado automaticamente (MLB + SKU)
-              </li>
-            </ol>
-          </section>
-
-          <section>
-            <h3 className="mb-2 font-medium text-fg-strong">Mercado Líder</h3>
-            <p>
-              Se sua conta é Mercado Líder, marque a opção para incluir o custo de frete no cálculo.
-              O frete usa o maior entre peso real e peso volumétrico (altura × largura × comprimento ÷ 6000), como no Mercado Livre.
-            </p>
-          </section>
-
-          <section>
-            <h3 className="mb-2 font-medium text-fg-strong">Filtros (busca geral)</h3>
-            <ul className="list-inside list-disc space-y-1">
-              <li><strong>Status:</strong> Filtre por anúncios ativos, pausados ou encerrados</li>
-              <li>
-                <strong>Vínculo com produto:</strong> pode filtrar só anúncios vinculados a um produto (custo/SKU) ou só os
-                não vinculados para corrigir depois
-              </li>
-              <li><strong>Busca:</strong> Pesquise por título ou código MLB</li>
-              <li><strong>Só com vendas (30d):</strong> Exibe apenas anúncios com pelo menos 1 venda nos últimos 30 dias</li>
-              <li><strong>Lucratividade:</strong> Filtra em até 500 anúncios carregados (busca geral na amostra)</li>
-            </ul>
-          </section>
-
-          <section>
-            <h3 className="mb-2 font-medium text-fg-strong">Imposto, Taxa Extra e Desp. Fixas</h3>
-            <p className="mb-2">
-              Imposto e taxa extra (percentuais) e despesas fixas (valor em R$) são cadastrados na página de Produtos.
-              Imposto e taxa extra são calculados sobre o valor bruto (coluna Promoção); no <strong>Lucro</strong>, custo, imposto, taxa extra e desp. fixas são descontados após o <strong>Vai receber</strong>.
-            </p>
-            <p className="text-fg">
-              Exemplo: Produto com 10% de imposto, 5% de taxa extra e R$ 2,00 de desp. fixas vendido a R$ 100,00:
-              <br />Imposto = R$ 10,00 | Taxa Extra = R$ 5,00 | Desp. Fixas = R$ 2,00
-            </p>
-          </section>
-
-          <section>
-            <h3 className="mb-2 font-medium text-fg-strong">Observações</h3>
-            <ul className="list-inside list-disc space-y-1">
-              <li>
-                Anúncios com variações aparecem uma linha por MLB (preço do anúncio no ML é único até o suporte
-                pleno a preço por variação via User Product). Custo, impostos e SKU vêm dos produtos vinculados às
-                variações (vários SKUs podem aparecer resumidos na mesma linha).
-              </li>
-              <li>Anúncios sem tipo de listagem (N/D) precisam ser sincronizados novamente</li>
-              <li>Para ter o custo, vincule o anúncio a um produto na página de Produtos</li>
-              <li>Imposto, taxa extra e desp. fixas são considerados apenas se cadastrados no produto vinculado</li>
-              <li>Os preços salvos ficam vinculados ao MLB e ao SKU; ao reabrir a página, o valor em &quot;Promoção&quot; virá do último preço planejado salvo</li>
-              <li>Esta ferramenta não altera os preços no Mercado Livre; ela apenas calcula e guarda o preço planejado</li>
-            </ul>
-          </section>
-      </div>
-    </div>
-  );
 }
 
 function PrecosPageContent() {
@@ -3651,7 +3548,7 @@ function PrecosPageContent() {
             onClick={handleOpenUpdatePrice}
             disabled={listings.length === 0 || selectedCount === 0 || updatePriceLoading}
             className="btn btn-sm border-2 border-yellow-400 bg-white text-amber-950 shadow-sm hover:bg-yellow-50 focus:ring-yellow-400/40 disabled:cursor-not-allowed disabled:opacity-50 dark:border-yellow-500 dark:bg-slate-900 dark:text-yellow-100 dark:hover:bg-yellow-950/40"
-            title="Envia o valor da coluna Promoção como preço standard do anúncio no Mercado Livre (PUT /items)"
+            title="Envia o valor da coluna Promoção como preço do anúncio no Mercado Livre"
           >
             {updatePriceLoading ? "Atualizando…" : `Atualizar preço ML (${selectedCount})`}
           </button>
