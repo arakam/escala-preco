@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
 import { TablePageSizeSelect } from "@/components/TablePageSizeSelect";
@@ -142,122 +142,231 @@ type SortField =
   | "updated_at";
 type ColumnKey = string;
 
+function HelpFieldBadge({ kind }: { kind: "required" | "optional" }) {
+  return (
+    <span
+      className={
+        kind === "required"
+          ? "inline-flex shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white bg-rose-600 ring-1 ring-inset ring-rose-700 dark:bg-rose-700 dark:ring-rose-500"
+          : "inline-flex shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white bg-emerald-600 ring-1 ring-inset ring-emerald-700 dark:bg-emerald-700 dark:ring-emerald-500"
+      }
+    >
+      {kind === "required" ? "Obrigatório" : "Opcional"}
+    </span>
+  );
+}
+
+function HelpFieldRow({
+  name,
+  kind,
+  children,
+}: {
+  name: string;
+  kind: "required" | "optional";
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex gap-3 rounded-lg border border-slate-200/90 bg-white px-3 py-2.5 dark:border-slate-600 dark:bg-slate-800/50">
+      <div className="pt-0.5">
+        <HelpFieldBadge kind={kind} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-slate-900 dark:text-slate-100">{name}</p>
+        <p className="mt-0.5 text-slate-600 dark:text-slate-300">{children}</p>
+      </div>
+    </div>
+  );
+}
+
 function AnunciosHelpContent() {
   return (
-    <div className="space-y-4 text-sm text-slate-700 dark:text-slate-300">
-      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Como funciona a tela Anúncios</h2>
-      <div className="space-y-4">
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Objetivo</h3>
-          <p>
-            Esta tela mostra os <strong>anúncios do Mercado Livre</strong> já sincronizados no seu banco de dados para a
-            conta selecionada. Aqui você consulta dados, copia MLB, vê tipo de publicação e categoria, preço no ML,
-            preço trabalhado na calculadora, estoque e dispara novas importações quando precisar atualizar tudo ou só um
-            anúncio.
+    <div className="space-y-6 text-sm text-slate-700 dark:text-slate-300">
+      {/* 1. Aviso de leitura */}
+      <div
+        className="flex gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sky-950 shadow-sm dark:border-sky-800 dark:bg-sky-950/60 dark:text-sky-100"
+        role="note"
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-200 text-lg dark:bg-sky-800" aria-hidden>
+          💡
+        </span>
+        <div>
+          <p className="font-semibold text-sky-900 dark:text-sky-50">Leia antes de começar</p>
+          <p className="mt-1 text-sky-800/95 dark:text-sky-200/95">
+            Evita erros comuns (importar sem conta conectada, filtrar sem aplicar, confundir preço ML com preço
+            trabalhado). Reserve 2 minutos nesta aba antes de sincronizar ou exportar.
           </p>
-        </section>
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Sincronizar com o Mercado Livre</h3>
-          <ul className="list-inside list-disc space-y-1">
-            <li>
-              <strong>Importar / sincronizar todos</strong> — busca e atualiza os anúncios da conta em lote. Pode levar
-              vários minutos em catálogos grandes. Enquanto roda, aparece uma barra de progresso com totais processados;
-              se precisar interromper, use <strong>Encerrar e liberar nova importação</strong> (quando disponível).
-            </li>
-            <li>
-              <strong>Incluir por MLB</strong> — informe o código do anúncio (ex.: MLB123…) e clique em{" "}
-              <strong>Importar</strong> para sincronizar só aquele item.
-            </li>
-            <li>
-              Depois da importação, outras telas que usam o mesmo cache (por exemplo <strong>Preços</strong>,{" "}
-              <strong>Atacado</strong> e <strong>Produtos</strong>) passam a refletir os dados atualizados quando você
-              as recarregar ou quando o fluxo delas buscar de novo o servidor.
-            </li>
-          </ul>
-        </section>
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Filtros e opções</h3>
-          <ul className="list-inside list-disc space-y-1">
-            <li>
-              A linha <strong>Filtros:</strong> resume o que está aplicado em chips. <strong>Limpar</strong> zera busca,
-              status, tipo de anúncio, MLBU e o filtro “só com MLBU”.
-            </li>
-            <li>
-              O ícone de <strong>funil</strong> abre o modal de filtros. Ajuste os campos e clique em{" "}
-              <strong>Aplicar filtros</strong> para recarregar a tabela (nada é aplicado ao mudar um campo). Há busca,
-              status, tipo de anúncio, MLBU, <strong>alertas ML</strong>, <strong>estoque</strong> e{" "}
-              <strong>vendidos</strong> (maior, menor, igual, etc.).
-            </li>
-            <li>
-              O menu <strong>⋮ Opções</strong> permite <strong>exportar a página atual</strong> (CSV com as linhas
-              visíveis) e <strong>atualizar a tabela</strong> sem nova importação ML (recarrega a lista do servidor com
-              os mesmos filtros e página).
-            </li>
-          </ul>
-        </section>
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Tabela e cabeçalhos</h3>
-          <ul className="list-inside list-disc space-y-1">
-            <li>
-              Clique no <strong>▾</strong> no título da coluna para abrir o menu: <strong>ordenar</strong> (quando
-              disponível) e <strong>congelar / descongelar</strong> coluna. Várias colunas podem ficar fixas à esquerda
-              ao rolar horizontalmente; a ordem dos congelados segue a ordem das colunas na tabela.
-            </li>
-            <li>
-              <strong>MLB</strong> — clique na célula para copiar o código do anúncio.
-            </li>
-            <li>
-              <strong>Tipo de anúncio</strong> — tipo de publicação no Mercado Livre (ex.: Clássico, Premium), conforme
-              o <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">listing_type_id</code> sincronizado.
-            </li>
-            <li>
-              <strong>Categoria</strong> — identificador da categoria no ML (
-              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">category_id</code>
-              ), por exemplo MLB1051.
-            </li>
-            <li>
-              <strong>Preço ML</strong> — valor atual do anúncio no Mercado Livre (
-              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">price</code>).
-            </li>
-            <li>
-              <strong>Preço trabalhado</strong> — preço salvo na calculadora (
-              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">planned_prices</code>); cadastre ou altere
-              na tela <strong>Preços</strong>. Faixas de atacado ficam na tela <strong>Atacado</strong>.
-            </li>
-            <li>
-              <strong>Estoque</strong> — quantidade disponível para venda (
-              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">available_quantity</code>) conforme última
-              sincronização.
-            </li>
-            <li>
-              <strong>Vendidos</strong> — unidades vendidas no anúncio (
-              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">sold_quantity</code>).
-            </li>
-            <li>
-              <strong>Saúde</strong> — indicador de qualidade do ML (
-              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">health</code>, 0–100%).
-            </li>
-            <li>
-              <strong>MLBU</strong> — código User Product (
-              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">user_product_id</code>); clique para copiar.
-            </li>
-            <li>
-              <strong>Alertas ML</strong> — chips com tags críticas do Mercado Livre (ficha incompleta, catálogo,
-              migração UP, etc.).
-            </li>
-            <li>
-              <strong>Link</strong> — abre o anúncio no site do Mercado Livre.
-            </li>
-          </ul>
-        </section>
-        <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Paginação</h3>
-          <p>
-            Abaixo do título da tabela você vê quantos anúncios há nesta página e o total geral. Escolha{" "}
-            <strong>Linhas</strong> por página e navegue entre páginas quando o total ultrapassar o tamanho da página.
-          </p>
-        </section>
+        </div>
       </div>
+
+      {/* 2. Para que serve */}
+      <section className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#0d6efd]/10 text-lg dark:bg-[#0d6efd]/25"
+            aria-hidden
+          >
+            📋
+          </span>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Para que serve esta tela</h2>
+        </div>
+        <p>
+          A tela <strong>Anúncios</strong> centraliza os anúncios do Mercado Livre já sincronizados na sua conta: você
+          consulta status, preços, estoque, alertas do ML e dispara importações em lote ou por código MLB.
+        </p>
+        <p>
+          Ao concluir uma importação, os dados ficam gravados no sistema e passam a alimentar as telas{" "}
+          <strong>Preços</strong>, <strong>Produtos</strong>, <strong>Atacado</strong> e <strong>Promoções</strong>{" "}
+          quando você as abrir ou atualizar o cache delas.
+        </p>
+        <p className="text-slate-600 dark:text-slate-400">
+          <strong>Pré-requisito:</strong> conta do Mercado Livre conectada em{" "}
+          <a href="/app/configuracao" className="font-medium text-[#0d6efd] underline hover:no-underline">
+            Configuração
+          </a>
+          . Sem isso, a lista não carrega e a importação não inicia.
+        </p>
+      </section>
+
+      {/* 3. Passo a passo */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Passo a passo</h2>
+        <ol className="list-decimal space-y-2.5 pl-5 marker:font-semibold marker:text-[#0d6efd]">
+          <li>
+            Abra a aba <strong>Anúncios</strong> e confirme que há conta ML ativa (se não houver, conecte em{" "}
+            <strong>Configuração</strong>).
+          </li>
+          <li>
+            Clique em <strong>Importar / sincronizar todos</strong> para buscar o catálogo inteiro no Mercado Livre,{" "}
+            <em>ou</em> digite o código no campo ao lado de <strong>Incluir por MLB</strong> e clique em{" "}
+            <strong>Importar</strong> para um único anúncio.
+          </li>
+          <li>
+            Aguarde a barra de <strong>Importação</strong> terminar. Para cancelar uma sync em andamento, use{" "}
+            <strong>Encerrar e liberar nova importação</strong>.
+          </li>
+          <li>
+            Clique no ícone de <strong>funil</strong> (filtros), preencha os campos no modal <strong>Filtros</strong> e
+            clique em <strong>Aplicar filtros</strong> — alterações no modal só valem após esse botão.
+          </li>
+          <li>
+            Na tabela, clique em <strong>▾</strong> no cabeçalho da coluna para <strong>Ordenar crescente</strong>,{" "}
+            <strong>Ordenar decrescente</strong> ou <strong>Congelar coluna</strong> / <strong>Descongelar coluna</strong>
+            . Clique na célula <strong>MLB</strong> ou <strong>MLBU</strong> para copiar o código.
+          </li>
+          <li>
+            No menu <strong>⋮ Opções</strong>, use <strong>Exportar página atual</strong> (CSV da página visível) ou{" "}
+            <strong>Atualizar tabela</strong> (recarrega a lista com os mesmos filtros, sem nova importação no ML).
+          </li>
+        </ol>
+      </section>
+
+      {/* 4. Campos */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Campos e o que significam</h2>
+
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Importação (aba Anúncios)
+          </h3>
+          <div className="space-y-2">
+            <HelpFieldRow kind="optional" name="Importar / sincronizar todos">
+              Inicia a sincronização de todos os anúncios da conta no Mercado Livre; pode levar vários minutos em
+              catálogos grandes.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Incluir por MLB (campo de texto)">
+              Código do anúncio no formato <strong>MLB</strong> + números (ex.: MLB123456789); usado só com o botão{" "}
+              <strong>Importar</strong> ao lado.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Importar">
+              Sincroniza apenas o MLB informado no campo; o botão fica desabilitado se o campo estiver vazio.
+            </HelpFieldRow>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Modal Filtros (ícone de funil)
+          </h3>
+          <div className="space-y-2">
+            <HelpFieldRow kind="optional" name="Buscar">
+              Texto livre em título, MLB ou nome da família (User Product); correspondência parcial.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Status">
+              Filtra pelo status do anúncio no ML (Ativo, Pausado, Fechado, etc.); opção vazia = todos.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Tipo de anúncio">
+              Tipo de publicação sincronizado (ex.: Clássico, Premium); vem do <code className="text-xs">listing_type_id</code> do ML.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Cód. MLBU">
+              Filtra pelo código User Product (ex.: MLAU…); busca parcial no campo sincronizado.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Mostrar somente anúncios com MLBU">
+              Quando marcado, exibe só linhas que possuem código MLBU preenchido.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Alertas ML">
+              Filtra por tags críticas do Mercado Livre (ficha incompleta, catálogo, migração UP, etc.).
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Estoque — Condição">
+              Operador de comparação (maior que, menor que, igual…); escolha <strong>Sem filtro de estoque</strong> para ignorar.
+            </HelpFieldRow>
+            <HelpFieldRow kind="required" name="Estoque — Quantidade">
+              Número inteiro ≥ 0; só é aplicado se você escolheu uma condição em <strong>Estoque — Condição</strong>.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Vendidos — Condição">
+              Mesma lógica do estoque, usando unidades vendidas (<code className="text-xs">sold_quantity</code>).
+            </HelpFieldRow>
+            <HelpFieldRow kind="required" name="Vendidos — Quantidade">
+              Obrigatória quando há condição em <strong>Vendidos — Condição</strong>; inteiro ≥ 0.
+            </HelpFieldRow>
+            <HelpFieldRow kind="required" name="Aplicar filtros">
+              Confirma os valores do modal e recarrega a tabela; sem este clique, nada do modal entra em vigor.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Limpar">
+              Zera todos os filtros aplicados e os campos do modal; fecha o modal se estiver aberto pelo botão no rodapé.
+            </HelpFieldRow>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Barra acima da tabela
+          </h3>
+          <div className="space-y-2">
+            <HelpFieldRow kind="optional" name="Filtros: (chips)">
+              Mostra resumo dos filtros já aplicados; o link <strong>Limpar</strong> ao lado remove todos de uma vez.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Linhas">
+              Quantidade de anúncios por página (10 a 1000); alterar reinicia na página 1 da navegação.
+            </HelpFieldRow>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Colunas da tabela (somente leitura)
+          </h3>
+          <div className="space-y-2">
+            <HelpFieldRow kind="optional" name="MLB">
+              Código do anúncio; clique na célula para copiar.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Preço ML">
+              Preço atual no Mercado Livre na última sincronização.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Preço trab.">
+              Preço planejado salvo na tela <strong>Preços</strong>; editar lá, não nesta tela.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Estoque / Vendidos">
+              Quantidade disponível e unidades vendidas conforme retorno da API na sync.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Alertas ML">
+              Chips com alertas críticos do ML (ex.: Ficha incompleta, Foto fraca); passar o mouse mostra o código técnico.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Link">
+              Abre o anúncio no site do Mercado Livre em nova aba.
+            </HelpFieldRow>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
