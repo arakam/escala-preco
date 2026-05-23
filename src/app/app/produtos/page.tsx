@@ -850,28 +850,6 @@ function ProdutosPageContent() {
             </button>
             <button
               type="button"
-              onClick={() => setViewMode("operational")}
-              className={
-                viewMode === "operational"
-                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
-                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-500 hover:text-slate-800"
-              }
-            >
-              Custos operacionais
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("taxes")}
-              className={
-                viewMode === "taxes"
-                  ? "border-b-2 border-[#0d6efd] px-3 py-2 text-[13px] font-semibold text-[#0d6efd]"
-                  : "border-b-2 border-transparent px-3 py-2 text-[13px] font-medium text-slate-500 hover:text-slate-800"
-              }
-            >
-              Impostos
-            </button>
-            <button
-              type="button"
               onClick={() => setViewMode("howitworks")}
               className={
                 viewMode === "howitworks"
@@ -888,8 +866,6 @@ function ProdutosPageContent() {
           {(viewMode === "stats" ||
             viewMode === "tags" ||
             viewMode === "unregistered" ||
-            viewMode === "operational" ||
-            viewMode === "taxes" ||
             viewMode === "howitworks") && (
             <p className="mb-2 text-[11px] text-slate-500">
               {viewMode === "stats" && "Anúncios e vendas vinculados a cada SKU cadastrado."}
@@ -897,8 +873,6 @@ function ProdutosPageContent() {
                 "Crie e gerencie tags para classificar produtos. Use nos filtros de Produtos, Estatísticas e Preços."}
               {viewMode === "unregistered" &&
                 "SKUs presentes nos anúncios (seller_custom_field) que ainda não têm produto cadastrado na base."}
-              {viewMode === "operational" && "Valores mensais estimados de custos operacionais da empresa."}
-              {viewMode === "taxes" && "Percentuais de referência da carga tributária; complementam o imposto por produto."}
               {viewMode === "howitworks" &&
                 "Visão geral das abas desta página e de como produtos, anúncios e parâmetros alimentam a calculadora de preços."}
             </p>
@@ -1049,7 +1023,7 @@ function ProdutosPageContent() {
         ) : (
           <div className="space-y-4 px-3 pb-4">
             <p className="text-sm text-slate-600">
-              Tags ajudam a filtrar produtos e anúncios vinculados (ex.: <em>full</em>, <em>queima estoque</em>).
+              Tags ajudam a filtrar produtos e anúncios vinculados (ex.: <em>queima estoque</em>, <em>produto teste</em>).
               Também podem ser definidas no formulário do produto ou na coluna <strong>Tags</strong> do CSV de importação.
             </p>
             {tagsTabMessage && (
@@ -1078,7 +1052,7 @@ function ProdutosPageContent() {
                       void handleCreateTag();
                     }
                   }}
-                  placeholder="Ex.: full, queima estoque…"
+                  placeholder="Ex.: queima estoque, produto teste"
                   className="input w-full py-2 text-sm"
                 />
               </div>
@@ -1130,48 +1104,48 @@ function ProdutosPageContent() {
                         </td>
                         <td className="p-2 text-center tabular-nums">{tag.product_count}</td>
                         <td className="p-2">
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-wrap items-center gap-1">
                             {editingTagId === tag.id ? (
                               <>
-                                <button
-                                  type="button"
+                                <ProdutosIconButton
+                                  label="Salvar"
                                   onClick={() => void handleSaveTagRename(tag.id)}
                                   disabled={tagSaving}
-                                  className="text-sm text-[#0d6efd] hover:underline disabled:opacity-50"
+                                  className="text-[#0d6efd] hover:bg-[#0d6efd]/10"
                                 >
-                                  Salvar
-                                </button>
-                                <button
-                                  type="button"
+                                  <SaveIcon />
+                                </ProdutosIconButton>
+                                <ProdutosIconButton
+                                  label="Cancelar"
                                   onClick={() => {
                                     setEditingTagId(null);
                                     setEditingTagName("");
                                   }}
-                                  className="text-sm text-slate-600 hover:underline"
+                                  className="text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700"
                                 >
-                                  Cancelar
-                                </button>
+                                  <XIcon />
+                                </ProdutosIconButton>
                               </>
                             ) : (
                               <>
-                                <button
-                                  type="button"
+                                <ProdutosIconButton
+                                  label="Renomear"
                                   onClick={() => {
                                     setEditingTagId(tag.id);
                                     setEditingTagName(tag.name);
                                   }}
-                                  className="text-sm text-[#0d6efd] hover:underline"
+                                  className="text-[#0d6efd] hover:bg-[#0d6efd]/10"
                                 >
-                                  Renomear
-                                </button>
-                                <button
-                                  type="button"
+                                  <PencilIcon />
+                                </ProdutosIconButton>
+                                <ProdutosIconButton
+                                  label="Excluir"
                                   onClick={() => void handleDeleteTag(tag.id, tag.name)}
                                   disabled={tagSaving}
-                                  className="text-sm text-red-600 hover:underline disabled:opacity-50"
+                                  className="text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
                                 >
-                                  Excluir
-                                </button>
+                                  <TrashIcon />
+                                </ProdutosIconButton>
                               </>
                             )}
                           </div>
@@ -1380,21 +1354,21 @@ function ProdutosPageContent() {
                       {new Date(product.created_at).toLocaleDateString()}
                     </td>
                     <td className="p-2">
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
+                      <div className="flex items-center gap-1">
+                        <ProdutosIconButton
+                          label="Editar"
                           onClick={() => openEditProduct(product)}
-                          className="text-sm text-[#0d6efd] hover:underline"
+                          className="text-[#0d6efd] hover:bg-[#0d6efd]/10"
                         >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
+                          <PencilIcon />
+                        </ProdutosIconButton>
+                        <ProdutosIconButton
+                          label="Excluir"
                           onClick={() => setDeleteConfirm(product)}
-                          className="text-sm text-red-600 hover:underline"
+                          className="text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
                         >
-                          Excluir
-                        </button>
+                          <TrashIcon />
+                        </ProdutosIconButton>
                       </div>
                     </td>
                   </tr>
@@ -1703,7 +1677,6 @@ function ProdutosPageContent() {
               <li>Cadastre produtos com o mesmo SKU usado no campo personalizado dos anúncios no Mercado Livre.</li>
               <li>Use <strong className="font-medium text-slate-800 dark:text-slate-200">Vincular SKUs</strong> para associar anúncios e variações aos produtos automaticamente.</li>
               <li>Revise <strong className="font-medium text-slate-800 dark:text-slate-200">Não Cadastrados</strong> para criar produtos que ainda faltam.</li>
-              <li>Ajuste custos operacionais e impostos de referência quando fizer sentido para a sua operação.</li>
             </ol>
           </section>
           <section>
@@ -1733,13 +1706,6 @@ function ProdutosPageContent() {
             <p className="text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
               Lista SKUs encontrados em <strong className="font-medium text-slate-800 dark:text-slate-200">seller_custom_field</strong> dos
               anúncios que ainda não têm produto na base. Use <strong className="font-medium text-slate-800 dark:text-slate-200">Cadastrar</strong> para abrir o formulário já com o SKU.
-            </p>
-          </section>
-          <section>
-            <h3 className="mb-2 text-[13px] font-semibold text-slate-900 dark:text-slate-100">Custos operacionais e Impostos</h3>
-            <p className="text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
-              Custos operacionais são valores mensais estimados da empresa. Impostos são percentuais de referência da carga tributária;
-              complementam o campo <strong className="font-medium text-slate-800 dark:text-slate-200">Imposto (%)</strong> de cada produto na aba Produtos.
             </p>
           </section>
           <p className="text-[12px] text-slate-500 dark:text-slate-500">
@@ -2280,6 +2246,109 @@ function ProdutosPageContent() {
       )}
 
     </div>
+  );
+}
+
+function ProdutosIconButton({
+  label,
+  onClick,
+  disabled,
+  className,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className={`inline-flex shrink-0 items-center justify-center rounded-md p-1 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-600/80 ${className ?? ""}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SaveIcon() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+      <polyline points="17 21 17 13 7 13 7 21" />
+      <polyline points="7 3 7 8 15 8" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" x2="10" y1="11" y2="17" />
+      <line x1="14" x2="14" y1="11" y2="17" />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
+    </svg>
+  );
+}
+
+function XIcon() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
   );
 }
 
