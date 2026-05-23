@@ -108,65 +108,81 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Buscar itens com paginação interna (evita limite de 1000 do Supabase)
-  async function fetchAllItems() {
+  type ItemRow = {
+    item_id: string;
+    title: string | null;
+    has_variations: boolean;
+    price: number | null;
+    listing_type_id: string | null;
+    category_id: string | null;
+    seller_custom_field: string | null;
+    family_name: string | null;
+    family_id: string | null;
+    user_product_id: string | null;
+    raw_json?: unknown;
+  };
+
+  const ITEM_SELECT =
+    "item_id, title, has_variations, price, listing_type_id, category_id, seller_custom_field, family_name, family_id, user_product_id";
+  const ITEM_SELECT_WITH_RAW = `${ITEM_SELECT}, raw_json`;
+
+  const needsFullScan =
+    showAll ||
+    !!filterSku ||
+    filter === "com_rascunho" ||
+    filter === "sem_rascunho" ||
+    filter === "price_high";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function applyItemFilters<T extends { eq: (...args: any[]) => T; ilike: (...args: any[]) => T; not: (...args: any[]) => T; in: (...args: any[]) => T }>(
+    query: T
+  ): T {
+    let q = query;
+    if (filterMlb) {
+      if (filterMlb.toUpperCase().startsWith("MLB") && filterMlb.length >= 10) {
+        q = q.eq("item_id", filterMlb.toUpperCase());
+      } else {
+        q = q.ilike("item_id", `%${filterMlb}%`);
+      }
+    }
+    if (filterTitle) {
+      q = q.ilike("title", `%${filterTitle}%`);
+    }
+    if (filterMlbu) {
+      q = q.ilike("user_product_id", `%${filterMlbu}%`);
+    }
+    if (filterVariation === "com") {
+      q = q.eq("has_variations", true);
+    } else if (filterVariation === "sem") {
+      q = q.eq("has_variations", false);
+    }
+    if (filter === "mlbu") {
+      q = q.not("user_product_id", "is", null);
+    }
+    if (filter === "com_familia") {
+      q = q.not("family_name", "is", null);
+    }
+    if (allowedItemIds) {
+      q = q.in("item_id", allowedItemIds);
+    }
+    return q;
+  }
+
+  async function fetchAllItems(includeRawJson: boolean) {
     const batchSize = 1000;
-    type ItemRow = {
-      item_id: string;
-      title: string | null;
-      has_variations: boolean;
-      price: number | null;
-      listing_type_id: string | null;
-      category_id: string | null;
-      seller_custom_field: string | null;
-      family_name: string | null;
-      family_id: string | null;
-      user_product_id: string | null;
-      raw_json: unknown;
-    };
     let allItems: ItemRow[] = [];
     let offset = 0;
     let hasMore = true;
 
     while (hasMore) {
-      let query = supabase
-        .from("ml_items")
-        .select("item_id, title, has_variations, price, listing_type_id, category_id, seller_custom_field, family_name, family_id, user_product_id, raw_json")
-        .eq("account_id", accountId)
-        .order("updated_at", { ascending: false })
-        .range(offset, offset + batchSize - 1);
-
-      // Filtros específicos
-      if (filterMlb) {
-        if (filterMlb.toUpperCase().startsWith("MLB") && filterMlb.length >= 10) {
-          query = query.eq("item_id", filterMlb.toUpperCase());
-        } else {
-          query = query.ilike("item_id", `%${filterMlb}%`);
-        }
-      }
-      if (filterTitle) {
-        query = query.ilike("title", `%${filterTitle}%`);
-      }
-      if (filterMlbu) {
-        query = query.ilike("user_product_id", `%${filterMlbu}%`);
-      }
-      // SKU não é filtrado aqui porque pode estar na variação, não no item
-      // O filtro de SKU é aplicado no pós-processamento após extrair o SKU corretamente
-      if (filterVariation === "com") {
-        query = query.eq("has_variations", true);
-      } else if (filterVariation === "sem") {
-        query = query.eq("has_variations", false);
-      }
-      // Filtros de status (dropdown)
-      if (filter === "mlbu") {
-        query = query.not("user_product_id", "is", null);
-      }
-      if (filter === "com_familia") {
-        query = query.not("family_name", "is", null);
-      }
-      if (allowedItemIds) {
-        query = query.in("item_id", allowedItemIds);
-      }
+      let query = applyItemFilters(
+        supabase
+          .from("ml_items")
+          .select(includeRawJson ? ITEM_SELECT_WITH_RAW : ITEM_SELECT)
+          .eq("account_id", accountId)
+          .order("updated_at", { ascending: false })
+          .range(offset, offset + batchSize - 1)
+      );
 
       const { data, error } = await query;
       if (error) throw error;
@@ -180,25 +196,60 @@ export async function GET(request: NextRequest) {
     return allItems;
   }
 
-  let items: Awaited<ReturnType<typeof fetchAllItems>>;
+  let items: ItemRow[] = [];
+  let dbPaginatedTotal: number | null = null;
+
   try {
-    items = await fetchAllItems();
+    if (!needsFullScan) {
+      const countQuery = applyItemFilters(
+        supabase
+          .from("ml_items")
+          .select("item_id", { count: "exact", head: true })
+          .eq("account_id", accountId)
+      );
+      const pageQuery = applyItemFilters(
+        supabase
+          .from("ml_items")
+          .select(ITEM_SELECT)
+          .eq("account_id", accountId)
+          .order("updated_at", { ascending: false })
+          .range(from, from + limit - 1)
+      );
+
+      const [{ count, error: countError }, { data: pageItems, error: pageError }] = await Promise.all([
+        countQuery,
+        pageQuery,
+      ]);
+
+      if (countError) throw countError;
+      if (pageError) throw pageError;
+
+      dbPaginatedTotal = count ?? 0;
+      items = (pageItems ?? []) as ItemRow[];
+    } else {
+      items = await fetchAllItems(!!filterSku);
+    }
   } catch (err) {
     console.error("[atacado/rows] items error:", err);
+    const code = typeof err === "object" && err != null && "code" in err ? String((err as { code?: string }).code) : "";
+    if (code === "57014") {
+      return NextResponse.json(
+        { error: "A consulta demorou demais. Use filtros (MLB, título, SKU) para reduzir o resultado." },
+        { status: 504 }
+      );
+    }
     return NextResponse.json({ error: "Erro ao listar itens" }, { status: 500 });
   }
 
-  // Verificar se há filtros específicos ativos (não incluir itens da família quando filtrando)
   const hasSpecificFilters =
     filterMlb || filterMlbu || filterTitle || filterSku || filterVariation || !!allowedItemIds;
 
-  // Incluir itens da mesma família APENAS quando não há filtros específicos
-  if (!hasSpecificFilters && items.length > 0) {
+  if (needsFullScan && !hasSpecificFilters && items.length > 0) {
     const familyIdsFromMatch = Array.from(new Set(items.map((i) => i.family_id).filter(Boolean))) as string[];
     if (familyIdsFromMatch.length > 0) {
       const { data: familySiblings } = await supabase
         .from("ml_items")
-        .select("item_id, title, has_variations, price, listing_type_id, category_id, seller_custom_field, family_name, family_id, user_product_id, raw_json")
+        .select(ITEM_SELECT)
         .eq("account_id", accountId)
         .in("family_id", familyIdsFromMatch);
       const seen = new Set(items.map((i) => i.item_id));
@@ -251,7 +302,7 @@ export async function GET(request: NextRequest) {
     fetchInParallelBatches<VariationRow>(itemIds, 100, async (batchIds) => {
       const { data } = await supabase
         .from("ml_variations")
-        .select("item_id, variation_id, price, seller_custom_field, attributes_json, raw_json")
+        .select("item_id, variation_id, price, seller_custom_field, attributes_json")
         .eq("account_id", accountId)
         .in("item_id", batchIds);
       return (data ?? []) as VariationRow[];
@@ -537,7 +588,20 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // Filtros pós-processamento
+  if (dbPaginatedTotal != null) {
+    return NextResponse.json(
+      {
+        rows,
+        total: dbPaginatedTotal,
+        totalItems: dbPaginatedTotal,
+        page,
+        limit: showAll ? 0 : limit,
+      },
+      { headers: { "Cache-Control": "no-store, max-age=0" } }
+    );
+  }
+
+  // Filtros pós-processamento (modo varredura completa)
   let filtered = rows;
   
   // Filtro de variação (garantir que funcione no nível da linha)

@@ -75,14 +75,14 @@ interface AtacadoRow {
   family_item_ids?: string[] | null;
 }
 
-const ATACADO_STICKY_STORAGE_KEY = "escalapreco.atacado.pinnedColumns.v2";
+const ATACADO_STICKY_STORAGE_KEY = "escalapreco.atacado.pinnedColumns.v5";
 /** Mesma chave do layout / Anúncios — conta ativa no painel */
 const DASHBOARD_ACCOUNT_STORAGE_KEY = "escalapreco_dashboard_account_id";
 
 /** Larguras mínimas (px): alinhadas ao `<colgroup>` para `position: sticky` e `left`. */
 const ATACADO_COLUMNS: { minWidth: number }[] = [
-  { minWidth: 108 },
-  { minWidth: 108 },
+  /** MLB (13 caracteres em mono) + padding do chip e da célula */
+  { minWidth: 136 },
   { minWidth: 180 },
   { minWidth: 120 },
   { minWidth: 88 },
@@ -96,12 +96,28 @@ const ATACADO_COLUMNS: { minWidth: number }[] = [
   { minWidth: 92 },
   { minWidth: 92 },
   { minWidth: 92 },
+  { minWidth: 92 },
   { minWidth: 100 },
-  { minWidth: 120 },
+  { minWidth: 128 },
 ];
 
 /** Soma das larguras do `<colgroup>`: tabela com esta largura evita redistribuição em `table-fixed` que deslocava `left` das colunas sticky. */
 const ATACADO_TABLE_TOTAL_WIDTH_PX = ATACADO_COLUMNS.reduce((s, c) => s + c.minWidth, 0);
+
+const ATACADO_STATUS_COL_INDEX = ATACADO_COLUMNS.length - 2;
+const ATACADO_ACTIONS_COL_INDEX = ATACADO_COLUMNS.length - 1;
+
+function isValidAtacadoColIndex(colIndex: number): boolean {
+  return Number.isInteger(colIndex) && colIndex >= 0 && colIndex < ATACADO_COLUMNS.length;
+}
+
+function atacadoColWidth(colIndex: number): number {
+  return ATACADO_COLUMNS[colIndex]?.minWidth ?? 0;
+}
+
+function sanitizeAtacadoStickyColumns(cols: Set<number>): Set<number> {
+  return new Set(Array.from(cols).filter((j) => isValidAtacadoColIndex(j)));
+}
 
 function readAtacadoStickyInitial(): Set<number> {
   if (typeof window === "undefined") return new Set();
@@ -115,26 +131,10 @@ function readAtacadoStickyInitial(): Set<number> {
       (x): x is number =>
         typeof x === "number" && Number.isInteger(x) && x >= 0 && x < n
     );
-    return new Set(nums);
+    return sanitizeAtacadoStickyColumns(new Set(nums));
   } catch {
     return new Set();
   }
-}
-
-/** Ícone de alfinete no menu do cabeçalho (mesmo traço da tela Anúncios) */
-function ColumnHeaderMenuPinIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-400" aria-hidden="true">
-      <path
-        d="m14 4 6 6-3 1-3 3v4l-2 2-2-6-6-2 2-2h4l3-3 1-3z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 function AtacadoIconButton({
@@ -157,7 +157,7 @@ function AtacadoIconButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className={`inline-flex shrink-0 items-center justify-center rounded-md p-1.5 text-fg hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-600/80 ${className ?? ""}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-md p-1 text-fg hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-600/80 ${className ?? ""}`}
     >
       {children}
     </button>
@@ -309,12 +309,11 @@ function AtacadoHelpContent() {
           </p>
         </section>
         <section>
-          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Carregar a partir dos anúncios</h3>
+          <h3 className="mb-2 font-medium text-slate-800 dark:text-slate-200">Importar do Mercado Livre</h3>
           <p>
-            O botão <strong>Carregar dos Anúncios</strong> copia para rascunho as faixas já salvas na última{" "}
-            <strong>sincronização</strong> (o mesmo dado que você vê na tela Anúncios), apenas nas linhas que ainda não
-            têm rascunho com faixas. Para forçar a substituição de rascunhos existentes, use{" "}
-            <strong>Substituir pelos Anúncios</strong> (com confirmação).
+            O botão <strong>Importar do ML</strong> traz para o rascunho as faixas de atacado que estão hoje no{" "}
+            <strong>Mercado Livre</strong>, <strong>substituindo</strong> os valores que você tinha editado nesta tela
+            (com confirmação).
           </p>
         </section>
         <section>
@@ -328,7 +327,7 @@ function AtacadoHelpContent() {
               O ícone de <strong>funil</strong> abre o modal (MLB, MLBU, título, SKU, refino e tags de produto).
             </li>
             <li>
-              <strong>Carregar dos Anúncios</strong>, <strong>Importar CSV</strong> e <strong>Exportar CSV</strong>{" "}
+              <strong>Importar do ML</strong>, <strong>Importar CSV</strong> e <strong>Exportar CSV</strong>{" "}
               ficam na barra superior — o arquivo exportado segue o mesmo modelo para editar e voltar a importar. O
               menu <strong>⋮</strong> continua a oferecer <strong>Exportar CSV</strong> e{" "}
               <strong>Atualizar tabela</strong> (recarrega do servidor com os mesmos filtros).
@@ -499,7 +498,7 @@ function AtacadoPageContent() {
   const atacadoTheadRef = useRef<HTMLTableSectionElement>(null);
 
   useEffect(() => {
-    setStickyColumns(readAtacadoStickyInitial());
+    setStickyColumns(sanitizeAtacadoStickyColumns(readAtacadoStickyInitial()));
     setStickyHydrated(true);
   }, []);
 
@@ -515,6 +514,7 @@ function AtacadoPageContent() {
   }, [headerMenuColIndex]);
 
   const toggleStickyColumn = useCallback((colIndex: number) => {
+    if (!isValidAtacadoColIndex(colIndex)) return;
     setStickyColumns((prev) => {
       const next = new Set(prev);
       if (next.has(colIndex)) next.delete(colIndex);
@@ -528,15 +528,17 @@ function AtacadoPageContent() {
     const len = ATACADO_COLUMNS.length;
     const head: (CSSProperties | undefined)[] = Array.from({ length: len }, () => undefined);
     const body: (CSSProperties | undefined)[] = Array.from({ length: len }, () => undefined);
+    const pinnedColumns = sanitizeAtacadoStickyColumns(stickyColumns);
     /** Mesma ideia que `frozenColumnLeft` em Anúncios: soma só colunas pinadas à esquerda deste índice. */
     const stickyLeft = (colIndex: number) =>
-      Array.from(stickyColumns)
+      Array.from(pinnedColumns)
         .filter((j) => j < colIndex)
-        .reduce((sum, j) => sum + ATACADO_COLUMNS[j].minWidth, 0);
+        .reduce((sum, j) => sum + atacadoColWidth(j), 0);
     let order = 0;
     for (let i = 0; i < len; i++) {
-      if (stickyColumns.has(i)) {
-        const w = ATACADO_COLUMNS[i].minWidth;
+      if (pinnedColumns.has(i)) {
+        const w = atacadoColWidth(i);
+        if (w <= 0) continue;
         const left = stickyLeft(i);
         const base = {
           position: "sticky" as const,
@@ -570,13 +572,12 @@ function AtacadoPageContent() {
     if (headerMenuColIndex !== colIndex) return null;
     const pinned = stickyColumns.has(colIndex);
     return (
-      <div className="absolute left-1 top-full z-50 mt-1 w-48 overflow-hidden rounded border border-slate-200 bg-card py-1 text-[12px] normal-case tracking-normal text-slate-700 shadow-xl dark:border-slate-600 dark:text-slate-200">
+      <div className="btn-dropdown-menu left-1 top-full z-50 mt-1 w-48 normal-case tracking-normal shadow-xl">
         <button
           type="button"
           onClick={() => toggleStickyColumn(colIndex)}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+          className="btn-dropdown-item"
         >
-          <ColumnHeaderMenuPinIcon />
           {pinned ? "Descongelar coluna" : "Congelar coluna"}
         </button>
       </div>
@@ -636,25 +637,23 @@ function AtacadoPageContent() {
       >
         {stickyTd(
           0,
-          "p-2",
-          <button type="button" onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)} title="Clique para copiar" className="pricing-cell-chip font-mono text-left -mx-1 py-0.5">
-            {copiedCell === `${rowKey(r)}-mlb` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.item_id}
+          "overflow-hidden p-2",
+          <button
+            type="button"
+            onClick={() => copyToClipboard(r.item_id, `${rowKey(r)}-mlb`)}
+            title="Clique para copiar"
+            className="pricing-cell-chip inline-block max-w-full whitespace-nowrap py-0.5 text-left font-mono text-xs"
+          >
+            {copiedCell === `${rowKey(r)}-mlb` ? (
+              <span className="text-xs font-medium text-emerald-600">Copiado!</span>
+            ) : (
+              r.item_id
+            )}
           </button>
         )}
+        {stickyTd(1, "max-w-[180px] truncate p-2", <span title={r.title ?? ""}>{r.title ?? "—"}</span>)}
         {stickyTd(
-          1,
-          "p-2",
-          r.user_product_id ? (
-            <button type="button" onClick={() => copyToClipboard(r.user_product_id ?? "", `${rowKey(r)}-mlbu`)} title="Clique para copiar" className="pricing-cell-chip font-mono text-left -mx-1 py-0.5">
-              {copiedCell === `${rowKey(r)}-mlbu` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.user_product_id}
-            </button>
-          ) : (
-            <span className="text-fg-muted">—</span>
-          )
-        )}
-        {stickyTd(2, "max-w-[180px] truncate p-2", <span title={r.title ?? ""}>{r.title ?? "—"}</span>)}
-        {stickyTd(
-          3,
+          2,
           "p-2 text-fg",
           r.sku ? (
             <button type="button" onClick={() => copyToClipboard(r.sku ?? "", `${rowKey(r)}-sku`)} title="Clique para copiar" className="hover:bg-gray-100 rounded px-1 py-0.5 -mx-1 text-left cursor-pointer max-w-full truncate block">
@@ -666,9 +665,9 @@ function AtacadoPageContent() {
             </span>
           )
         )}
-        {stickyTd(4, "p-2 tabular-nums", r.current_price != null ? Number(r.current_price).toFixed(2) : "—")}
+        {stickyTd(3, "p-2 tabular-nums", r.current_price != null ? Number(r.current_price).toFixed(2) : "—")}
         {stickyTd(
-          5,
+          4,
           "p-2 text-right tabular-nums",
           r.planned_price != null && !Number.isNaN(Number(r.planned_price)) ? Number(r.planned_price).toFixed(2) : "—"
         )}
@@ -687,8 +686,8 @@ function AtacadoPageContent() {
               : slots5[i]?.min_qty != null
                 ? String(slots5[i]!.min_qty)
                 : "";
-          const minCol = 6 + i * 2;
-          const priceCol = 7 + i * 2;
+          const minCol = 5 + i * 2;
+          const priceCol = 6 + i * 2;
           return (
             <React.Fragment key={i}>
               {stickyTd(
@@ -730,14 +729,14 @@ function AtacadoPageContent() {
           );
         })}
         {stickyTd(
-          16,
-          "p-2",
+          ATACADO_STATUS_COL_INDEX,
+          "overflow-hidden p-2",
           <span className={`rounded px-2 py-0.5 text-xs ${cur.status === "error" ? "bg-red-200 text-red-800" : cur.status === "edited" ? "bg-amber-200 text-amber-800" : "bg-green-100 text-green-800"}`}>{cur.status === "error" ? "erro" : cur.status === "edited" ? "alterado" : "salvo"}</span>
         )}
         {stickyTd(
-          17,
-          "p-2",
-          <div className="flex flex-wrap items-center justify-end gap-0.5">
+          ATACADO_ACTIONS_COL_INDEX,
+          "overflow-hidden p-1.5",
+          <div className="flex flex-nowrap items-center justify-center gap-0.5">
             <AtacadoIconButton label="Salvar linha" onClick={() => saveRow(r)} disabled={saving} className="text-primary hover:bg-primary/10 dark:hover:bg-primary/20">
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
@@ -1495,18 +1494,12 @@ function AtacadoPageContent() {
     setImportCsvModalOpen(true);
   };
 
-  const seedDraftsFromMlCache = async (mode: "fill_empty" | "overwrite") => {
+  const importFromMl = async () => {
     if (!accountId || seedFromMlLoading) return;
-    const confirmed =
-      mode === "fill_empty"
-        ? window.confirm(
-            "Copiar para rascunho as faixas de atacado já salvas nos seus anúncios (última sincronização)?\n\n" +
-              "Só serão preenchidas linhas que ainda não têm rascunho com faixas. Sincronize na tela Anúncios antes se precisar de dados mais recentes."
-          )
-        : window.confirm(
-            "Substituir os rascunhos pelas faixas que estão hoje nos anúncios (última sincronização)?\n\n" +
-              "Todas as linhas com atacado sincronizado terão o rascunho sobrescrito, inclusive as que você já editou."
-          );
+    const confirmed = window.confirm(
+      "Importar do Mercado Livre?\n\n" +
+        "Os rascunhos desta tela serão substituídos pelas faixas de atacado que estão hoje no Mercado Livre, inclusive linhas que você já editou."
+    );
     if (!confirmed) return;
     setSeedFromMlLoading(true);
     setMessage(null);
@@ -1514,7 +1507,7 @@ function AtacadoPageContent() {
       const res = await fetch("/api/atacado/seed-from-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId, mode }),
+        body: JSON.stringify({ accountId, mode: "overwrite" }),
       });
       let data: {
         error?: string;
@@ -1530,7 +1523,7 @@ function AtacadoPageContent() {
         data = {};
       }
       if (!res.ok) {
-        setMessage({ type: "error", text: data.error ?? "Erro ao carregar a partir dos anúncios." });
+        setMessage({ type: "error", text: data.error ?? "Erro ao importar do Mercado Livre." });
         return;
       }
       if (data.message) {
@@ -1539,7 +1532,7 @@ function AtacadoPageContent() {
         const bits: string[] = [`${data.seeded_count ?? 0} linha(s) de rascunho criada(s) ou atualizada(s).`];
         if ((data.skipped_has_draft ?? 0) > 0) bits.push(`${data.skipped_has_draft} ignorada(s) (já tinham rascunho).`);
         if ((data.skipped_no_ml_data ?? 0) > 0)
-          bits.push(`${data.skipped_no_ml_data} anúncio(s) sem atacado na última sincronização.`);
+          bits.push(`${data.skipped_no_ml_data} item(s) sem atacado no Mercado Livre.`);
         if ((data.skipped_invalid ?? 0) > 0) bits.push(`${data.skipped_invalid} ignorada(s) na validação.`);
         setMessage({ type: "success", text: bits.join(" ") });
       }
@@ -1886,21 +1879,12 @@ function AtacadoPageContent() {
             </div>
             <button
               type="button"
-              onClick={() => seedDraftsFromMlCache("fill_empty")}
+              onClick={() => importFromMl()}
               disabled={importLoading || seedFromMlLoading || !accountId}
-              className="btn btn-secondary btn-sm disabled:cursor-not-allowed disabled:opacity-50"
-              title="Usa os dados da última sincronização da tela Anúncios. Só preenche linhas sem rascunho com faixas."
+              className="btn btn-sm border-2 border-yellow-400 bg-white text-amber-950 shadow-sm hover:bg-yellow-50 focus:ring-yellow-400/40 disabled:cursor-not-allowed disabled:opacity-50 dark:border-yellow-500 dark:bg-slate-900 dark:text-yellow-100 dark:hover:bg-yellow-950/40"
+              title="Substitui os rascunhos pelas faixas de atacado atuais no Mercado Livre."
             >
-              {seedFromMlLoading ? "Carregando…" : "Carregar dos Anúncios"}
-            </button>
-            <button
-              type="button"
-              onClick={() => seedDraftsFromMlCache("overwrite")}
-              disabled={importLoading || seedFromMlLoading || !accountId}
-              className="btn btn-secondary btn-sm border-amber-300 text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-700 dark:text-amber-100 dark:hover:bg-amber-950/40"
-              title="Sobrescreve os rascunhos pelas faixas já salvas nos anúncios (última sincronização)."
-            >
-              {seedFromMlLoading ? "Aguarde…" : "Substituir pelos Anúncios"}
+              {seedFromMlLoading ? "Importando…" : "Importar do ML"}
             </button>
             <button
               type="button"
@@ -2593,22 +2577,19 @@ function AtacadoPageContent() {
               <thead ref={atacadoTheadRef} className="sticky top-0 z-10">
                 <tr>
                   {renderAtacadoColumnHeader(0, "MLB", "whitespace-nowrap")}
-                  {renderAtacadoColumnHeader(1, "MLBU", "whitespace-nowrap", {
-                    title: "Código User Product (MLBU)",
-                  })}
-                  {renderAtacadoColumnHeader(2, "Título")}
-                  {renderAtacadoColumnHeader(3, "SKU", "", {
+                  {renderAtacadoColumnHeader(1, "Título")}
+                  {renderAtacadoColumnHeader(2, "SKU", "", {
                     title:
                       "SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.",
                   })}
-                  {renderAtacadoColumnHeader(4, "Preço R$", "tabular-nums")}
-                  {renderAtacadoColumnHeader(5, "Promoção R$", "tabular-nums", {
+                  {renderAtacadoColumnHeader(3, "Preço R$", "tabular-nums")}
+                  {renderAtacadoColumnHeader(4, "Promoção R$", "tabular-nums", {
                     title: "Valor salvo na calculadora (Preços / planned_prices)",
                   })}
                   {[1, 2, 3, 4, 5].map((n) => {
                     const t = n - 1;
-                    const minIdx = 6 + t * 2;
-                    const priceIdx = 7 + t * 2;
+                    const minIdx = 5 + t * 2;
+                    const priceIdx = 6 + t * 2;
                     return (
                       <React.Fragment key={n}>
                         {renderAtacadoColumnHeader(minIdx, <>Qt. Atac. {n}</>, "whitespace-nowrap")}
@@ -2616,8 +2597,8 @@ function AtacadoPageContent() {
                       </React.Fragment>
                     );
                   })}
-                  {renderAtacadoColumnHeader(16, "Status")}
-                  {renderAtacadoColumnHeader(17, "Ações")}
+                  {renderAtacadoColumnHeader(ATACADO_STATUS_COL_INDEX, "Status")}
+                  {renderAtacadoColumnHeader(ATACADO_ACTIONS_COL_INDEX, "Ações")}
                 </tr>
               </thead>
               <tbody>

@@ -20,7 +20,7 @@ type SeedMode = "fill_empty" | "overwrite";
 /**
  * POST /api/atacado/seed-from-sync
  * Body: { accountId: string, mode?: "fill_empty" | "overwrite" }
- * Copia faixas de `ml_items.wholesale_prices_json` (última sincronização) para `wholesale_drafts`.
+ * Copia faixas de `ml_items.wholesale_prices_json` (dados do Mercado Livre) para `wholesale_drafts`.
  * Em anúncios com variações, replica as mesmas faixas do item para cada variação (como no ML por listing).
  */
 export async function POST(request: Request) {
@@ -103,7 +103,7 @@ export async function POST(request: Request) {
       skipped_has_draft: 0,
       skipped_invalid: 0,
       message:
-        "Nenhum anúncio com preço de atacado na última sincronização. Sincronize na tela Anúncios e tente de novo.",
+        "Nenhum item com preço de atacado no Mercado Livre.",
     });
   }
 
@@ -211,7 +211,7 @@ export async function POST(request: Request) {
       skipped_invalid,
       message:
         mode === "fill_empty"
-          ? "Todas as linhas relevantes já tinham rascunho com faixas. Use «Substituir pelos Anúncios» se quiser sobrescrever."
+          ? "Todas as linhas relevantes já tinham rascunho com faixas. Use «Importar do ML» se quiser substituir pelo que está no Mercado Livre."
           : "Nenhuma faixa sincronizada passou na validação ou não havia linhas a gravar.",
     });
   }
