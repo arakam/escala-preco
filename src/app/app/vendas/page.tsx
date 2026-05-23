@@ -17,6 +17,7 @@ import {
   formatMlOrderTagLabel,
   mlOrderTagBadgeClass,
 } from "@/lib/mercadolivre/order-tags";
+import { formatOrderShippingLabel } from "@/lib/mercadolivre/shipping-labels";
 
 const IS_NEXT_DEV = process.env.NODE_ENV === "development";
 const SALES_ORDERS_FETCH_LIMIT = 500;
@@ -39,6 +40,10 @@ type OrderRow = {
   date_created: string;
   synced_at: string;
   tags: string[];
+  shipping_id: string | null;
+  shipping_logistic_mode: string | null;
+  shipping_logistic_type: string | null;
+  shipping_carrier: string | null;
 };
 
 type ItemRow = {
@@ -77,6 +82,10 @@ type OrderLineTableRow = OrderLineProfitRow & {
   status: string;
   date_created: string;
   tags: string[];
+  shipping_label: string | null;
+  shipping_logistic_mode: string | null;
+  shipping_logistic_type: string | null;
+  shipping_carrier: string | null;
 };
 
 function normalizeOrderTags(raw: unknown): string[] {
@@ -397,10 +406,27 @@ function VendasPageContent() {
       }
       setSyncState(data.sync_state ?? null);
       setOrders(
-        (data.recent_orders ?? []).map((o: OrderRow & { tags?: unknown }) => ({
-          ...o,
-          tags: normalizeOrderTags(o.tags),
-        }))
+        (data.recent_orders ?? []).map(
+          (o: OrderRow & {
+            tags?: unknown;
+            shipping_id?: string | null;
+            shipping_logistic_mode?: string | null;
+            shipping_logistic_type?: string | null;
+            shipping_carrier?: string | null;
+          }) => ({
+            ml_order_id: String(o.ml_order_id),
+            status: String(o.status),
+            date_created: String(o.date_created),
+            synced_at: String(o.synced_at),
+            tags: normalizeOrderTags(o.tags),
+            shipping_id: o.shipping_id != null ? String(o.shipping_id) : null,
+            shipping_logistic_mode:
+              o.shipping_logistic_mode != null ? String(o.shipping_logistic_mode) : null,
+            shipping_logistic_type:
+              o.shipping_logistic_type != null ? String(o.shipping_logistic_type) : null,
+            shipping_carrier: o.shipping_carrier != null ? String(o.shipping_carrier) : null,
+          })
+        )
       );
       setItems(data.order_items ?? []);
       setOrderLinesProfit(data.order_items_profit ?? []);
@@ -515,6 +541,16 @@ function VendasPageContent() {
           status: order.status,
           date_created: order.date_created,
           tags: order.tags ?? [],
+          shipping_logistic_mode: order.shipping_logistic_mode,
+          shipping_logistic_type: order.shipping_logistic_type,
+          shipping_carrier: order.shipping_carrier,
+          shipping_label: formatOrderShippingLabel({
+            shipping_id: order.shipping_id,
+            shipping_logistic_mode: order.shipping_logistic_mode,
+            shipping_logistic_type: order.shipping_logistic_type,
+            shipping_carrier: order.shipping_carrier,
+            tags: order.tags,
+          }),
         };
       })
       .filter((r): r is OrderLineTableRow => r != null)
@@ -958,6 +994,7 @@ function VendasPageContent() {
                       <AppTableTh>Data</AppTableTh>
                       <AppTableTh>MLB</AppTableTh>
                       <AppTableTh>SKU</AppTableTh>
+                      <AppTableTh title="Modo/tipo Mercado Envios e transportadora">Envio</AppTableTh>
                       <AppTableTh className="text-right">Qtd</AppTableTh>
                       <AppTableTh className="text-right">Preço</AppTableTh>
                       <AppTableTh className="text-right" title="sale_fee do pedido vs % referência">
@@ -972,7 +1009,7 @@ function VendasPageContent() {
                   <tbody>
                     {filteredOrderLines.length === 0 && !loading ? (
                       <tr>
-                        <td colSpan={11} className="p-6 text-center text-sm text-slate-500">
+                        <td colSpan={12} className="p-6 text-center text-sm text-slate-500">
                           {orderLineTableRows.length === 0
                             ? "Nenhum pedido gravado ainda."
                             : "Nenhuma linha corresponde aos filtros."}
@@ -1031,6 +1068,28 @@ function VendasPageContent() {
                                 onCopy={copyToClipboard}
                                 className="max-w-full truncate text-xs text-slate-700 dark:text-slate-300"
                               />
+                            </AppTableTd>
+                            <AppTableTd
+                              className="max-w-[10rem] text-xs text-slate-700 dark:text-slate-300"
+                              title={
+                                row.shipping_label
+                                  ? [
+                                      row.shipping_logistic_mode &&
+                                        `modo: ${row.shipping_logistic_mode}`,
+                                      row.shipping_logistic_type &&
+                                        `tipo: ${row.shipping_logistic_type}`,
+                                      row.shipping_carrier && `carrier: ${row.shipping_carrier}`,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ") || row.shipping_label
+                                  : "Resincronize o pedido para obter tipo de envio"
+                              }
+                            >
+                              {row.shipping_label ? (
+                                <span className="line-clamp-2 leading-snug">{row.shipping_label}</span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
                             </AppTableTd>
                             <AppTableTd className="text-right tabular-nums text-sm">{row.quantity}</AppTableTd>
                             <AppTableTd className="text-right text-sm tabular-nums">

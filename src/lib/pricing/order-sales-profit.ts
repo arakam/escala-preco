@@ -2,12 +2,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { computeItemsFees, type PricingFeeInputItem } from "@/lib/pricing/compute-items-fees";
 import { calculateFullPricing } from "@/lib/pricing/full-net";
 import { loadPricingRulesSnapshot } from "@/lib/pricing/pricing-rules-cache";
+import { extractSkuFromMlRawJson } from "@/lib/products/ml-sku";
 
 const VARIATION_ID_ITEM = -1;
 
 export type OrderLineInput = {
   ml_order_id: string;
   item_id: string;
+  /** Variação vendida (ml_order_items.variation_id / order_items[].item.variation_id). */
+  variation_id?: number | null;
   quantity: number;
   unit_price: number | null;
   line_index: number;
@@ -126,22 +129,12 @@ type ListingCtx = {
   current_price: number | null;
 };
 
-function pickBestListingRow(
-  rows: Array<Record<string, unknown>>
-): ListingCtx | null {
-  if (rows.length === 0) return null;
-  const sorted = [...rows].sort((a, b) => {
-    const av = Number(a.variation_id);
-    const bv = Number(b.variation_id);
-    const aItem = av === VARIATION_ID_ITEM || av === -1;
-    const bItem = bv === VARIATION_ID_ITEM || bv === -1;
-    if (aItem !== bItem) return aItem ? -1 : 1;
-    const ap = a.product_id != null && a.product_id !== "";
-    const bp = b.product_id != null && b.product_id !== "";
-    if (ap !== bp) return ap ? -1 : 1;
-    return av - bv;
-  });
-  const r = sorted[0];
+function isMergedSkuLabel(sku: string | null): boolean {
+  if (!sku) return false;
+  return sku.includes(" · ") || sku.includes("(+") || /\+\d+\s*SKU/i.test(sku);
+}
+
+function cacheRowToListingCtx(r: Record<string, unknown>): ListingCtx {
   return {
     item_id: String(r.item_id).trim().toUpperCase(),
     listing_type_id: r.listing_type_id != null ? String(r.listing_type_id) : null,
@@ -160,24 +153,159 @@ function pickBestListingRow(
   };
 }
 
+function pickParentCacheRow(rows: Array<Record<string, unknown>>): ListingCtx | null {
+  const parent = rows.find((r) => Number(r.variation_id) === VARIATION_ID_ITEM);
+  if (parent) return cacheRowToListingCtx(parent);
+  if (rows.length === 1) return cacheRowToListingCtx(rows[0]);
+  return null;
+}
+
+function pickCacheRowForVariation(
+  rows: Array<Record<string, unknown>>,
+  variationId: number
+): ListingCtx | null {
+  const row = rows.find((r) => Number(r.variation_id) === variationId);
+  return row ? cacheRowToListingCtx(row) : null;
+}
+
+function mergeVariationWithParent(variation: ListingCtx, parent: ListingCtx | null): ListingCtx {
+  if (!parent) return variation;
+  return {
+    ...parent,
+    ...variation,
+    listing_type_id: parent.listing_type_id ?? variation.listing_type_id,
+    category_id: parent.category_id ?? variation.category_id,
+    reference_fee_percent: parent.reference_fee_percent ?? variation.reference_fee_percent,
+    sku: variation.sku ?? parent.sku,
+    cost_price: variation.cost_price ?? parent.cost_price,
+    tax_percent: variation.tax_percent ?? parent.tax_percent,
+    extra_fee_percent: variation.extra_fee_percent ?? parent.extra_fee_percent,
+    fixed_expenses: variation.fixed_expenses ?? parent.fixed_expenses,
+    weight_kg: variation.weight_kg ?? parent.weight_kg,
+    height_cm: variation.height_cm ?? parent.height_cm,
+    width_cm: variation.width_cm ?? parent.width_cm,
+    length_cm: variation.length_cm ?? parent.length_cm,
+    current_price: variation.current_price ?? parent.current_price,
+  };
+}
+
+function inferVariationByPrice(
+  itemId: string,
+  unitPrice: number | null,
+  variationByKey: Map<string, ListingCtx>
+): ListingCtx | null {
+  if (unitPrice == null || unitPrice <= 0) return null;
+  const prefix = `${itemId}:`;
+  const matches: ListingCtx[] = [];
+  for (const [key, ctx] of Array.from(variationByKey.entries())) {
+    if (!key.startsWith(prefix)) continue;
+    const p = ctx.current_price;
+    if (p != null && Math.abs(p - unitPrice) < 0.02) matches.push(ctx);
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
+type ListingResolutionCtx = {
+  cacheRowsByItem: Map<string, Array<Record<string, unknown>>>;
+  variationByKey: Map<string, ListingCtx>;
+};
+
+function normalizeLineVariationId(variationId: number | null | undefined): number | null {
+  if (variationId == null || !Number.isFinite(Number(variationId))) return null;
+  const n = Math.trunc(Number(variationId));
+  return n > 0 ? n : null;
+}
+
+function resolveListingForLine(
+  itemId: string,
+  variationId: number | null | undefined,
+  unitPrice: number | null,
+  ctx: ListingResolutionCtx
+): ListingCtx | null {
+  const rows = ctx.cacheRowsByItem.get(itemId) ?? [];
+  const parent = pickParentCacheRow(rows);
+  const normVid = normalizeLineVariationId(variationId);
+
+  let variationListing: ListingCtx | null = null;
+  if (normVid != null) {
+    variationListing =
+      ctx.variationByKey.get(`${itemId}:${normVid}`) ??
+      pickCacheRowForVariation(rows, normVid);
+  } else if (parent && isMergedSkuLabel(parent.sku)) {
+    variationListing = inferVariationByPrice(itemId, unitPrice, ctx.variationByKey);
+  }
+
+  if (variationListing) {
+    return mergeVariationWithParent(variationListing, parent);
+  }
+
+  if (parent && !isMergedSkuLabel(parent.sku)) {
+    return parent;
+  }
+
+  if (parent) {
+    return { ...parent, sku: null };
+  }
+
+  if (rows.length > 0) {
+    const fallback = cacheRowToListingCtx(rows[0]);
+    return isMergedSkuLabel(fallback.sku) ? { ...fallback, sku: null } : fallback;
+  }
+
+  return null;
+}
+
 function numOrNull(v: unknown): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
-async function loadListingByItemIds(
+function variationDbRowToListingCtx(
+  raw: Record<string, unknown>,
+  itemId: string
+): ListingCtx {
+  const prod = raw.products as Record<string, unknown> | Record<string, unknown>[] | null;
+  const p = Array.isArray(prod) ? prod[0] : prod;
+  const productSku = p && typeof p.sku === "string" ? p.sku : null;
+  const sku =
+    extractSkuFromMlRawJson(raw.raw_json) ??
+    (raw.seller_custom_field != null && String(raw.seller_custom_field).trim()
+      ? String(raw.seller_custom_field).trim()
+      : null) ??
+    productSku;
+  return {
+    item_id: itemId,
+    listing_type_id: null,
+    category_id: null,
+    weight_kg: numOrNull(p?.weight),
+    height_cm: numOrNull(p?.height),
+    width_cm: numOrNull(p?.width),
+    length_cm: numOrNull(p?.length),
+    sku,
+    cost_price: numOrNull(p?.cost_price),
+    tax_percent: numOrNull(p?.tax_percent),
+    extra_fee_percent: numOrNull(p?.extra_fee_percent),
+    fixed_expenses: numOrNull(p?.fixed_expenses),
+    reference_fee_percent: null,
+    current_price: numOrNull(raw.price),
+  };
+}
+
+async function loadListingResolutionContext(
   supabase: SupabaseClient,
   accountId: string,
   itemIds: string[]
-): Promise<Map<string, ListingCtx>> {
-  const map = new Map<string, ListingCtx>();
-  if (itemIds.length === 0) return map;
+): Promise<ListingResolutionCtx> {
+  const cacheRowsByItem = new Map<string, Array<Record<string, unknown>>>();
+  const variationByKey = new Map<string, ListingCtx>();
+  if (itemIds.length === 0) {
+    return { cacheRowsByItem, variationByKey };
+  }
 
   const cacheCols =
     "item_id, variation_id, listing_type_id, category_id, weight_kg, height_cm, width_cm, length_cm, sku, product_id, cost_price, tax_percent, extra_fee_percent, fixed_expenses, reference_fee_percent, current_price";
 
   const chunk = 80;
-  const byItem = new Map<string, Array<Record<string, unknown>>>();
   for (let i = 0; i < itemIds.length; i += chunk) {
     const slice = itemIds.slice(i, i + chunk);
     const { data: cacheRows } = await supabase
@@ -187,21 +315,15 @@ async function loadListingByItemIds(
       .in("item_id", slice);
     for (const row of cacheRows ?? []) {
       const id = String(row.item_id).trim().toUpperCase();
-      const list = byItem.get(id) ?? [];
+      const list = cacheRowsByItem.get(id) ?? [];
       list.push(row as Record<string, unknown>);
-      byItem.set(id, list);
+      cacheRowsByItem.set(id, list);
     }
   }
 
   const missing: string[] = [];
   for (const id of itemIds) {
-    const rows = byItem.get(id);
-    if (rows?.length) {
-      const picked = pickBestListingRow(rows);
-      if (picked) map.set(id, picked);
-    } else {
-      missing.push(id);
-    }
+    if (!cacheRowsByItem.has(id)) missing.push(id);
   }
 
   if (missing.length > 0) {
@@ -219,32 +341,55 @@ async function loadListingByItemIds(
       for (const row of itemRows ?? []) {
         const raw = row as Record<string, unknown>;
         const id = String(raw.item_id).trim().toUpperCase();
-        if (map.has(id)) continue;
+        if (cacheRowsByItem.has(id)) continue;
         const prod = raw.products as Record<string, unknown> | Record<string, unknown>[] | null;
         const p = Array.isArray(prod) ? prod[0] : prod;
-        map.set(id, {
-          item_id: id,
-          listing_type_id: raw.listing_type_id != null ? String(raw.listing_type_id) : null,
-          category_id: raw.category_id != null ? String(raw.category_id) : null,
-          weight_kg: numOrNull(raw.weight_kg) ?? numOrNull(p?.weight),
-          height_cm: numOrNull(raw.height_cm) ?? numOrNull(p?.height),
-          width_cm: numOrNull(raw.width_cm) ?? numOrNull(p?.width),
-          length_cm: numOrNull(raw.length_cm) ?? numOrNull(p?.length),
-          sku:
-            (p && typeof p.sku === "string" ? p.sku : null) ??
-            (raw.seller_custom_field != null ? String(raw.seller_custom_field) : null),
-          cost_price: numOrNull(p?.cost_price),
-          tax_percent: numOrNull(p?.tax_percent),
-          extra_fee_percent: numOrNull(p?.extra_fee_percent),
-          fixed_expenses: numOrNull(p?.fixed_expenses),
-          reference_fee_percent: null,
-          current_price: numOrNull(raw.price),
-        });
+        cacheRowsByItem.set(id, [
+          {
+            item_id: id,
+            variation_id: VARIATION_ID_ITEM,
+            listing_type_id: raw.listing_type_id,
+            category_id: raw.category_id,
+            weight_kg: numOrNull(raw.weight_kg) ?? numOrNull(p?.weight),
+            height_cm: numOrNull(raw.height_cm) ?? numOrNull(p?.height),
+            width_cm: numOrNull(raw.width_cm) ?? numOrNull(p?.width),
+            length_cm: numOrNull(raw.length_cm) ?? numOrNull(p?.length),
+            sku:
+              (p && typeof p.sku === "string" ? p.sku : null) ??
+              (raw.seller_custom_field != null ? String(raw.seller_custom_field) : null),
+            cost_price: numOrNull(p?.cost_price),
+            tax_percent: numOrNull(p?.tax_percent),
+            extra_fee_percent: numOrNull(p?.extra_fee_percent),
+            fixed_expenses: numOrNull(p?.fixed_expenses),
+            reference_fee_percent: null,
+            current_price: numOrNull(raw.price),
+          },
+        ]);
       }
     }
   }
 
-  return map;
+  for (let i = 0; i < itemIds.length; i += chunk) {
+    const slice = itemIds.slice(i, i + chunk);
+    const { data: variationRows } = await supabase
+      .from("ml_variations")
+      .select(
+        `item_id, variation_id, price, raw_json, seller_custom_field,
+         products:product_id ( sku, cost_price, tax_percent, extra_fee_percent, fixed_expenses, weight, height, width, length )`
+      )
+      .eq("account_id", accountId)
+      .in("item_id", slice);
+
+    for (const row of variationRows ?? []) {
+      const raw = row as Record<string, unknown>;
+      const itemId = String(raw.item_id).trim().toUpperCase();
+      const vid = Number(raw.variation_id);
+      if (!Number.isFinite(vid) || vid <= 0) continue;
+      variationByKey.set(`${itemId}:${vid}`, variationDbRowToListingCtx(raw, itemId));
+    }
+  }
+
+  return { cacheRowsByItem, variationByKey };
 }
 
 /**
@@ -282,16 +427,24 @@ export async function enrichOrderLinesWithProfit(
   const itemIds = Array.from(
     new Set(lines.map((l) => String(l.item_id).trim().toUpperCase()).filter(Boolean))
   );
-  const listingByItem = await loadListingByItemIds(supabaseAdmin, accountId, itemIds);
+  const listingCtx = await loadListingResolutionContext(supabaseAdmin, accountId, itemIds);
   const rules = await loadPricingRulesSnapshot(supabaseAdmin, siteId, { loadFeeReferences: true });
 
   const feeInputs: PricingFeeInputItem[] = [];
   const feeInputIndexByLine: number[] = [];
 
+  const listingByLineIndex: Array<ListingCtx | null> = [];
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const itemId = String(line.item_id).trim().toUpperCase();
-    const listing = listingByItem.get(itemId);
+    const listing = resolveListingForLine(
+      itemId,
+      line.variation_id,
+      line.unit_price,
+      listingCtx
+    );
+    listingByLineIndex[i] = listing;
     const salePrice =
       line.unit_price != null && line.unit_price > 0
         ? line.unit_price
@@ -304,10 +457,13 @@ export async function enrichOrderLinesWithProfit(
       continue;
     }
 
+    const feeVariationId =
+      normalizeLineVariationId(line.variation_id) ?? VARIATION_ID_ITEM;
+
     feeInputIndexByLine[i] = feeInputs.length;
     feeInputs.push({
       item_id: itemId,
-      variation_id: VARIATION_ID_ITEM,
+      variation_id: feeVariationId,
       price: salePrice,
       listing_type_id: listing.listing_type_id,
       category_id: listing.category_id,
@@ -365,7 +521,7 @@ export async function enrichOrderLinesWithProfit(
 
   return lines.map((line, i) => {
     const itemId = String(line.item_id).trim().toUpperCase();
-    const listing = listingByItem.get(itemId);
+    const listing = listingByLineIndex[i];
     const salePrice =
       line.unit_price != null && line.unit_price > 0
         ? line.unit_price

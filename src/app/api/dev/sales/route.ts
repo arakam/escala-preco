@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
   const { data: recentOrders, error: ordersErr } = await supabase
     .from("ml_orders")
     .select(
-      "ml_order_id, status, date_created, synced_at, shipping_id, shipping_cost_sender, marketplace_fee"
+      "ml_order_id, status, date_created, synced_at, shipping_id, shipping_logistic_mode, shipping_logistic_type, shipping_carrier, shipping_cost_sender, marketplace_fee, tags"
     )
     .eq("account_id", account.id)
     .order("date_created", { ascending: false })
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
   if (orderIds.length > 0) {
     const { data: itemRows, error: itemsErr } = await supabase
       .from("ml_order_items")
-      .select("ml_order_id, item_id, quantity, unit_price, line_index, sale_fee")
+      .select("ml_order_id, item_id, variation_id, quantity, unit_price, line_index, sale_fee")
       .eq("account_id", account.id)
       .in("ml_order_id", orderIds)
       .order("line_index", { ascending: true });
@@ -71,6 +71,12 @@ export async function GET(req: NextRequest) {
       items = (itemRows ?? []).map((row) => ({
         ml_order_id: String(row.ml_order_id),
         item_id: String(row.item_id).trim().toUpperCase(),
+        variation_id:
+          row.variation_id != null &&
+          Number.isFinite(Number(row.variation_id)) &&
+          Number(row.variation_id) > 0
+            ? Math.trunc(Number(row.variation_id))
+            : null,
         quantity: Number(row.quantity) > 0 ? Math.trunc(Number(row.quantity)) : 1,
         unit_price:
           row.unit_price != null && Number.isFinite(Number(row.unit_price))
