@@ -103,8 +103,10 @@ interface ItemRow {
   item_id: string;
   title: string | null;
   status: string | null;
+  /** Preço standard cadastrado (GET /items/{id}/prices, type=standard). */
   price: number | null;
-  planned_price?: number | null;
+  /** Preço exibido ao comprador (GET /items/{id}/sale_price). */
+  sale_price?: number | null;
   available_quantity?: number | null;
   sold_quantity?: number | null;
   health?: number | null;
@@ -134,13 +136,24 @@ type SortField =
   | "category_id"
   | "status"
   | "price"
-  | "planned_price"
+  | "sale_price"
   | "available_quantity"
   | "sold_quantity"
   | "health"
   | "user_product_id"
   | "updated_at";
 type ColumnKey = string;
+
+/** Preço que o anúncio mostra no ML (sale_price); até re-sync, pode coincidir com o standard. */
+function itemWorkedPrice(item: ItemRow): number | null {
+  if (item.sale_price != null && Number.isFinite(Number(item.sale_price))) {
+    return Number(item.sale_price);
+  }
+  if (item.price != null && Number.isFinite(Number(item.price))) {
+    return Number(item.price);
+  }
+  return null;
+}
 
 function HelpFieldBadge({ kind }: { kind: "required" | "optional" }) {
   return (
@@ -192,8 +205,9 @@ function AnunciosHelpContent() {
         <div>
           <p className="font-semibold text-sky-900 dark:text-sky-50">Leia antes de começar</p>
           <p className="mt-1 text-sky-800/95 dark:text-sky-200/95">
-            Evita erros comuns (importar sem conta conectada, filtrar sem aplicar, confundir preço ML com preço
-            trabalhado). Reserve 2 minutos nesta aba antes de sincronizar ou exportar.
+            Evita erros comuns (importar sem conta conectada, filtrar sem aplicar, confundir preço ML — standard —
+            com preço trab. — o que o comprador vê, inclusive com promoção). Reserve 2 minutos nesta aba antes de
+            sincronizar ou exportar.
           </p>
         </div>
       </div>
@@ -350,10 +364,12 @@ function AnunciosHelpContent() {
               Código do anúncio; clique na célula para copiar.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Preço ML">
-              Preço atual no Mercado Livre na última sincronização.
+              Preço <strong>standard</strong> cadastrado (sem promoção), via API de preços do ML na última sync.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Preço trab.">
-              Preço planejado salvo na tela <strong>Preços</strong>; editar lá, não nesta tela.
+              Preço que o anúncio está <strong>exibindo</strong> agora (preço de venda vencedor /{" "}
+              <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">sale_price</code> do ML). Com
+              promoção ativa, pode ser menor que o Preço ML.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Estoque / Vendidos">
               Quantidade disponível e unidades vendidas conforme retorno da API na sync.
@@ -759,7 +775,10 @@ function AnunciosPageContent() {
       item.category_id ?? "",
       formatMlItemStatusLabel(item.status),
       item.price != null ? Number(item.price).toFixed(2) : "",
-      item.planned_price != null ? Number(item.planned_price).toFixed(2) : "",
+      (() => {
+        const w = itemWorkedPrice(item);
+        return w != null ? w.toFixed(2) : "";
+      })(),
       item.available_quantity != null ? String(item.available_quantity) : "",
       item.sold_quantity != null ? String(item.sold_quantity) : "",
       formatMlItemHealth(item.health),
@@ -785,8 +804,14 @@ function AnunciosPageContent() {
     const data = [...items];
     data.sort((a, b) => {
       const dir = sortDirection === "asc" ? 1 : -1;
-      const av = a[sortField];
-      const bv = b[sortField];
+      const av =
+        sortField === "sale_price"
+          ? itemWorkedPrice(a)
+          : (a[sortField] as string | number | null | undefined);
+      const bv =
+        sortField === "sale_price"
+          ? itemWorkedPrice(b)
+          : (b[sortField] as string | number | null | undefined);
 
       if (av == null && bv == null) return 0;
       if (av == null) return 1 * dir;
@@ -794,7 +819,7 @@ function AnunciosPageContent() {
 
       if (
         sortField === "price" ||
-        sortField === "planned_price" ||
+        sortField === "sale_price" ||
         sortField === "available_quantity" ||
         sortField === "sold_quantity" ||
         sortField === "health"
@@ -1199,7 +1224,7 @@ function AnunciosPageContent() {
                   {renderColumnHeader(
                     "planned_price",
                     "Preço trab.",
-                    "planned_price",
+                    "sale_price",
                     "whitespace-nowrap"
                   )}
                   {renderColumnHeader("stock", "Estoque", "available_quantity", "whitespace-nowrap")}
@@ -1288,7 +1313,7 @@ function AnunciosPageContent() {
                     <td
                       className={frozenCellClass("price", "p-2 text-right text-sm tabular-nums text-slate-600 dark:text-slate-300")}
                       style={frozenCellStyle("price")}
-                      title="Preço atual no Mercado Livre"
+                      title="Preço standard cadastrado no ML (sem promoção)"
                     >
                       {item.price != null ? Number(item.price).toFixed(2) : "—"}
                     </td>
@@ -1296,17 +1321,23 @@ function AnunciosPageContent() {
                       className={frozenCellClass(
                         "planned_price",
                         `p-2 text-right text-sm font-semibold tabular-nums ${
-                          item.planned_price != null &&
-                          item.price != null &&
-                          Number(item.planned_price) !== Number(item.price)
-                            ? "text-[#018589] dark:text-teal-300"
-                            : "text-slate-800 dark:text-slate-100"
+                          (() => {
+                            const w = itemWorkedPrice(item);
+                            return w != null &&
+                              item.price != null &&
+                              w !== Number(item.price)
+                              ? "text-[#018589] dark:text-teal-300"
+                              : "text-slate-800 dark:text-slate-100";
+                          })()
                         }`
                       )}
                       style={frozenCellStyle("planned_price")}
-                      title="Preço salvo na calculadora (Preços)"
+                      title="Preço exibido no anúncio (sale_price do ML)"
                     >
-                      {item.planned_price != null ? Number(item.planned_price).toFixed(2) : "—"}
+                      {(() => {
+                        const w = itemWorkedPrice(item);
+                        return w != null ? w.toFixed(2) : "—";
+                      })()}
                     </td>
                     <td
                       className={frozenCellClass(

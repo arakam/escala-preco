@@ -8,7 +8,16 @@
  *   preenchidos; sem array variations (has_variations = false). Atualização de preço/atacado por item_id.
  */
 import type { MLItemDetail, MLVariationDetail } from "./client";
-import { fetchAllItemIds, fetchItemDetail, fetchVariationDetail, getItemPrices, getStandardPriceAmount, runWithConcurrency } from "./client";
+import {
+  fetchAllItemIds,
+  fetchItemDetail,
+  fetchVariationDetail,
+  getItemPrices,
+  getItemSalePrice,
+  getSalePriceAmount,
+  getStandardPriceAmount,
+  runWithConcurrency,
+} from "./client";
 import { extractItemDimensions } from "./item-dimensions";
 import { getLatestValidAccessToken, getValidAccessToken } from "./refresh";
 import { syncHeartbeatMs, syncLog, syncLogVerbose } from "./sync-log";
@@ -55,6 +64,7 @@ function mapItemToRow(accountId: string, item: MLItemDetail) {
     listing_type_id: item.listing_type_id ?? null,
     site_id: item.site_id ?? null,
     price: item.price ?? null,
+    sale_price: null as number | null,
     currency_id: item.currency_id ?? null,
     available_quantity: item.available_quantity ?? null,
     sold_quantity: item.sold_quantity ?? null,
@@ -216,8 +226,11 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       const item = await fetchItemDetail(itemId, token);
       const pricesResponse = await getItemPrices(itemId, token, { showAllPrices: true });
       const standardPrice = getStandardPriceAmount(pricesResponse);
+      const salePriceResponse = await getItemSalePrice(itemId, token);
+      const salePrice = getSalePriceAmount(salePriceResponse);
       const row = mapItemToRow(accountId, item);
       row.price = standardPrice ?? row.price;
+      row.sale_price = salePrice;
       const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
         onConflict: "account_id,item_id",
       });
@@ -436,8 +449,11 @@ export async function syncSingleItem(
     const item = await fetchItemDetail(itemIdClean, accessToken);
     const pricesResponse = await getItemPrices(itemIdClean, accessToken, { showAllPrices: true });
     const standardPrice = getStandardPriceAmount(pricesResponse);
+    const salePriceResponse = await getItemSalePrice(itemIdClean, accessToken);
+    const salePrice = getSalePriceAmount(salePriceResponse);
     const row = mapItemToRow(accountId, item);
     row.price = standardPrice ?? row.price;
+    row.sale_price = salePrice;
     const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
       onConflict: "account_id,item_id",
     });

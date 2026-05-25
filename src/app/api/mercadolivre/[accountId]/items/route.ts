@@ -9,65 +9,7 @@ import {
 } from "@/lib/mercadolivre/item-tags";
 
 const DEFAULT_PAGE_SIZE = 20;
-const PLANNED_VARIATION_ITEM = -1;
 
-type ItemListRow = {
-  item_id: string;
-  has_variations?: boolean;
-  price?: number | null;
-  [key: string]: unknown;
-};
-
-type PlannedPriceRow = {
-  item_id: string;
-  variation_id: number | null;
-  planned_price: number;
-};
-
-function resolvePlannedPriceForListing(
-  itemId: string,
-  plannedRows: PlannedPriceRow[]
-): number | null {
-  const norm = String(itemId).trim().toUpperCase();
-  const itemPlans = plannedRows.filter(
-    (p) => String(p.item_id).trim().toUpperCase() === norm
-  );
-  const atItem = itemPlans.find(
-    (p) =>
-      p.variation_id == null || Number(p.variation_id) === PLANNED_VARIATION_ITEM
-  );
-  if (atItem != null) {
-    const v = Number(atItem.planned_price);
-    return Number.isFinite(v) ? v : null;
-  }
-  const first = itemPlans[0];
-  if (first == null) return null;
-  const v = Number(first.planned_price);
-  return Number.isFinite(v) ? v : null;
-}
-
-async function enrichItemsWithPlannedPrices(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  accountId: string,
-  items: ItemListRow[]
-): Promise<ItemListRow[]> {
-  if (items.length === 0) return items;
-  const ids = items.map((i) => i.item_id);
-  const { data: plannedRows, error } = await supabase
-    .from("planned_prices")
-    .select("item_id, variation_id, planned_price")
-    .eq("account_id", accountId)
-    .in("item_id", ids);
-  if (error) {
-    console.error("[items list] planned_prices:", error);
-    return items.map((item) => ({ ...item, planned_price: null }));
-  }
-  const rows = (plannedRows ?? []) as PlannedPriceRow[];
-  return items.map((item) => ({
-    ...item,
-    planned_price: resolvePlannedPriceForListing(item.item_id, rows),
-  }));
-}
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function applyStockFilter(q: any, op: StockCompareOp, qty: number) {
   let next = q.not("available_quantity", "is", null);
@@ -216,7 +158,7 @@ export async function GET(
     let q = supabase
       .from("ml_items")
       .select(
-        "item_id, title, status, price, available_quantity, sold_quantity, health, tags_json, has_variations, thumbnail, permalink, updated_at, user_product_id, family_id, family_name, listing_type_id, category_id",
+        "item_id, title, status, price, sale_price, available_quantity, sold_quantity, health, tags_json, has_variations, thumbnail, permalink, updated_at, user_product_id, family_id, family_name, listing_type_id, category_id",
         { count: "exact" }
       )
       .eq("account_id", accountId)
@@ -245,9 +187,8 @@ export async function GET(
       console.error("[items list]", error);
       return NextResponse.json({ error: "Erro ao listar itens" }, { status: 500 });
     }
-    const enriched = await enrichItemsWithPlannedPrices(supabase, accountId, rows as ItemListRow[]);
     return NextResponse.json({
-      items: enriched,
+      items: rows ?? [],
       total,
       page: 1,
       page_size: 0,
@@ -260,14 +201,8 @@ export async function GET(
     return NextResponse.json({ error: "Erro ao listar itens" }, { status: 500 });
   }
 
-  const enriched = await enrichItemsWithPlannedPrices(
-    supabase,
-    accountId,
-    (items ?? []) as ItemListRow[]
-  );
-
   return NextResponse.json({
-    items: enriched,
+    items: items ?? [],
     total: count ?? 0,
     page: familyId ? 1 : page,
     page_size: pageSize,

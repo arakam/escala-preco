@@ -347,6 +347,40 @@ export function getStandardPriceAmount(
   return null;
 }
 
+/** Resposta de GET /items/{itemId}/sale_price — preço de venda vencedor (exibido ao comprador). */
+export interface MLItemSalePriceResponse {
+  price_id?: string;
+  amount?: number;
+  regular_amount?: number | null;
+  currency_id?: string;
+  reference_date?: string;
+  metadata?: { promotion_id?: string; promotion_type?: string };
+}
+
+const DEFAULT_SALE_PRICE_CONTEXT = "channel_marketplace";
+
+/**
+ * GET /items/{itemId}/sale_price — preço que o anúncio está mostrando (vencedor no canal).
+ * Documentação: https://developers.mercadolivre.com.br/pt_br/api-de-precos#Obter-preco-de-venda-atual
+ */
+export async function getItemSalePrice(
+  itemId: string,
+  accessToken: string,
+  context: string = DEFAULT_SALE_PRICE_CONTEXT
+): Promise<MLItemSalePriceResponse | null> {
+  const id = encodeURIComponent(itemId.trim());
+  const url = `https://api.mercadolibre.com/items/${id}/sale_price?context=${encodeURIComponent(context)}`;
+  const res = await fetchWithRetry(url, accessToken);
+  if (!res.ok) return null;
+  return (await res.json()) as MLItemSalePriceResponse;
+}
+
+export function getSalePriceAmount(response: MLItemSalePriceResponse | null): number | null {
+  if (response?.amount == null) return null;
+  const n = Number(response.amount);
+  return Number.isFinite(n) ? n : null;
+}
+
 /**
  * GET /seller-promotions/items/{item_id}?app_version=v2 — promoções e campanhas aplicáveis ao anúncio.
  */
