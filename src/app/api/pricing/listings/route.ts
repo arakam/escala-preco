@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { resolveProductIdsByTagIds } from "@/lib/product-tags";
+import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 import {
   fetchAllViaRange,
   isAllPageSize,
@@ -72,11 +72,30 @@ export async function GET(req: NextRequest) {
 
   const offset = showAll ? 0 : (page - 1) * limit;
 
-  let productIdsForTags: string[] | null = null;
+  const { data: account, error: accountError } = await supabase
+    .from("ml_accounts")
+    .select("id,ml_user_id")
+    .eq("user_id", user.id)
+    .single();
+
+  if (accountError || !account) {
+    return NextResponse.json({ error: "Conta ML não encontrada" }, { status: 404 });
+  }
+
+  // Ler cache com service role (já validamos que a conta é do usuário); evita RLS bloqueando leitura
+  const serviceSupabase = createServiceClient();
+
+  /** MLB com produto tagueado (via ml_items/ml_variations), não só product_id no cache. */
+  let allowedItemIds: string[] | null = null;
   if (tagIds.length > 0) {
     try {
-      productIdsForTags = await resolveProductIdsByTagIds(supabase, tagIds);
-      if (productIdsForTags.length === 0) {
+      const resolved = await resolveMlItemIdsByProductTagIds(
+        serviceSupabase,
+        account.id,
+        tagIds
+      );
+      allowedItemIds = resolved ?? [];
+      if (allowedItemIds.length === 0) {
         return NextResponse.json({
           listings: [],
           total: 0,
@@ -93,19 +112,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const { data: account, error: accountError } = await supabase
-    .from("ml_accounts")
-    .select("id,ml_user_id")
-    .eq("user_id", user.id)
-    .single();
-
-  if (accountError || !account) {
-    return NextResponse.json({ error: "Conta ML não encontrada" }, { status: 404 });
-  }
-
-  // Ler cache com service role (já validamos que a conta é do usuário); evita RLS bloqueando leitura
-  const serviceSupabase = createServiceClient();
-
   try {
     const buildCacheQuery = (base: ReturnType<typeof serviceSupabase.from>) => {
       let q = base.select("*", { count: "exact" }).eq("account_id", account.id);
@@ -115,7 +121,7 @@ export async function GET(req: NextRequest) {
       if (search) q = q.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
       if (skuFilter) q = q.ilike("sku", `%${skuFilter}%`);
       if (onlyWithSales30d) q = q.gt("orders_30d", 0);
-      if (productIdsForTags) q = q.in("product_id", productIdsForTags);
+      if (allowedItemIds) q = q.in("item_id", allowedItemIds);
       return q;
     };
 
