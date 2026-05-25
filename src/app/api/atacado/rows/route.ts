@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 import { NextRequest, NextResponse } from "next/server";
+import { resolveSkuForAtacadoListing } from "@/lib/atacado";
 import { isAllPageSize } from "@/lib/table-pagination";
 
 const PAGE_SIZE = 50;
@@ -33,6 +34,7 @@ type VariationRow = {
   seller_custom_field: string | null;
   attributes_json: unknown;
   raw_json: unknown;
+  products?: unknown;
 };
 
 /** Alinhado a planned_prices / pricing-cache: -1 = anúncio sem variação ou preço no nível do item */
@@ -120,12 +122,13 @@ export async function GET(request: NextRequest) {
     family_id: string | null;
     user_product_id: string | null;
     raw_json?: unknown;
+    products?: unknown;
   };
 
   const ITEM_SELECT =
-    "item_id, title, has_variations, price, listing_type_id, category_id, seller_custom_field, family_name, family_id, user_product_id";
+    "item_id, title, has_variations, price, listing_type_id, category_id, seller_custom_field, family_name, family_id, user_product_id, product_id, products:product_id (sku)";
   const ITEM_SELECT_WITH_RAW =
-    "item_id, title, has_variations, price, listing_type_id, category_id, seller_custom_field, family_name, family_id, user_product_id, raw_json";
+    "item_id, title, has_variations, price, listing_type_id, category_id, seller_custom_field, family_name, family_id, user_product_id, product_id, raw_json, products:product_id (sku)";
 
   const needsFullScan =
     showAll ||
@@ -310,7 +313,9 @@ export async function GET(request: NextRequest) {
     fetchInParallelBatches<VariationRow>(itemIds, 100, async (batchIds) => {
       const { data } = await supabase
         .from("ml_variations")
-        .select("item_id, variation_id, price, seller_custom_field, attributes_json")
+        .select(
+          "item_id, variation_id, price, seller_custom_field, attributes_json, raw_json, product_id, products:product_id (sku)"
+        )
         .eq("account_id", accountId)
         .in("item_id", batchIds);
       return (data ?? []) as VariationRow[];
@@ -419,20 +424,6 @@ export async function GET(request: NextRequest) {
     return Number.isFinite(fallbackPrice) && fallbackPrice > 0 ? fallbackPrice : null;
   }
 
-  function resolveSkuForItem(
-    item: { raw_json?: unknown; seller_custom_field?: string | null },
-    itemVariations: VariationRow[]
-  ): string | null {
-    const parent = getSku(item, null);
-    if (parent) return parent;
-    for (const v of itemVariations) {
-      const s = getSku(item, v);
-      if (s) return s;
-    }
-    const scf = item.seller_custom_field;
-    return scf != null && String(scf).trim() !== "" ? String(scf).trim() : null;
-  }
-
   function resolveDraftForItem(
     itemId: string,
     variationIds: number[]
@@ -476,45 +467,6 @@ export async function GET(request: NextRequest) {
       if (k.startsWith(prefix)) return v;
     }
     return undefined;
-  }
-
-  function extractSkuFromAttributes(attributes: unknown): string | null {
-    if (!Array.isArray(attributes)) return null;
-    const skuAttr = attributes.find(
-      (a: { id?: string }) => a?.id === "SELLER_SKU" || a?.id === "SKU" || a?.id === "CUSTOM_SKU"
-    );
-    if (skuAttr && typeof skuAttr === "object" && "value_name" in skuAttr) {
-      const v = (skuAttr as { value_name?: string }).value_name;
-      return v ? String(v) : null;
-    }
-    return null;
-  }
-
-  function getSku(
-    item: { raw_json?: unknown },
-    variation?: { attributes_json?: unknown; raw_json?: unknown } | null
-  ): string | null {
-    if (variation) {
-      const rawVar = variation.raw_json as Record<string, unknown> | null;
-      if (rawVar) {
-        const fromAttrs = extractSkuFromAttributes(rawVar.attributes);
-        if (fromAttrs) return fromAttrs;
-      }
-      const attr = variation.attributes_json;
-      if (Array.isArray(attr)) {
-        const skuAttr = attr.find((a: { id?: string }) => a?.id === "SELLER_SKU" || a?.id === "SKU" || a?.id === "CUSTOM_SKU");
-        if (skuAttr && typeof skuAttr === "object" && "value_name" in skuAttr) {
-          const v = (skuAttr as { value_name?: string }).value_name;
-          if (v) return String(v);
-        }
-      }
-    }
-    const raw = item.raw_json as Record<string, unknown> | null;
-    if (raw) {
-      const fromAttrs = extractSkuFromAttributes(raw.attributes);
-      if (fromAttrs) return fromAttrs;
-    }
-    return null;
   }
 
   // Construir linhas
@@ -563,7 +515,7 @@ export async function GET(request: NextRequest) {
     rows.push({
       item_id: item.item_id,
       variation_id: null,
-      sku: resolveSkuForItem(item, itemVariations),
+      sku: resolveSkuForAtacadoListing(item, itemVariations),
       title: item.title ?? null,
       current_price: currentPrice,
       planned_price: resolvePlannedPriceForItem(

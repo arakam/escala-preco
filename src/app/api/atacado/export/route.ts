@@ -1,3 +1,4 @@
+import { resolveSkuForAtacadoListing } from "@/lib/atacado";
 import { createClient } from "@/lib/supabase/server";
 import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 import { NextRequest, NextResponse } from "next/server";
@@ -78,6 +79,7 @@ export async function GET(request: NextRequest) {
     seller_custom_field: string | null;
     user_product_id: string | null;
     raw_json: unknown;
+    products?: unknown;
   }[] = [];
   let offset = 0;
   let hasMore = true;
@@ -85,7 +87,9 @@ export async function GET(request: NextRequest) {
   while (hasMore) {
     let itemsQuery = supabase
       .from("ml_items")
-      .select("item_id, title, has_variations, price, seller_custom_field, user_product_id, raw_json")
+      .select(
+        "item_id, title, has_variations, price, seller_custom_field, user_product_id, raw_json, product_id, products:product_id (sku)"
+      )
       .eq("account_id", accountId)
       .order("updated_at", { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -160,6 +164,7 @@ export async function GET(request: NextRequest) {
     seller_custom_field: string | null;
     attributes_json: unknown;
     raw_json: unknown;
+    products?: unknown;
   }[] = [];
 
   for (let i = 0; i < itemIds.length; i += BATCH_SIZE) {
@@ -170,7 +175,9 @@ export async function GET(request: NextRequest) {
     while (varHasMore) {
       const { data: varPage } = await supabase
         .from("ml_variations")
-        .select("item_id, variation_id, price, seller_custom_field, attributes_json, raw_json")
+        .select(
+          "item_id, variation_id, price, seller_custom_field, attributes_json, raw_json, product_id, products:product_id (sku)"
+        )
         .eq("account_id", accountId)
         .in("item_id", batchIds)
         .range(varOffset, varOffset + PAGE_SIZE - 1);
@@ -255,45 +262,6 @@ export async function GET(request: NextRequest) {
     return v != null && !Number.isNaN(v) ? v : null;
   }
 
-  function extractSkuFromAttributes(attributes: unknown): string | null {
-    if (!Array.isArray(attributes)) return null;
-    const skuAttr = attributes.find(
-      (a: { id?: string }) => a?.id === "SELLER_SKU" || a?.id === "SKU" || a?.id === "CUSTOM_SKU"
-    );
-    if (skuAttr && typeof skuAttr === "object" && "value_name" in skuAttr) {
-      const v = (skuAttr as { value_name?: string }).value_name;
-      return v ? String(v) : null;
-    }
-    return null;
-  }
-
-  function getSku(
-    item: { raw_json?: unknown },
-    variation?: { attributes_json?: unknown; raw_json?: unknown } | null
-  ): string {
-    if (variation) {
-      const rawVar = variation.raw_json as Record<string, unknown> | null;
-      if (rawVar) {
-        const fromAttrs = extractSkuFromAttributes(rawVar.attributes);
-        if (fromAttrs) return escapeCsv(fromAttrs);
-      }
-      const attr = variation.attributes_json;
-      if (Array.isArray(attr)) {
-        const skuAttr = attr.find((a: { id?: string }) => a?.id === "SELLER_SKU" || a?.id === "SKU" || a?.id === "CUSTOM_SKU");
-        if (skuAttr && typeof skuAttr === "object" && "value_name" in skuAttr) {
-          const v = (skuAttr as { value_name?: string }).value_name;
-          if (v) return escapeCsv(String(v));
-        }
-      }
-    }
-    const raw = item.raw_json as Record<string, unknown> | null;
-    if (raw) {
-      const fromAttrs = extractSkuFromAttributes(raw.attributes);
-      if (fromAttrs) return escapeCsv(fromAttrs);
-    }
-    return "";
-  }
-
   const SEP = ";";
   function escapeCsv(v: string): string {
     if (v.includes(SEP) || v.includes('"') || v.includes("\n")) {
@@ -347,24 +315,12 @@ export async function GET(request: NextRequest) {
     return fallback > 0 ? fallback : null;
   }
 
-  function skuForItem(
-    item: { item_id: string; raw_json?: unknown; seller_custom_field?: string | null },
-    itemVariations: typeof allVariations
-  ): string {
-    const parent = getSku(item, null);
-    if (parent) return parent;
-    for (const v of itemVariations) {
-      const s = getSku(item, v);
-      if (s) return s;
-    }
-    return "";
-  }
-
   for (const item of items ?? []) {
     const itemVariations = (variations ?? []).filter((v) => v.item_id === item.item_id);
     const variationIds = itemVariations.map((v) => Number(v.variation_id));
     const tiers = tiersForItem(item.item_id, variationIds);
-    const sku = skuForItem(item, itemVariations);
+    const skuResolved = resolveSkuForAtacadoListing(item, itemVariations);
+    const sku = skuResolved ? escapeCsv(skuResolved) : "";
     const price = item.price != null ? Number(item.price) : null;
     const values = [
       escapeCsv(item.item_id),
@@ -381,7 +337,7 @@ export async function GET(request: NextRequest) {
     dataRows.push({
       values,
       hasDraft: tiers.length > 0,
-      sku: sku || null,
+      sku: skuResolved,
       title: item.title,
       userProductId: item.user_product_id,
     });

@@ -428,7 +428,7 @@ function AtacadoHelpContent() {
               Texto livre no título do anúncio; correspondência parcial.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="SKU">
-              Filtra pelo SKU (atributo SELLER_SKU do item ou variação).
+              Filtra pelo SKU (Mercado Livre ou produto vinculado em Anúncios).
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Refino">
               Opções: Nenhum, Só MLBU, Com família, Com rascunho, Sem rascunho, Preço alto (ref.).
@@ -790,7 +790,10 @@ function AtacadoPageContent() {
               {copiedCell === `${rowKey(r)}-sku` ? <span className="text-emerald-600 text-xs font-medium">Copiado!</span> : r.sku}
             </button>
           ) : (
-            <span className="cursor-help text-amber-600" title="Configure SELLER_SKU no ML.">
+            <span
+              className="cursor-help text-amber-600"
+              title="Sem SKU no ML nem no produto vinculado. Vincule em Anúncios ou configure SELLER_SKU no Mercado Livre."
+            >
               Não configurado
             </span>
           )
@@ -2710,7 +2713,7 @@ function AtacadoPageContent() {
                   {renderAtacadoColumnHeader(1, "Título")}
                   {renderAtacadoColumnHeader(2, "SKU", "", {
                     title:
-                      "SKU do atributo SELLER_SKU. Itens: Anúncio → Atributos do produto. Variações: atributo SELLER_SKU em cada variação.",
+                      "SKU do Mercado Livre (SELLER_SKU) ou do produto vinculado em Anúncios. Variações podem ter SKU próprio no ML ou no vínculo.",
                   })}
                   {renderAtacadoColumnHeader(3, "Preço R$", "tabular-nums")}
                   {renderAtacadoColumnHeader(4, "Promoção R$", "tabular-nums", {

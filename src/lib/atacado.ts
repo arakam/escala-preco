@@ -175,3 +175,96 @@ export function normalizeTiers(tiers: Tier[]): Tier[] {
     return true;
   }).slice(0, MAX_TIERS);
 }
+
+/** SKU do join Supabase `products:product_id (sku)`. */
+export function productSkuFromJoin(products: unknown): string | null {
+  if (!products) return null;
+  const prod = products as Record<string, unknown> | Record<string, unknown>[] | null;
+  const p = Array.isArray(prod) ? prod[0] : prod;
+  const sku = p && typeof p.sku === "string" ? p.sku.trim() : "";
+  return sku || null;
+}
+
+function extractSkuFromAttributes(attributes: unknown): string | null {
+  if (!Array.isArray(attributes)) return null;
+  const skuAttr = attributes.find(
+    (a: { id?: string }) => a?.id === "SELLER_SKU" || a?.id === "SKU" || a?.id === "CUSTOM_SKU"
+  );
+  if (skuAttr && typeof skuAttr === "object" && "value_name" in skuAttr) {
+    const v = (skuAttr as { value_name?: string }).value_name;
+    return v ? String(v).trim() : null;
+  }
+  return null;
+}
+
+/**
+ * SKU exibido na tela de atacado: atributos ML → seller_custom_field → produto vinculado.
+ * Alinhado à tela de Preços (`pricing-cache`).
+ */
+export function resolveMlListingSku(opts: {
+  rawJson?: unknown;
+  sellerCustomField?: string | null;
+  attributesJson?: unknown;
+  variationRawJson?: unknown;
+  productSku?: string | null;
+}): string | null {
+  const variationRaw = opts.variationRawJson as Record<string, unknown> | null | undefined;
+  if (variationRaw) {
+    const fromVarAttrs = extractSkuFromAttributes(variationRaw.attributes);
+    if (fromVarAttrs) return fromVarAttrs;
+  }
+  const fromAttrsJson = extractSkuFromAttributes(opts.attributesJson);
+  if (fromAttrsJson) return fromAttrsJson;
+
+  const raw = opts.rawJson as Record<string, unknown> | null | undefined;
+  if (raw) {
+    const fromItemAttrs = extractSkuFromAttributes(raw.attributes);
+    if (fromItemAttrs) return fromItemAttrs;
+    if (typeof raw.seller_custom_field === "string" && raw.seller_custom_field.trim()) {
+      return raw.seller_custom_field.trim();
+    }
+  }
+
+  const scf = opts.sellerCustomField;
+  if (scf != null && String(scf).trim() !== "") return String(scf).trim();
+
+  return opts.productSku?.trim() ? opts.productSku.trim() : null;
+}
+
+export type AtacadoSkuVariationInput = {
+  attributes_json?: unknown;
+  raw_json?: unknown;
+  seller_custom_field?: string | null;
+  products?: unknown;
+};
+
+/** Resolve SKU de um anúncio (nível item), considerando variações e produto vinculado. */
+export function resolveSkuForAtacadoListing(
+  item: {
+    raw_json?: unknown;
+    seller_custom_field?: string | null;
+    products?: unknown;
+  },
+  variations: AtacadoSkuVariationInput[]
+): string | null {
+  const itemProductSku = productSkuFromJoin(item.products);
+
+  const fromItem = resolveMlListingSku({
+    rawJson: item.raw_json,
+    sellerCustomField: item.seller_custom_field,
+    productSku: itemProductSku,
+  });
+  if (fromItem) return fromItem;
+
+  for (const v of variations) {
+    const s = resolveMlListingSku({
+      attributesJson: v.attributes_json,
+      variationRawJson: v.raw_json,
+      sellerCustomField: v.seller_custom_field,
+      productSku: productSkuFromJoin(v.products),
+    });
+    if (s) return s;
+  }
+
+  return itemProductSku;
+}
