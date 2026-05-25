@@ -56,6 +56,12 @@ export type ParsedMlOrder = {
   shipping_logistic_type: string | null;
   /** Transportadora (GET /shipments/{id}/carrier). */
   shipping_carrier: string | null;
+  /** Entrega prevista (lead_time → estimated_delivery_final/time). */
+  shipping_delivery_expected_at: string | null;
+  /** Prazo máximo de despacho (GET /shipments/{id}/sla → expected_date). */
+  shipping_sla_expected_at: string | null;
+  /** Status SLA: on_time, delayed, early, etc. */
+  shipping_sla_status: string | null;
   /** Frete pago pelo vendedor (GET /shipments/{id}/costs → senders[].cost). */
   shipping_cost_sender: number | null;
   /** Comissão no pagamento (payments[].marketplace_fee), quando disponível. */
@@ -165,6 +171,9 @@ export function parseMlOrderPayload(raw: Record<string, unknown>): ParsedMlOrder
     shipping_logistic_mode: null,
     shipping_logistic_type: null,
     shipping_carrier: null,
+    shipping_delivery_expected_at: null,
+    shipping_sla_expected_at: null,
+    shipping_sla_status: null,
     shipping_cost_sender: null,
     marketplace_fee,
     tags: parseMlOrderTags(raw.tags),
@@ -177,6 +186,9 @@ export type MlShipmentShippingMeta = {
   shipping_logistic_mode: string | null;
   shipping_logistic_type: string | null;
   shipping_carrier: string | null;
+  shipping_delivery_expected_at: string | null;
+  shipping_sla_expected_at: string | null;
+  shipping_sla_status: string | null;
 };
 
 function parseShipmentSenderCost(data: { senders?: Array<{ cost?: number }> }): number | null {
@@ -202,19 +214,21 @@ export async function fetchMlShipmentShippingMeta(
     shipping_logistic_mode: null,
     shipping_logistic_type: null,
     shipping_carrier: null,
+    shipping_delivery_expected_at: null,
+    shipping_sla_expected_at: null,
+    shipping_sla_status: null,
   };
   const id = String(shippingId).trim();
   if (!id) return empty;
 
-  const headers = {
-    Authorization: `Bearer ${accessToken}`,
-    "x-format-new": "true",
-  };
+  const authHeaders = { Authorization: `Bearer ${accessToken}` };
+  const headersNew = { ...authHeaders, "x-format-new": "true" };
 
-  const [shipmentRes, costsRes, carrierRes] = await Promise.all([
-    fetch(`https://api.mercadolibre.com/shipments/${id}`, { headers }),
-    fetch(`https://api.mercadolibre.com/shipments/${id}/costs`, { headers }),
-    fetch(`https://api.mercadolibre.com/shipments/${id}/carrier`, { headers }),
+  const [shipmentRes, costsRes, carrierRes, slaRes] = await Promise.all([
+    fetch(`https://api.mercadolibre.com/shipments/${id}`, { headers: headersNew }),
+    fetch(`https://api.mercadolibre.com/shipments/${id}/costs`, { headers: headersNew }),
+    fetch(`https://api.mercadolibre.com/shipments/${id}/carrier`, { headers: headersNew }),
+    fetch(`https://api.mercadolibre.com/shipments/${id}/sla`, { headers: authHeaders }),
   ]);
 
   let shipping_cost_sender: number | null = null;
@@ -264,11 +278,28 @@ export async function fetchMlShipmentShippingMeta(
     }
   }
 
+  let shipping_sla_expected_at: string | null = null;
+  let shipping_sla_status: string | null = null;
+  if (slaRes.ok) {
+    try {
+      const data = (await slaRes.json()) as { expected_date?: unknown; status?: unknown };
+      shipping_sla_expected_at = parseMlDateIso(data.expected_date);
+      if (data.status != null && String(data.status).trim()) {
+        shipping_sla_status = String(data.status).trim().toLowerCase();
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return {
     shipping_cost_sender,
     shipping_logistic_mode,
     shipping_logistic_type,
     shipping_carrier,
+    shipping_delivery_expected_at: null,
+    shipping_sla_expected_at,
+    shipping_sla_status,
   };
 }
 
@@ -315,13 +346,16 @@ export async function upsertMlOrderForAccount(
   let shippingLogisticMode = parsed.shipping_logistic_mode;
   let shippingLogisticType = parsed.shipping_logistic_type;
   let shippingCarrier = parsed.shipping_carrier;
+  let shippingSlaExpectedAt = parsed.shipping_sla_expected_at;
+  let shippingSlaStatus = parsed.shipping_sla_status;
 
   if (parsed.shipping_id && options?.accessToken) {
     const needsMeta =
       shippingCostSender == null ||
       shippingLogisticMode == null ||
       shippingLogisticType == null ||
-      shippingCarrier == null;
+      shippingCarrier == null ||
+      shippingSlaExpectedAt == null;
     if (needsMeta) {
       const meta = await fetchMlShipmentShippingMeta(
         options.accessToken,
@@ -331,6 +365,8 @@ export async function upsertMlOrderForAccount(
       if (shippingLogisticMode == null) shippingLogisticMode = meta.shipping_logistic_mode;
       if (shippingLogisticType == null) shippingLogisticType = meta.shipping_logistic_type;
       if (shippingCarrier == null) shippingCarrier = meta.shipping_carrier;
+      if (shippingSlaExpectedAt == null) shippingSlaExpectedAt = meta.shipping_sla_expected_at;
+      if (shippingSlaStatus == null) shippingSlaStatus = meta.shipping_sla_status;
     }
   }
 
@@ -346,6 +382,9 @@ export async function upsertMlOrderForAccount(
       shipping_logistic_mode: shippingLogisticMode,
       shipping_logistic_type: shippingLogisticType,
       shipping_carrier: shippingCarrier,
+      shipping_delivery_expected_at: null,
+      shipping_sla_expected_at: shippingSlaExpectedAt,
+      shipping_sla_status: shippingSlaStatus,
       shipping_cost_sender: shippingCostSender,
       marketplace_fee: parsed.marketplace_fee,
       tags: parsed.tags,

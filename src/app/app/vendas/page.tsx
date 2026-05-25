@@ -17,9 +17,11 @@ import {
   formatMlOrderTagLabel,
   mlOrderTagBadgeClass,
 } from "@/lib/mercadolivre/order-tags";
-import { formatOrderShippingLabel } from "@/lib/mercadolivre/shipping-labels";
+import {
+  formatOrderDispatchDeadline,
+  formatOrderShippingLabel,
+} from "@/lib/mercadolivre/shipping-labels";
 
-const IS_NEXT_DEV = process.env.NODE_ENV === "development";
 const SALES_ORDERS_FETCH_LIMIT = 500;
 const ORDERS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200] as const;
 
@@ -44,6 +46,8 @@ type OrderRow = {
   shipping_logistic_mode: string | null;
   shipping_logistic_type: string | null;
   shipping_carrier: string | null;
+  shipping_sla_expected_at: string | null;
+  shipping_sla_status: string | null;
 };
 
 type ItemRow = {
@@ -86,6 +90,9 @@ type OrderLineTableRow = OrderLineProfitRow & {
   shipping_logistic_mode: string | null;
   shipping_logistic_type: string | null;
   shipping_carrier: string | null;
+  dispatch_deadline_label: string | null;
+  dispatch_deadline_title: string | null;
+  shipping_sla_expected_at: string | null;
 };
 
 function normalizeOrderTags(raw: unknown): string[] {
@@ -148,7 +155,7 @@ function VendasHelpContent() {
         <h3 className="mb-2 font-medium text-fg-strong">Fluxo</h3>
         <ul className="list-inside list-disc space-y-1">
           <li>
-            <strong>Carga inicial 30 dias</strong> — busca pedidos pagos no ML e grava no banco (ferramenta de suporte em desenvolvimento).
+            <strong>Carga inicial 30 dias</strong> — busca pedidos pagos no ML e grava no banco (use na primeira vez ou para repor histórico).
           </li>
           <li>
             <strong>Webhooks</strong> (<code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">orders_v2</code>) — cada pedido novo ou
@@ -161,6 +168,10 @@ function VendasHelpContent() {
           <li>
             Cada pedido traz <strong>tags</strong> do ML (<code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">order.tags</code>
             ), como <em>paid</em>, <em>delivered</em>, <em>pack_order</em> — visíveis na aba Vendas e filtráveis.
+          </li>
+          <li>
+            A coluna <strong>Prazo despacho</strong> usa o <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">expected_date</code> do{" "}
+            <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">/shipments/&#123;id&#125;/sla</code> (prazo máximo para enviar o pacote).
           </li>
         </ul>
       </section>
@@ -375,11 +386,15 @@ function VendasPageContent() {
   const [ordersStatusFilter, setOrdersStatusFilter] = useState<OrderStatusFilter>("");
   const [ordersDateFrom, setOrdersDateFrom] = useState("");
   const [ordersDateTo, setOrdersDateTo] = useState("");
+  const [ordersDispatchDateFrom, setOrdersDispatchDateFrom] = useState("");
+  const [ordersDispatchDateTo, setOrdersDispatchDateTo] = useState("");
   const [ordersFiltersModalOpen, setOrdersFiltersModalOpen] = useState(false);
   const [draftOrdersSearch, setDraftOrdersSearch] = useState("");
   const [draftOrdersStatusFilter, setDraftOrdersStatusFilter] = useState<OrderStatusFilter>("");
   const [draftOrdersDateFrom, setDraftOrdersDateFrom] = useState("");
   const [draftOrdersDateTo, setDraftOrdersDateTo] = useState("");
+  const [draftOrdersDispatchDateFrom, setDraftOrdersDispatchDateFrom] = useState("");
+  const [draftOrdersDispatchDateTo, setDraftOrdersDispatchDateTo] = useState("");
   const [ordersTagFilter, setOrdersTagFilter] = useState<string[]>([]);
   const [draftOrdersTagFilter, setDraftOrdersTagFilter] = useState<string[]>([]);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -413,6 +428,8 @@ function VendasPageContent() {
             shipping_logistic_mode?: string | null;
             shipping_logistic_type?: string | null;
             shipping_carrier?: string | null;
+            shipping_sla_expected_at?: string | null;
+            shipping_sla_status?: string | null;
           }) => ({
             ml_order_id: String(o.ml_order_id),
             status: String(o.status),
@@ -425,6 +442,10 @@ function VendasPageContent() {
             shipping_logistic_type:
               o.shipping_logistic_type != null ? String(o.shipping_logistic_type) : null,
             shipping_carrier: o.shipping_carrier != null ? String(o.shipping_carrier) : null,
+            shipping_sla_expected_at:
+              o.shipping_sla_expected_at != null ? String(o.shipping_sla_expected_at) : null,
+            shipping_sla_status:
+              o.shipping_sla_status != null ? String(o.shipping_sla_status) : null,
           })
         )
       );
@@ -448,7 +469,7 @@ function VendasPageContent() {
     setSyncingPending(true);
     setError(null);
     try {
-      const res = await fetch("/api/dev/sales-sync-pending", { method: "POST" });
+      const res = await fetch("/api/sales/sync-pending", { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Falha ao reprocessar webhooks");
@@ -479,7 +500,7 @@ function VendasPageContent() {
     setBackfilling(true);
     setError(null);
     try {
-      const res = await fetch("/api/dev/sales-backfill", { method: "POST" });
+      const res = await fetch("/api/sales/backfill", { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Falha na carga inicial");
@@ -551,6 +572,18 @@ function VendasPageContent() {
             shipping_carrier: order.shipping_carrier,
             tags: order.tags,
           }),
+          ...(() => {
+            const d = formatOrderDispatchDeadline({
+              shipping_sla_expected_at: order.shipping_sla_expected_at,
+              shipping_sla_status: order.shipping_sla_status,
+              tags: order.tags,
+            });
+            return {
+              dispatch_deadline_label: d.label,
+              dispatch_deadline_title: d.title,
+              shipping_sla_expected_at: order.shipping_sla_expected_at,
+            };
+          })(),
         };
       })
       .filter((r): r is OrderLineTableRow => r != null)
@@ -568,6 +601,7 @@ function VendasPageContent() {
         matchesOrderLineSearch(row, ordersSearch) &&
         matchesOrderStatusFilter(row.status, ordersStatusFilter) &&
         matchesOrderDateRange(row.date_created, ordersDateFrom, ordersDateTo) &&
+        matchesOrderDateRange(row.shipping_sla_expected_at ?? "", ordersDispatchDateFrom, ordersDispatchDateTo) &&
         matchesOrderTagsFilter(row.tags, ordersTagFilter)
     );
   }, [
@@ -576,6 +610,8 @@ function VendasPageContent() {
     ordersStatusFilter,
     ordersDateFrom,
     ordersDateTo,
+    ordersDispatchDateFrom,
+    ordersDispatchDateTo,
     ordersTagFilter,
   ]);
 
@@ -612,33 +648,68 @@ function VendasPageContent() {
     } else if (ordersDateTo) {
       labels.push(`Até: ${formatFilterDateLabel(ordersDateTo)}`);
     }
+    if (ordersDispatchDateFrom && ordersDispatchDateTo) {
+      labels.push(
+        `Despacho: ${formatFilterDateLabel(ordersDispatchDateFrom)} – ${formatFilterDateLabel(ordersDispatchDateTo)}`
+      );
+    } else if (ordersDispatchDateFrom) {
+      labels.push(`Despacho de: ${formatFilterDateLabel(ordersDispatchDateFrom)}`);
+    } else if (ordersDispatchDateTo) {
+      labels.push(`Despacho até: ${formatFilterDateLabel(ordersDispatchDateTo)}`);
+    }
     for (const tag of ordersTagFilter) {
       labels.push(`Tag: ${formatMlOrderTagLabel(tag)}`);
     }
     return labels;
-  }, [ordersSearch, ordersStatusFilter, ordersDateFrom, ordersDateTo, ordersTagFilter]);
+  }, [
+    ordersSearch,
+    ordersStatusFilter,
+    ordersDateFrom,
+    ordersDateTo,
+    ordersDispatchDateFrom,
+    ordersDispatchDateTo,
+    ordersTagFilter,
+  ]);
 
   const syncOrdersFiltersDraftFromApplied = useCallback(() => {
     setDraftOrdersSearch(ordersSearch);
     setDraftOrdersStatusFilter(ordersStatusFilter);
     setDraftOrdersDateFrom(ordersDateFrom);
     setDraftOrdersDateTo(ordersDateTo);
+    setDraftOrdersDispatchDateFrom(ordersDispatchDateFrom);
+    setDraftOrdersDispatchDateTo(ordersDispatchDateTo);
     setDraftOrdersTagFilter(ordersTagFilter);
-  }, [ordersSearch, ordersStatusFilter, ordersDateFrom, ordersDateTo, ordersTagFilter]);
+  }, [
+    ordersSearch,
+    ordersStatusFilter,
+    ordersDateFrom,
+    ordersDateTo,
+    ordersDispatchDateFrom,
+    ordersDispatchDateTo,
+    ordersTagFilter,
+  ]);
 
   const handleOrdersFiltersApply = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
       const from = draftOrdersDateFrom.trim();
       const to = draftOrdersDateTo.trim();
+      const dispatchFrom = draftOrdersDispatchDateFrom.trim();
+      const dispatchTo = draftOrdersDispatchDateTo.trim();
       if (from && to && from > to) {
-        alert("A data inicial não pode ser posterior à data final.");
+        alert("A data do pedido inicial não pode ser posterior à data final.");
+        return;
+      }
+      if (dispatchFrom && dispatchTo && dispatchFrom > dispatchTo) {
+        alert("A data de despacho inicial não pode ser posterior à data final.");
         return;
       }
       setOrdersSearch(draftOrdersSearch.trim());
       setOrdersStatusFilter(draftOrdersStatusFilter);
       setOrdersDateFrom(from);
       setOrdersDateTo(to);
+      setOrdersDispatchDateFrom(dispatchFrom);
+      setOrdersDispatchDateTo(dispatchTo);
       setOrdersTagFilter(draftOrdersTagFilter);
       setOrdersPage(1);
       setOrdersFiltersModalOpen(false);
@@ -648,6 +719,8 @@ function VendasPageContent() {
       draftOrdersStatusFilter,
       draftOrdersDateFrom,
       draftOrdersDateTo,
+      draftOrdersDispatchDateFrom,
+      draftOrdersDispatchDateTo,
       draftOrdersTagFilter,
     ]
   );
@@ -667,6 +740,10 @@ function VendasPageContent() {
     setOrdersDateTo("");
     setDraftOrdersDateFrom("");
     setDraftOrdersDateTo("");
+    setOrdersDispatchDateFrom("");
+    setOrdersDispatchDateTo("");
+    setDraftOrdersDispatchDateFrom("");
+    setDraftOrdersDispatchDateTo("");
     setOrdersTagFilter([]);
     setDraftOrdersTagFilter([]);
     setOrdersPage(1);
@@ -680,6 +757,8 @@ function VendasPageContent() {
     ordersStatusFilter,
     ordersDateFrom,
     ordersDateTo,
+    ordersDispatchDateFrom,
+    ordersDispatchDateTo,
     ordersTagFilter,
     ordersPageSize,
   ]);
@@ -757,27 +836,23 @@ function VendasPageContent() {
                 >
                   {loading ? "Atualizando…" : "Atualizar"}
                 </button>
-                {IS_NEXT_DEV && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void runSyncPendingWebhooks()}
-                      disabled={loading || backfilling || syncingPending}
-                      className="btn btn-secondary btn-sm disabled:cursor-not-allowed"
-                      title="Busca no ML pedidos de webhooks orders_v2 que ainda não estão em ml_orders"
-                    >
-                      {syncingPending ? "Reprocessando…" : "Sincronizar webhooks pendentes"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void runBackfill()}
-                      disabled={loading || backfilling || syncingPending}
-                      className="btn btn-primary btn-sm disabled:cursor-not-allowed"
-                    >
-                      {backfilling ? "Carga inicial…" : "Carga inicial 30 dias"}
-                    </button>
-                  </>
-                )}
+                <button
+                  type="button"
+                  onClick={() => void runSyncPendingWebhooks()}
+                  disabled={loading || backfilling || syncingPending}
+                  className="btn btn-secondary btn-sm disabled:cursor-not-allowed"
+                  title="Busca no ML pedidos de webhooks orders_v2 que ainda não estão em ml_orders"
+                >
+                  {syncingPending ? "Reprocessando…" : "Sincronizar webhooks pendentes"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runBackfill()}
+                  disabled={loading || backfilling || syncingPending}
+                  className="btn btn-primary btn-sm disabled:cursor-not-allowed"
+                >
+                  {backfilling ? "Carga inicial…" : "Carga inicial 30 dias"}
+                </button>
               </div>
             </div>
 
@@ -992,6 +1067,9 @@ function VendasPageContent() {
                       <AppTableTh>Status</AppTableTh>
                       <AppTableTh title="Tags do pedido no ML (order.tags)">Tags ML</AppTableTh>
                       <AppTableTh>Data</AppTableTh>
+                      <AppTableTh title="Prazo máximo de despacho (SLA expected_date)">
+                        Prazo despacho
+                      </AppTableTh>
                       <AppTableTh>MLB</AppTableTh>
                       <AppTableTh>SKU</AppTableTh>
                       <AppTableTh title="Modo/tipo Mercado Envios e transportadora">Envio</AppTableTh>
@@ -1009,7 +1087,7 @@ function VendasPageContent() {
                   <tbody>
                     {filteredOrderLines.length === 0 && !loading ? (
                       <tr>
-                        <td colSpan={12} className="p-6 text-center text-sm text-slate-500">
+                        <td colSpan={13} className="p-6 text-center text-sm text-slate-500">
                           {orderLineTableRows.length === 0
                             ? "Nenhum pedido gravado ainda."
                             : "Nenhuma linha corresponde aos filtros."}
@@ -1050,6 +1128,18 @@ function VendasPageContent() {
                             </AppTableTd>
                             <AppTableTd className="whitespace-nowrap text-xs text-slate-600">
                               {new Date(row.date_created).toLocaleString("pt-BR")}
+                            </AppTableTd>
+                            <AppTableTd
+                              className="whitespace-nowrap text-xs text-slate-700 dark:text-slate-300"
+                              title={row.dispatch_deadline_title ?? undefined}
+                            >
+                              {row.dispatch_deadline_label ? (
+                                <span className="line-clamp-2 leading-snug">
+                                  {row.dispatch_deadline_label}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
                             </AppTableTd>
                             <AppTableTd className="font-mono text-xs">
                               <CopyableCell
@@ -1186,7 +1276,7 @@ function VendasPageContent() {
               <div>
                 <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">Filtros</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Refine por pedido, MLB, SKU, status, tags do ML e intervalo de datas.
+                  Refine por pedido, MLB, SKU, status, tags do ML, data do pedido e prazo de despacho.
                 </p>
               </div>
               <button
@@ -1253,6 +1343,35 @@ function VendasPageContent() {
                 </div>
                 <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
                   Deixe em branco para não limitar por data. Pode usar só &quot;De&quot; ou só &quot;Até&quot;.
+                </p>
+              </div>
+              <div>
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Prazo de despacho (SLA)
+                </span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-600 dark:text-slate-400">De</label>
+                    <input
+                      type="date"
+                      value={draftOrdersDispatchDateFrom}
+                      onChange={(e) => setDraftOrdersDispatchDateFrom(e.target.value)}
+                      className="input w-full py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-600 dark:text-slate-400">Até</label>
+                    <input
+                      type="date"
+                      value={draftOrdersDispatchDateTo}
+                      onChange={(e) => setDraftOrdersDispatchDateTo(e.target.value)}
+                      min={draftOrdersDispatchDateFrom || undefined}
+                      className="input w-full py-2 text-sm"
+                    />
+                  </div>
+                </div>
+                <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                  Filtra pela data do prazo máximo de despacho. Pedidos sem SLA não aparecem quando o filtro está ativo.
                 </p>
               </div>
               <div>

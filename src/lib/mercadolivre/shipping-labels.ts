@@ -38,6 +38,53 @@ export function labelMlLogisticType(type: string | null | undefined): string | n
 }
 
 /** Texto único para exibir na tela de vendas (modo · tipo · transportadora). */
+export type OrderDispatchDeadlineMeta = {
+  shipping_sla_expected_at?: string | null;
+  shipping_sla_status?: string | null;
+  tags?: string[];
+};
+
+function formatDateOnlyPtBr(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+const SLA_STATUS_LABELS: Record<string, string> = {
+  on_time: "No prazo",
+  delayed: "Atrasado",
+  early: "Adiantado",
+  insufficient_info: "Info insuficiente",
+};
+
+/** Prazo máximo de despacho (GET /shipments/{id}/sla → expected_date). */
+export function formatOrderDispatchDeadline(
+  meta: OrderDispatchDeadlineMeta
+): { label: string | null; title: string | null } {
+  const tags = meta.tags ?? [];
+  if (tags.includes("no_shipping")) {
+    return { label: "Sem envio", title: null };
+  }
+
+  const sla = meta.shipping_sla_expected_at?.trim();
+  if (!sla) {
+    return { label: null, title: "Resincronize o pedido para obter o SLA do envio" };
+  }
+
+  const slaStatus = meta.shipping_sla_status?.trim().toLowerCase();
+  const statusLabel = slaStatus ? SLA_STATUS_LABELS[slaStatus] ?? slaStatus : null;
+  return {
+    label: formatDateOnlyPtBr(sla),
+    title: statusLabel
+      ? `Prazo máximo de despacho (SLA) · ${statusLabel}`
+      : "Prazo máximo de despacho (GET /shipments/{id}/sla → expected_date)",
+  };
+}
+
 export function formatOrderShippingLabel(meta: OrderShippingMeta): string | null {
   const tags = meta.tags ?? [];
   if (tags.includes("no_shipping")) return "Sem envio";

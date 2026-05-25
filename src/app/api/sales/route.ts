@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
   const { data: recentOrders, error: ordersErr } = await supabase
     .from("ml_orders")
     .select(
-      "ml_order_id, status, date_created, synced_at, shipping_id, shipping_logistic_mode, shipping_logistic_type, shipping_carrier, shipping_cost_sender, marketplace_fee, tags"
+      "ml_order_id, status, date_created, synced_at, shipping_id, shipping_logistic_mode, shipping_logistic_type, shipping_carrier, shipping_sla_expected_at, shipping_sla_status, shipping_cost_sender, marketplace_fee, tags"
     )
     .eq("account_id", account.id)
     .order("date_created", { ascending: false })
