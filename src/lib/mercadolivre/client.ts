@@ -108,7 +108,7 @@ async function fetchWithTimeout(
   }
 }
 
-async function fetchWithRetry(
+export async function fetchWithRetry(
   url: string,
   accessToken: string,
   options: { timeout?: number; method?: string; body?: string; headers?: Record<string, string> } = {}

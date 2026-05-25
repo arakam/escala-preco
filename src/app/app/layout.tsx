@@ -18,6 +18,7 @@ import {
 } from "@/components/adminty-nav-icons";
 import { OnboardingProvider, useOnboarding } from "@/contexts/onboarding-context";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { MlCommunicationsBell } from "@/components/MlCommunicationsBell";
 import { isPrecoAtacadoAllowed, navBlockedHref } from "@/lib/onboarding-gating";
 
 const admintyUiFont = Open_Sans({
@@ -438,6 +439,7 @@ function AdmintyDashboardShell({
                 {accountLabel}
               </span>
             )}
+            <MlCommunicationsBell />
             <ThemeToggle />
           </div>
         </header>

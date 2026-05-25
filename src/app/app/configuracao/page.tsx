@@ -4,6 +4,11 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTheme } from "@/components/theme-provider";
 import { useOnboarding } from "@/contexts/onboarding-context";
+import {
+  communicationCategoryLabel,
+  communicationTagTypeLabel,
+} from "@/lib/mercadolivre/communication-labels";
+import type { MLCommunicationNoticeRow } from "@/components/MlCommunicationsBell";
 
 const IS_NEXT_DEV = process.env.NODE_ENV === "development";
 const STORAGE_KEY_ACCOUNT = "escalapreco_dashboard_account_id";
@@ -148,8 +153,12 @@ function ConfiguracaoContent() {
   const [shippingLoading, setShippingLoading] = useState(true);
   const [reputationLoading, setReputationLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<
-    "ml" | "sincronizacao" | "notificacoes" | "frete" | "aparencia"
+    "ml" | "sincronizacao" | "notificacoes" | "comunicacoes" | "frete" | "aparencia"
   >("ml");
+  const [communications, setCommunications] = useState<MLCommunicationNoticeRow[]>([]);
+  const [communicationsLoading, setCommunicationsLoading] = useState(false);
+  const [communicationsError, setCommunicationsError] = useState<string | null>(null);
+  const [communicationsUnread, setCommunicationsUnread] = useState(0);
   const [webhookNotifications, setWebhookNotifications] = useState<WebhookNotificationRow[]>([]);
   const [webhookNotificationsLoading, setWebhookNotificationsLoading] = useState(false);
   const [webhookNotificationsError, setWebhookNotificationsError] = useState<string | null>(null);
@@ -271,6 +280,50 @@ function ConfiguracaoContent() {
     }
   }
 
+  const loadCommunications = useCallback(async () => {
+    setCommunicationsLoading(true);
+    setCommunicationsError(null);
+    try {
+      const res = await fetch("/api/mercadolivre/communications?sync=1");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCommunicationsError((data as { error?: string }).error || "Falha ao carregar comunicações.");
+        setCommunications([]);
+        setCommunicationsUnread(0);
+        return;
+      }
+      const payload = data as {
+        notices?: MLCommunicationNoticeRow[];
+        unread_count?: number;
+      };
+      setCommunications(payload.notices ?? []);
+      setCommunicationsUnread(payload.unread_count ?? 0);
+    } finally {
+      setCommunicationsLoading(false);
+    }
+  }, []);
+
+  async function markCommunicationRead(noticeId: string) {
+    const res = await fetch(`/api/mercadolivre/communications/${encodeURIComponent(noticeId)}/read`, {
+      method: "PATCH",
+    });
+    if (!res.ok) return;
+    const data = (await res.json()) as { unread_count?: number };
+    const now = new Date().toISOString();
+    setCommunications((prev) =>
+      prev.map((n) => (n.notice_id === noticeId ? { ...n, read_at: now } : n))
+    );
+    setCommunicationsUnread(data.unread_count ?? Math.max(0, communicationsUnread - 1));
+  }
+
+  async function markAllCommunicationsRead() {
+    const res = await fetch("/api/mercadolivre/communications/read-all", { method: "POST" });
+    if (!res.ok) return;
+    const now = new Date().toISOString();
+    setCommunications((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? now })));
+    setCommunicationsUnread(0);
+  }
+
   const loadWebhookNotifications = useCallback(async () => {
     setWebhookNotificationsLoading(true);
     setWebhookNotificationsError(null);
@@ -295,6 +348,18 @@ function ConfiguracaoContent() {
   }, [loadAccounts, loadShippingCosts, loadReputation]);
 
   useEffect(() => {
+    if (accounts.length === 0) return;
+    fetch("/api/mercadolivre/communications/unread-count")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && typeof (data as { unread_count?: number }).unread_count === "number") {
+          setCommunicationsUnread((data as { unread_count: number }).unread_count);
+        }
+      })
+      .catch(() => undefined);
+  }, [accounts.length]);
+
+  useEffect(() => {
     if (activeTab === "sincronizacao") {
       void loadSyncSettings();
     }
@@ -305,6 +370,19 @@ function ConfiguracaoContent() {
       void loadWebhookNotifications();
     }
   }, [activeTab, loadWebhookNotifications]);
+
+  useEffect(() => {
+    if (activeTab === "comunicacoes") {
+      void loadCommunications();
+    }
+  }, [activeTab, loadCommunications]);
+
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab === "comunicacoes") {
+      setActiveTab("comunicacoes");
+    }
+  }, [searchParams]);
 
   async function handleDevResetData() {
     if (
@@ -412,7 +490,23 @@ function ConfiguracaoContent() {
               : "text-gray-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400"
           }`}
         >
-          Notificações
+          Webhooks
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("comunicacoes")}
+          className={`rounded-t-md px-3 py-2 text-sm font-medium ${
+            activeTab === "comunicacoes"
+              ? "border border-b-white border-gray-200 bg-white text-blue-600 dark:border-slate-700 dark:border-b-slate-900 dark:bg-slate-900 dark:text-blue-400"
+              : "text-gray-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400"
+          }`}
+        >
+          Comunicações ML
+          {communicationsUnread > 0 && activeTab !== "comunicacoes" && (
+            <span className="ml-1.5 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-teal-600 px-1 text-[10px] font-bold text-white">
+              {communicationsUnread > 99 ? "99+" : communicationsUnread}
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -967,6 +1061,172 @@ function ConfiguracaoContent() {
                 </tbody>
               </table>
             </div>
+          )}
+        </section>
+      )}
+
+      {activeTab === "comunicacoes" && (
+        <section className="mb-8">
+          <h2 className="mb-3 text-lg font-medium text-fg-strong">Comunicações do Mercado Livre</h2>
+          <p className="mb-2 text-gray-600 dark:text-slate-300">
+            Novidades, alertas, lançamentos e avisos enviados pelo Mercado Livre para o seu vendedor, conforme a API{" "}
+            <code className="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-slate-800">/communications/notices</code>.
+            Mantenha-se atualizado para evitar bloqueios e aproveitar mudanças de política.
+          </p>
+          <p className="mb-4 text-sm text-gray-500 dark:text-slate-400">
+            Documentação:{" "}
+            <a
+              href="https://developers.mercadolivre.com.br/pt_br/conheca-as-novidades-que-os-vendedores-recebem"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline dark:text-blue-400"
+            >
+              Comunicações para vendedores
+            </a>
+            .
+          </p>
+
+          {accounts.length === 0 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/30">
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                Conecte sua conta do Mercado Livre na aba Integrações para receber as comunicações do vendedor.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void loadCommunications()}
+                  disabled={communicationsLoading}
+                  className="btn btn-secondary btn-sm disabled:opacity-60"
+                >
+                  {communicationsLoading ? "Atualizando…" : "Atualizar da API"}
+                </button>
+                {communicationsUnread > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void markAllCommunicationsRead()}
+                    className="btn btn-outline-secondary btn-sm"
+                  >
+                    Marcar todas como lidas ({communicationsUnread})
+                  </button>
+                )}
+              </div>
+
+              {communicationsError && (
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/30">
+                  <p className="text-sm text-amber-800 dark:text-amber-200">{communicationsError}</p>
+                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-300/90">
+                    Execute a migration{" "}
+                    <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">
+                      044_ml_communication_notices.sql
+                    </code>{" "}
+                    no Supabase, se a tabela ainda não existir.
+                  </p>
+                </div>
+              )}
+
+              {communicationsLoading && communications.length === 0 && !communicationsError ? (
+                <p className="text-gray-500 dark:text-slate-400">Carregando…</p>
+              ) : communications.length === 0 ? (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-6 text-center dark:border-slate-700 dark:bg-slate-800/80">
+                  <p className="text-sm text-gray-600 dark:text-slate-300">
+                    Nenhuma comunicação vigente retornada pela API do Mercado Livre.
+                  </p>
+                </div>
+              ) : (
+                <ul className="space-y-3">
+                  {communications.map((n) => {
+                    const isUnread = !n.read_at;
+                    const cat = communicationCategoryLabel(n.category);
+                    return (
+                      <li
+                        key={n.id}
+                        className={`rounded-lg border p-4 ${
+                          isUnread
+                            ? "border-teal-200 bg-teal-50/40 dark:border-teal-800 dark:bg-teal-950/25"
+                            : "border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-900"
+                        }`}
+                      >
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          {isUnread && (
+                            <span className="rounded bg-teal-600/15 px-2 py-0.5 text-xs font-semibold text-teal-800 dark:text-teal-300">
+                              Não lida
+                            </span>
+                          )}
+                          {n.highlighted && (
+                            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                              Destaque ML
+                            </span>
+                          )}
+                          {cat && (
+                            <span className="text-xs text-gray-500 dark:text-slate-400">{cat}</span>
+                          )}
+                          {n.from_date && (
+                            <span className="text-xs text-gray-400 dark:text-slate-500">
+                              {new Date(n.from_date).toLocaleString("pt-BR", {
+                                timeZone: "America/Sao_Paulo",
+                                dateStyle: "medium",
+                                timeStyle: "short",
+                              })}
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="text-base font-semibold text-fg-strong">
+                          {n.title?.trim() || n.label}
+                        </h3>
+                        {n.description && (
+                          <p className="mt-2 whitespace-pre-wrap text-sm text-gray-600 dark:text-slate-300">
+                            {n.description.trim()}
+                          </p>
+                        )}
+                        {(n.tags ?? []).length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {(n.tags ?? []).map((t, i) => (
+                              <span
+                                key={`${n.notice_id}-tag-${i}`}
+                                className="rounded bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600 dark:bg-slate-800 dark:text-slate-300"
+                                title={communicationTagTypeLabel(t.type)}
+                              >
+                                {t.tag ?? t.type}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="mt-3 flex flex-wrap gap-3">
+                          {isUnread && (
+                            <button
+                              type="button"
+                              onClick={() => void markCommunicationRead(n.notice_id)}
+                              className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+                            >
+                              Marcar como lida
+                            </button>
+                          )}
+                          {(n.actions ?? []).map((action, i) =>
+                            action.link ? (
+                              <a
+                                key={`${n.notice_id}-act-${i}`}
+                                href={action.link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+                                onClick={() => {
+                                  if (isUnread) void markCommunicationRead(n.notice_id);
+                                }}
+                              >
+                                {action.text || "Abrir link"}
+                              </a>
+                            ) : null
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>
           )}
         </section>
       )}
