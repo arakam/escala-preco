@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
 import { TablePageSizeSelect } from "@/components/TablePageSizeSelect";
@@ -432,6 +432,7 @@ function AnunciosPageContent() {
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
   const [headerMenuColumn, setHeaderMenuColumn] = useState<ColumnKey | null>(null);
   const [frozenColumns, setFrozenColumns] = useState<ColumnKey[]>([]);
+  const syncRestoreGenerationRef = useRef(0);
 
   const account = accounts.find((a) => a.id === accountId) ?? accounts[0] ?? null;
 
@@ -585,6 +586,50 @@ function AnunciosPageContent() {
     if (account) loadItems();
   }, [account, loadItems]);
 
+  useEffect(() => {
+    if (!account) {
+      setSyncing(false);
+      setJob(null);
+      return;
+    }
+
+    const generation = ++syncRestoreGenerationRef.current;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/mercadolivre/${account.id}/sync`);
+        if (cancelled || generation !== syncRestoreGenerationRef.current || !res.ok) return;
+        const data = await res.json();
+        if (cancelled || generation !== syncRestoreGenerationRef.current) return;
+        const j = data.job as JobState | null | undefined;
+        if (j && (j.status === "queued" || j.status === "running")) {
+          setSyncing(true);
+          setJob({
+            id: j.id,
+            status: j.status,
+            total: j.total ?? 0,
+            processed: j.processed ?? 0,
+            ok: j.ok ?? 0,
+            errors: j.errors ?? 0,
+          });
+        } else {
+          setSyncing(false);
+          setJob(null);
+        }
+      } catch {
+        if (!cancelled && generation === syncRestoreGenerationRef.current) {
+          setSyncing(false);
+          setJob(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [account?.id]);
+
   const pollJob = useCallback(async () => {
     if (!account || !job?.id) return;
     const res = await fetch(`/api/jobs/${job.id}`);
@@ -613,6 +658,7 @@ function AnunciosPageContent() {
 
   async function handleSyncAll() {
     if (!account) return;
+    syncRestoreGenerationRef.current += 1;
     setSyncing(true);
     setSingleError(null);
     try {
