@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
  * Webhook público do Mercado Livre (Callback URL no painel do app).
  * Produção: https://app.escalapreco.com.br/wh/api
  *
- * O ML envia POST com JSON; respondemos 200 rápido após persistir (quando há contas correspondentes).
+ * Log enxuto (sem raw_payload), dedup por notification_id, processamento só em eventos novos.
  */
 export async function GET() {
   return NextResponse.json({ ok: true, service: "mercadolivre-webhook" });
@@ -36,6 +36,69 @@ function parseMlDate(value: unknown): string | null {
   if (typeof value !== "string" || !value) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+interface WebhookAccountRow {
+  id: string;
+  user_id: string;
+  auto_sync_items_webhook?: boolean | null;
+  ml_user_id: number;
+}
+
+async function persistWebhookLog(
+  supabase: ReturnType<typeof createServiceClient>,
+  accounts: WebhookAccountRow[],
+  fields: {
+    mlUserId: number;
+    topic: string;
+    resource: string | null;
+    applicationId: string | null;
+    attempts: number | null;
+    mlSentAt: string | null;
+    actions: unknown;
+    notificationId: string | null;
+  }
+): Promise<{ stored: number; accountIds: Set<string> }> {
+  const rows = accounts.map((acc) => ({
+    account_id: acc.id,
+    user_id: acc.user_id,
+    ml_user_id: fields.mlUserId,
+    topic: fields.topic,
+    resource: fields.resource,
+    application_id: fields.applicationId,
+    attempts: fields.attempts,
+    ml_sent_at: fields.mlSentAt,
+    actions: fields.actions as unknown,
+    notification_id: fields.notificationId,
+  }));
+
+  if (fields.notificationId) {
+    const { data, error } = await supabase
+      .from("ml_webhook_notifications")
+      .upsert(rows, { onConflict: "account_id,notification_id", ignoreDuplicates: true })
+      .select("account_id");
+
+    if (error) {
+      console.error("[ML webhook] upsert:", error);
+      throw error;
+    }
+
+    const accountIds = new Set((data ?? []).map((r) => String((r as { account_id: string }).account_id)));
+    return { stored: accountIds.size, accountIds };
+  }
+
+  const { data, error } = await supabase
+    .from("ml_webhook_notifications")
+    .insert(rows)
+    .select("account_id");
+
+  if (error) {
+    console.error("[ML webhook] insert:", error);
+    throw error;
+  }
+
+  const accountIds = new Set((data ?? []).map((r) => String((r as { account_id: string }).account_id)));
+  return { stored: accountIds.size, accountIds };
 }
 
 export async function POST(request: NextRequest) {
@@ -86,47 +149,46 @@ export async function POST(request: NextRequest) {
   const actions = Array.isArray(payload.actions) ? payload.actions : null;
   const notificationId = payload.id != null ? String(payload.id) : null;
 
-  const rows = accounts.map((acc) => ({
-    account_id: acc.id,
-    user_id: acc.user_id,
-    ml_user_id: mlUserId,
-    topic,
-    resource,
-    application_id: applicationId,
-    attempts,
-    ml_sent_at: mlSentAt,
-    actions: actions as unknown,
-    notification_id: notificationId,
-    raw_payload: payload as unknown,
-  }));
+  let stored = 0;
+  let accountIdsToProcess: WebhookAccountRow[] = accounts;
 
-  const { error: insErr } = await supabase.from("ml_webhook_notifications").insert(rows);
-  if (insErr) {
-    console.error("[ML webhook] insert:", insErr);
+  try {
+    const persisted = await persistWebhookLog(supabase, accounts, {
+      mlUserId,
+      topic,
+      resource,
+      applicationId,
+      attempts,
+      mlSentAt,
+      actions,
+      notificationId,
+    });
+    stored = persisted.stored;
+    accountIdsToProcess = accounts.filter((a) => persisted.accountIds.has(a.id));
+  } catch {
     return NextResponse.json({ error: "Erro ao gravar" }, { status: 500 });
+  }
+
+  if (accountIdsToProcess.length === 0) {
+    return NextResponse.json({ ok: true, stored: 0, duplicate: true });
   }
 
   if (resource && isPromotionPublicWebhookTopic(topic)) {
     await Promise.all(
-      accounts.map(async (acc) => {
-        const resolved = await resolveAndStorePromotionWebhookAlert(
-          supabase,
-          acc,
-          topic,
-          resource
-        );
+      accountIdsToProcess.map(async (acc) => {
+        const resolved = await resolveAndStorePromotionWebhookAlert(supabase, acc, topic, resource);
         schedulePromotionsWebhookCacheRefresh([acc], resolved.item_id);
       })
     ).catch((e) => console.error("[ML webhook] promotion alerts:", e));
   }
 
-  scheduleItemsWebhookSync(accounts, topic, resource);
+  scheduleItemsWebhookSync(accountIdsToProcess, topic, resource);
 
   try {
-    await processOrdersWebhookSync(supabase, accounts, topic, resource);
+    await processOrdersWebhookSync(supabase, accountIdsToProcess, topic, resource);
   } catch (e) {
     console.error("[ML webhook] orders sync:", e);
   }
 
-  return NextResponse.json({ ok: true, stored: rows.length });
+  return NextResponse.json({ ok: true, stored });
 }

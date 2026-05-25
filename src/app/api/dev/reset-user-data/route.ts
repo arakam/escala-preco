@@ -20,8 +20,8 @@ async function deleteOrFail(
 /**
  * POST /api/dev/reset-user-data
  * Apenas com NODE_ENV=development (npm run dev). Remove conta(s) ML, tokens e dados
- * derivados (cache de preços, promoções, webhooks, jobs, anúncios, rascunhos, referências)
- * e apaga produtos, custos operacionais e parâmetros fiscais deste usuário.
+ * derivados (cache de preços, promoções, webhooks, jobs, anúncios, vendas, rascunhos, referências)
+ * e apaga produtos, tags, custos operacionais e parâmetros fiscais deste usuário.
  *
  * Não apaga ml_category_fee_reference (referência global por site/categoria/tipo de listagem).
  */
@@ -91,6 +91,30 @@ export async function POST() {
   if (accErr) {
     console.error("[dev/reset-user-data] ml_accounts:", accErr);
     return NextResponse.json({ error: "Erro ao desconectar Mercado Livre" }, { status: 500 });
+  }
+
+  const { data: products } = await supabase
+    .from("products")
+    .select("id")
+    .eq("user_id", user.id);
+  const productIds = (products ?? []).map((p) => p.id).filter(Boolean);
+
+  if (productIds.length > 0) {
+    const assignErr = await deleteOrFail(
+      "product_tag_assignments",
+      supabase.from("product_tag_assignments").delete().in("product_id", productIds)
+    );
+    if (assignErr) {
+      return NextResponse.json({ error: "Erro ao limpar tags de produtos" }, { status: 500 });
+    }
+  }
+
+  const tagErr = await deleteOrFail(
+    "product_tags",
+    supabase.from("product_tags").delete().eq("user_id", user.id)
+  );
+  if (tagErr) {
+    return NextResponse.json({ error: "Erro ao limpar product_tags" }, { status: 500 });
   }
 
   const { error: prodErr } = await supabase.from("products").delete().eq("user_id", user.id);

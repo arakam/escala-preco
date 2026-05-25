@@ -21,7 +21,7 @@ export async function GET() {
   const { data: notifications, error } = await supabase
     .from("ml_webhook_notifications")
     .select(
-      "id, created_at, account_id, ml_user_id, topic, resource, application_id, attempts, ml_sent_at, actions, notification_id, raw_payload"
+      "id, created_at, account_id, ml_user_id, topic, resource, application_id, attempts, ml_sent_at, actions, notification_id"
     )
     .eq("user_id", user.id)
     .gte("created_at", since)

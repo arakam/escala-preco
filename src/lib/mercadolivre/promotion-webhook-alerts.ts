@@ -57,7 +57,6 @@ export async function resolveAndStorePromotionWebhookAlert(
       promotion_type: null,
       status_label: null,
       fetch_error: "token_indisponivel",
-      raw_api: null,
     });
     return { item_id: null };
   }
@@ -75,7 +74,6 @@ export async function resolveAndStorePromotionWebhookAlert(
       promotion_type: null,
       status_label: null,
       fetch_error: `http_${res.status}: ${res.body}`,
-      raw_api: null,
     });
     return { item_id: null };
   }
@@ -92,7 +90,6 @@ export async function resolveAndStorePromotionWebhookAlert(
     promotion_type: parsed.promotion_type,
     status_label: parsed.status_label,
     fetch_error: null,
-    raw_api: res.data as object,
   });
 
   return { item_id: parsed.item_id };

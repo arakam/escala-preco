@@ -107,7 +107,6 @@ interface WebhookNotificationRow {
   ml_sent_at: string | null;
   actions: unknown;
   notification_id: string | null;
-  raw_payload: Record<string, unknown>;
 }
 
 function getReputationColor(levelId: string | null): { bg: string; text: string; label: string } {
@@ -863,8 +862,9 @@ function ConfiguracaoContent() {
         <section className="mb-8">
           <h2 className="mb-3 text-lg font-medium text-fg-strong">Notificações do Mercado Livre</h2>
           <p className="mb-2 text-gray-600 dark:text-slate-300">
-            Eventos recebidos via webhook nas últimas 24 horas. O Mercado Livre envia um POST para a URL de callback
-            configurada no seu aplicativo; apenas notificações cujo{" "}
+            Eventos recebidos via webhook nas últimas 24 horas (metadados; histórico completo no servidor é mantido por
+            7 dias). O Mercado Livre envia um POST para a URL de callback configurada no seu aplicativo; apenas
+            notificações cujo{" "}
             <code className="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-slate-800">user_id</code> corresponde a
             uma conta conectada aqui aparecem na lista.
           </p>
@@ -924,7 +924,7 @@ function ConfiguracaoContent() {
                     <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Tópico</th>
                     <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Recurso</th>
                     <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Conta ML</th>
-                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Detalhes</th>
+                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">ID / tentativas</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
@@ -945,13 +945,21 @@ function ConfiguracaoContent() {
                           {n.resource ?? "—"}
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-gray-700 dark:text-slate-200">{accLabel}</td>
-                        <td className="px-3 py-2">
-                          <details className="cursor-pointer text-blue-600 dark:text-blue-400">
-                            <summary className="text-xs font-medium">JSON</summary>
-                            <pre className="mt-2 max-h-48 max-w-xl overflow-auto rounded bg-gray-100 p-2 text-xs dark:bg-slate-950 dark:text-slate-200">
-                              {JSON.stringify(n.raw_payload, null, 2)}
-                            </pre>
-                          </details>
+                        <td className="px-3 py-2 text-xs text-gray-600 dark:text-slate-300">
+                          <div>{n.notification_id ?? "—"}</div>
+                          {n.attempts != null && (
+                            <div className="text-gray-500 dark:text-slate-400">tentativas: {n.attempts}</div>
+                          )}
+                          {n.ml_sent_at && (
+                            <div className="text-gray-500 dark:text-slate-400">
+                              enviado ML:{" "}
+                              {new Date(n.ml_sent_at).toLocaleString("pt-BR", {
+                                timeZone: "America/Sao_Paulo",
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              })}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
