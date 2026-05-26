@@ -94,18 +94,12 @@ export async function getOrCreateTagsByNames(
   return map;
 }
 
-/**
- * MLB da conta cujo produto vinculado (item ou variação) tem alguma das tags.
- * Retorna `null` se tagIds vazio (sem filtro); `[]` se nenhum anúncio bate.
- */
-export async function resolveMlItemIdsByProductTagIds(
+/** MLB da conta vinculados aos produtos informados (item ou variação). */
+export async function resolveMlItemIdsByProductIds(
   supabase: SupabaseClient,
   accountId: string,
-  tagIds: string[]
-): Promise<string[] | null> {
-  if (tagIds.length === 0) return null;
-
-  const productIds = await resolveProductIdsByTagIds(supabase, tagIds);
+  productIds: string[]
+): Promise<string[]> {
   if (productIds.length === 0) return [];
 
   const itemIds = new Set<string>();
@@ -134,6 +128,23 @@ export async function resolveMlItemIdsByProductTagIds(
   }
 
   return Array.from(itemIds);
+}
+
+/**
+ * MLB da conta cujo produto vinculado (item ou variação) tem alguma das tags.
+ * Retorna `null` se tagIds vazio (sem filtro); `[]` se nenhum anúncio bate.
+ */
+export async function resolveMlItemIdsByProductTagIds(
+  supabase: SupabaseClient,
+  accountId: string,
+  tagIds: string[]
+): Promise<string[] | null> {
+  if (tagIds.length === 0) return null;
+
+  const productIds = await resolveProductIdsByTagIds(supabase, tagIds);
+  if (productIds.length === 0) return [];
+
+  return resolveMlItemIdsByProductIds(supabase, accountId, productIds);
 }
 
 /** IDs de produtos que possuem pelo menos uma das tags informadas. */

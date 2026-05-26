@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { intersectMlItemIdFilters, resolveMlItemIdsByProductSupplier } from "@/lib/product-filters";
 import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 import {
   fetchAllViaRange,
@@ -64,6 +65,7 @@ export async function GET(req: NextRequest) {
   const linkedParam = url.searchParams.get("linked")?.trim();
   const orderBy = url.searchParams.get("order_by")?.trim() || "";
   const skuFilter = url.searchParams.get("sku")?.trim() || "";
+  const supplierFilter = url.searchParams.get("supplier")?.trim() || "";
   const onlyWithSales30d = url.searchParams.get("only_with_sales") === "1";
   const tagIdsParam = url.searchParams.get("tags")?.trim() || "";
   const tagIds = tagIdsParam
@@ -85,17 +87,24 @@ export async function GET(req: NextRequest) {
   // Ler cache com service role (já validamos que a conta é do usuário); evita RLS bloqueando leitura
   const serviceSupabase = createServiceClient();
 
-  /** MLB com produto tagueado (via ml_items/ml_variations), não só product_id no cache. */
+  /** MLB com produto tagueado ou fornecedor (via ml_items/ml_variations), não só product_id no cache. */
   let allowedItemIds: string[] | null = null;
-  if (tagIds.length > 0) {
+  if (tagIds.length > 0 || supplierFilter) {
     try {
-      const resolved = await resolveMlItemIdsByProductTagIds(
-        serviceSupabase,
-        account.id,
-        tagIds
-      );
-      allowedItemIds = resolved ?? [];
-      if (allowedItemIds.length === 0) {
+      const byTags =
+        tagIds.length > 0
+          ? await resolveMlItemIdsByProductTagIds(serviceSupabase, account.id, tagIds)
+          : null;
+      const bySupplier = supplierFilter
+        ? await resolveMlItemIdsByProductSupplier(
+            serviceSupabase,
+            account.id,
+            user.id,
+            supplierFilter
+          )
+        : null;
+      allowedItemIds = intersectMlItemIdFilters(byTags, bySupplier);
+      if (allowedItemIds !== null && allowedItemIds.length === 0) {
         return NextResponse.json({
           listings: [],
           total: 0,
@@ -107,8 +116,8 @@ export async function GET(req: NextRequest) {
         });
       }
     } catch (e) {
-      console.error("Erro ao filtrar listagens por tags:", e);
-      return NextResponse.json({ error: "Erro ao filtrar por tags" }, { status: 500 });
+      console.error("Erro ao filtrar listagens por produto:", e);
+      return NextResponse.json({ error: "Erro ao filtrar por produto" }, { status: 500 });
     }
   }
 

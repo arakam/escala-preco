@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { resolveProductIdsByTagIds } from "@/lib/product-tags";
+import { resolveMlItemIdsByProductIds, resolveProductIdsByTagIds } from "@/lib/product-tags";
 
 export type ProductHasPmaFilter = "yes" | "no" | "";
 
@@ -79,4 +79,40 @@ export async function resolveProductIdsForListFilters(
   }
 
   return allowed ? Array.from(allowed) : null;
+}
+
+/**
+ * MLB da conta cujo produto vinculado bate com o fornecedor (ilike parcial).
+ * Retorna `null` se supplier vazio (sem filtro); `[]` se nenhum anúncio bate.
+ */
+export async function resolveMlItemIdsByProductSupplier(
+  supabase: SupabaseClient,
+  accountId: string,
+  userId: string,
+  supplier: string
+): Promise<string[] | null> {
+  const trimmed = supplier.trim();
+  if (!trimmed) return null;
+
+  let q = supabase.from("products").select("id").eq("user_id", userId);
+  q = applyProductFiltersToQuery(q, { supplier: trimmed, hasPma: "" });
+  const { data, error } = await q;
+  if (error) throw error;
+
+  const productIds = (data ?? []).map((r: { id: string }) => r.id);
+  if (productIds.length === 0) return [];
+
+  return resolveMlItemIdsByProductIds(supabase, accountId, productIds);
+}
+
+/** Interseção de listas de item_id (null = sem restrição). */
+export function intersectMlItemIdFilters(
+  a: string[] | null,
+  b: string[] | null
+): string[] | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  if (a.length === 0 || b.length === 0) return [];
+  const setB = new Set(b);
+  return a.filter((id) => setB.has(id));
 }

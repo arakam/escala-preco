@@ -998,6 +998,8 @@ function PrecosPageContent() {
   const [searchInput, setSearchInput] = useState("");
   const [skuFilter, setSkuFilter] = useState("");
   const [draftSkuFilter, setDraftSkuFilter] = useState("");
+  const [supplierFilter, setSupplierFilter] = useState("");
+  const [draftSupplierFilter, setDraftSupplierFilter] = useState("");
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [draftFilterTagIds, setDraftFilterTagIds] = useState<string[]>([]);
   const [allTags, setAllTags] = useState<ProductTag[]>([]);
@@ -1172,6 +1174,7 @@ function PrecosPageContent() {
     if (linkFilter === "unlinked") params.set("linked", "0");
     if (sortBy === "orders_desc" || sortBy === "orders_asc") params.set("order_by", sortBy);
     if (skuFilter) params.set("sku", skuFilter);
+    if (supplierFilter) params.set("supplier", supplierFilter);
     if (onlyWithSales30d) params.set("only_with_sales", "1");
     if (filterTagIds.length > 0) params.set("tags", filterTagIds.join(","));
 
@@ -1254,7 +1257,7 @@ function PrecosPageContent() {
       setLoading(false);
       setListingsRefetching(false);
     }
-  }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, onlyWithSales30d, filterTagIds]);
+  }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, supplierFilter, onlyWithSales30d, filterTagIds]);
 
   const fetchRefJob = useCallback(
     async (jobId: string) => {
@@ -1344,7 +1347,7 @@ function PrecosPageContent() {
   /** Ao mudar filtros do servidor (ou sair do modo cliente), voltar a carregar só 500 quando em modo cliente */
   useEffect(() => {
     if (clientSideFiltering) setLoadAllResults(false);
-  }, [clientSideFiltering, search, statusFilter, linkFilter, sortBy, skuFilter]);
+  }, [clientSideFiltering, search, statusFilter, linkFilter, sortBy, skuFilter, supplierFilter]);
 
   useEffect(() => {
     loadReputation();
@@ -2273,6 +2276,7 @@ function PrecosPageContent() {
   const syncFiltersDraftFromApplied = useCallback(() => {
     setSearchInput(search);
     setDraftSkuFilter(skuFilter);
+    setDraftSupplierFilter(supplierFilter);
     setDraftStatusFilter(statusFilter);
     setDraftLinkFilter(linkFilter);
     setDraftFilterTagIds(filterTagIds);
@@ -2284,6 +2288,7 @@ function PrecosPageContent() {
   }, [
     search,
     skuFilter,
+    supplierFilter,
     statusFilter,
     linkFilter,
     filterTagIds,
@@ -2299,6 +2304,7 @@ function PrecosPageContent() {
       e.preventDefault();
       setSearch(searchInput.trim());
       setSkuFilter(draftSkuFilter.trim());
+      setSupplierFilter(draftSupplierFilter.trim());
       setStatusFilter(draftStatusFilter);
       setLinkFilter(draftLinkFilter);
       setFilterTagIds(draftFilterTagIds);
@@ -2313,6 +2319,7 @@ function PrecosPageContent() {
     [
       searchInput,
       draftSkuFilter,
+      draftSupplierFilter,
       draftStatusFilter,
       draftLinkFilter,
       draftFilterTagIds,
@@ -2336,6 +2343,8 @@ function PrecosPageContent() {
     if (q) labels.push(`Busca: ${q}`);
     const sku = skuFilter.trim();
     if (sku) labels.push(`SKU: ${sku}`);
+    const supplier = supplierFilter.trim();
+    if (supplier) labels.push(`Fornecedor: ${supplier}`);
     if (statusFilter) {
       const map: Record<string, string> = {
         active: "Ativo",
@@ -2368,6 +2377,7 @@ function PrecosPageContent() {
   }, [
     search,
     skuFilter,
+    supplierFilter,
     statusFilter,
     linkFilter,
     onlyWithSales30d,
@@ -2385,6 +2395,8 @@ function PrecosPageContent() {
     setSearchInput("");
     setSkuFilter("");
     setDraftSkuFilter("");
+    setSupplierFilter("");
+    setDraftSupplierFilter("");
     setFilterTagIds([]);
     setDraftFilterTagIds([]);
     setStatusFilter("");
@@ -4645,7 +4657,7 @@ function PrecosPageContent() {
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-800">Filtros</h2>
-                <p className="text-xs text-slate-500">Refine busca, status, vínculo, tags de produto e lucratividade.</p>
+                <p className="text-xs text-slate-500">Refine busca, status, vínculo, fornecedor, tags de produto e lucratividade.</p>
               </div>
               <button
                 type="button"
@@ -4675,6 +4687,18 @@ function PrecosPageContent() {
                   onChange={(e) => setDraftSkuFilter(e.target.value)}
                   placeholder="Filtrar por SKU…"
                   className="input font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Fornecedor
+                </label>
+                <input
+                  type="text"
+                  value={draftSupplierFilter}
+                  onChange={(e) => setDraftSupplierFilter(e.target.value)}
+                  placeholder="Nome ou parte do fornecedor…"
+                  className="input"
                 />
               </div>
               <div>
