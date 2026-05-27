@@ -29,7 +29,7 @@ import {
   mlItemStatusBadgeClass,
   ML_ITEM_STATUS_FILTER_OPTIONS,
 } from "@/lib/mercadolivre/item-status";
-import { isIncompleteJob, shouldTrackSyncJob } from "@/lib/jobs";
+import { isIncompleteJob, shouldTrackSyncJob, type JobStatus } from "@/lib/jobs";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
 const SYNC_JOB_STORAGE_KEY = "escalapreco_anuncios_sync_job_id";
@@ -124,7 +124,7 @@ interface ItemRow {
 
 interface JobState {
   id: string;
-  status: string;
+  status: JobStatus;
   total: number;
   processed: number;
   ok: number;

@@ -252,7 +252,7 @@ export async function enrichShipmentMetaForShippingIds(
   });
 
   const now = new Date().toISOString();
-  for (const [shippingId, meta] of metaById) {
+  for (const [shippingId, meta] of Array.from(metaById)) {
     const { error } = await supabase
       .from("ml_orders")
       .update({ ...shipmentMetaToOrderPatch(meta), synced_at: now })
