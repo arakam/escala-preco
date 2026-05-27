@@ -29,6 +29,8 @@ export interface JobRow {
 /** Jobs presos após crash do processo, timeout de proxy ou deploy (VPS/serverless). */
 const STALE_RUNNING_MS = 8 * 60 * 1000;
 const STALE_RUNNING_MS_BY_TYPE: Partial<Record<JobType, number>> = {
+  /** Sync grande pode levar horas; inatividade real é medida via `started_at` atualizado a cada item. */
+  sync_items: 30 * 60 * 1000,
   sales_backfill_30d: 45 * 60 * 1000,
 };
 const STALE_QUEUED_MS = 5 * 60 * 1000;
@@ -47,6 +49,31 @@ function staleQueuedMs(type: JobType): number {
 export const STUCK_QUEUED_RESTART_MS = 30 * 1000;
 
 /** Job em fila que nunca recebeu `started_at` e já passou do tempo de reagendar o worker. */
+export function isActiveJobStatus(status: string): boolean {
+  return status === "queued" || status === "running";
+}
+
+/** Job ainda incompleto (barra de progresso faz sentido). */
+export function isIncompleteJob(job: Pick<JobRow, "total" | "processed">): boolean {
+  return job.total > 0 && job.processed < job.total;
+}
+
+/**
+ * Job que a UI deve acompanhar (ativo ou marcado failed/partial antes do worker parar).
+ */
+export function shouldTrackSyncJob(job: Pick<JobRow, "status" | "total" | "processed">): boolean {
+  if (isActiveJobStatus(job.status)) return true;
+  return isIncompleteJob(job) && (job.status === "failed" || job.status === "partial");
+}
+
+export async function getJobStatus(
+  supabase: SupabaseClient,
+  jobId: string
+): Promise<JobStatus | null> {
+  const { data } = await supabase.from("ml_jobs").select("status").eq("id", jobId).single();
+  return (data as { status: JobStatus } | null)?.status ?? null;
+}
+
 export function needsSyncWorkerRestart(job: Pick<JobRow, "status" | "started_at" | "created_at">): boolean {
   if (job.status !== "queued" || job.started_at) return false;
   const ageMs = Date.now() - new Date(job.created_at).getTime();

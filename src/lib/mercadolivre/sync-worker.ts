@@ -24,6 +24,8 @@ import { syncHeartbeatMs, syncLog, syncLogVerbose } from "./sync-log";
 import { createServiceClient } from "@/lib/supabase/service";
 import { upsertCategoryFeeReferenceFromSample } from "@/lib/pricing/ml-category-fee-reference";
 import {
+  getJobStatus,
+  isActiveJobStatus,
   updateJob,
   addJobLog,
   type JobStatus,
@@ -209,11 +211,25 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       verbose: syncLogVerbose(),
       heartbeatMs: syncHeartbeatMs(),
     });
-    await updateJob(supabase, jobId, { total });
+    const progressHeartbeat = () => new Date().toISOString();
+    await updateJob(supabase, jobId, { total, started_at: progressHeartbeat() });
 
     let processed = 0;
     let ok = 0;
     let errors = 0;
+    let lastJobStatusCheck = 0;
+    let jobStillActive = true;
+
+    const assertJobStillActive = async (): Promise<boolean> => {
+      if (Date.now() - lastJobStatusCheck < 2000) return jobStillActive;
+      lastJobStatusCheck = Date.now();
+      const status = await getJobStatus(supabase, jobId);
+      jobStillActive = status != null && isActiveJobStatus(status);
+      if (!jobStillActive) {
+        syncLog(jobId, "abortar: job cancelado ou finalizado no banco", { status });
+      }
+      return jobStillActive;
+    };
 
     let lastProactiveTokenCheck = Date.now();
     const siteIdFallback = (account.site_id ?? "MLB").trim() || "MLB";
@@ -297,6 +313,8 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
 
     try {
       await runWithConcurrency(itemIds, CONCURRENCY, async (itemId) => {
+        if (!(await assertJobStillActive())) return;
+
         const itemT0 = Date.now();
         try {
           if (Date.now() - lastProactiveTokenCheck > 8 * 60 * 1000) {
@@ -336,7 +354,12 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
 
           processed++;
           ok++;
-          await updateJob(supabase, jobId, { processed, ok, errors });
+          await updateJob(supabase, jobId, {
+            processed,
+            ok,
+            errors,
+            started_at: progressHeartbeat(),
+          });
           await addJobLog(supabase, jobId, { item_id: itemId, status: "ok" });
           if (syncLogVerbose()) {
             syncLog(jobId, "item OK", { itemId, ms: Date.now() - itemT0 });
@@ -345,7 +368,12 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
           processed++;
           errors++;
           const message = e instanceof Error ? e.message : String(e);
-          await updateJob(supabase, jobId, { processed, ok, errors });
+          await updateJob(supabase, jobId, {
+            processed,
+            ok,
+            errors,
+            started_at: progressHeartbeat(),
+          });
           await addJobLog(supabase, jobId, {
             item_id: itemId,
             status: "error",
@@ -362,6 +390,18 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       });
     } finally {
       if (heartbeat) clearInterval(heartbeat);
+    }
+
+    const currentStatus = await getJobStatus(supabase, jobId);
+    if (!currentStatus || !isActiveJobStatus(currentStatus)) {
+      syncLog(jobId, "encerrado sem sobrescrever status (cancelado ou expirado)", {
+        currentStatus,
+        ok,
+        errors,
+        processed,
+        total,
+      });
+      return;
     }
 
     const finalStatus: JobStatus = errors === 0 ? "success" : total === errors ? "failed" : "partial";

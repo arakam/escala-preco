@@ -29,8 +29,10 @@ import {
   mlItemStatusBadgeClass,
   ML_ITEM_STATUS_FILTER_OPTIONS,
 } from "@/lib/mercadolivre/item-status";
+import { isIncompleteJob, shouldTrackSyncJob } from "@/lib/jobs";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
+const SYNC_JOB_STORAGE_KEY = "escalapreco_anuncios_sync_job_id";
 const FROZEN_COLUMNS_STORAGE_KEY = "escalapreco_anuncios_frozen_columns";
 const PAGE_SIZE_STORAGE_KEY = "escalapreco_anuncios_page_size";
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 250, 500, 750, 1000] as const;
@@ -433,8 +435,37 @@ function AnunciosPageContent() {
   const [headerMenuColumn, setHeaderMenuColumn] = useState<ColumnKey | null>(null);
   const [frozenColumns, setFrozenColumns] = useState<ColumnKey[]>([]);
   const syncRestoreGenerationRef = useRef(0);
+  const syncStallPollsRef = useRef(0);
+  const syncLastProcessedRef = useRef<number | null>(null);
 
   const account = accounts.find((a) => a.id === accountId) ?? accounts[0] ?? null;
+
+  const rememberSyncJob = useCallback((jobId: string) => {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(SYNC_JOB_STORAGE_KEY, jobId);
+    }
+  }, []);
+
+  const forgetSyncJob = useCallback(() => {
+    syncStallPollsRef.current = 0;
+    syncLastProcessedRef.current = null;
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem(SYNC_JOB_STORAGE_KEY);
+    }
+  }, []);
+
+  const applyTrackedJob = useCallback((j: JobState) => {
+    setSyncing(true);
+    setJob({
+      id: j.id,
+      status: j.status,
+      total: j.total ?? 0,
+      processed: j.processed ?? 0,
+      ok: j.ok ?? 0,
+      errors: j.errors ?? 0,
+    });
+    rememberSyncJob(j.id);
+  }, [rememberSyncJob]);
 
   const copyMlb = useCallback((itemId: string) => {
     navigator.clipboard.writeText(itemId).then(() => {
@@ -590,6 +621,7 @@ function AnunciosPageContent() {
     if (!account) {
       setSyncing(false);
       setJob(null);
+      forgetSyncJob();
       return;
     }
 
@@ -602,25 +634,37 @@ function AnunciosPageContent() {
         if (cancelled || generation !== syncRestoreGenerationRef.current || !res.ok) return;
         const data = await res.json();
         if (cancelled || generation !== syncRestoreGenerationRef.current) return;
-        const j = data.job as JobState | null | undefined;
-        if (j && (j.status === "queued" || j.status === "running")) {
-          setSyncing(true);
-          setJob({
-            id: j.id,
-            status: j.status,
-            total: j.total ?? 0,
-            processed: j.processed ?? 0,
-            ok: j.ok ?? 0,
-            errors: j.errors ?? 0,
-          });
+
+        let j = data.job as JobState | null | undefined;
+        if (!j || !shouldTrackSyncJob(j)) {
+          const storedId =
+            typeof window !== "undefined" ? sessionStorage.getItem(SYNC_JOB_STORAGE_KEY) : null;
+          if (storedId) {
+            const jr = await fetch(`/api/jobs/${storedId}`);
+            if (!cancelled && generation === syncRestoreGenerationRef.current && jr.ok) {
+              const jd = await jr.json();
+              const stored = jd.job as JobState | null | undefined;
+              if (stored && shouldTrackSyncJob(stored)) {
+                j = stored;
+              }
+            }
+          }
+        }
+
+        if (cancelled || generation !== syncRestoreGenerationRef.current) return;
+
+        if (j && shouldTrackSyncJob(j)) {
+          applyTrackedJob(j);
         } else {
           setSyncing(false);
           setJob(null);
+          forgetSyncJob();
         }
       } catch {
         if (!cancelled && generation === syncRestoreGenerationRef.current) {
           setSyncing(false);
           setJob(null);
+          forgetSyncJob();
         }
       }
     })();
@@ -628,7 +672,7 @@ function AnunciosPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [account?.id]);
+  }, [account?.id, applyTrackedJob, forgetSyncJob]);
 
   const pollJob = useCallback(async () => {
     if (!account || !job?.id) return;
@@ -636,22 +680,52 @@ function AnunciosPageContent() {
     if (!res.ok) return null;
     const data = await res.json();
     const j = data.job as JobState;
-    if (j) {
-      setJob(j);
-      const isTerminal = j.status === "success" || j.status === "failed" || j.status === "partial";
-      const allProcessed = j.total > 0 && j.processed >= j.total;
-      if (isTerminal || (j.status === "running" && allProcessed)) {
+    if (!j) return false;
+
+    setJob(j);
+
+    if (!shouldTrackSyncJob(j)) {
+      setSyncing(false);
+      forgetSyncJob();
+      loadItems();
+      reloadOnboarding();
+      return true;
+    }
+
+    const allProcessed = j.total > 0 && j.processed >= j.total;
+    if (j.status === "running" && allProcessed) {
+      setSyncing(false);
+      forgetSyncJob();
+      loadItems();
+      reloadOnboarding();
+      return true;
+    }
+
+    if ((j.status === "failed" || j.status === "partial") && isIncompleteJob(j)) {
+      if (syncLastProcessedRef.current === j.processed) {
+        syncStallPollsRef.current += 1;
+      } else {
+        syncStallPollsRef.current = 0;
+        syncLastProcessedRef.current = j.processed;
+      }
+      if (syncStallPollsRef.current >= 3) {
         setSyncing(false);
+        forgetSyncJob();
         loadItems();
         reloadOnboarding();
         return true;
       }
+    } else {
+      syncStallPollsRef.current = 0;
+      syncLastProcessedRef.current = j.processed;
     }
+
     return false;
-  }, [account, job?.id, loadItems, reloadOnboarding]);
+  }, [account, job?.id, forgetSyncJob, loadItems, reloadOnboarding]);
 
   useEffect(() => {
-    if (!syncing || !job || job.status === "success" || job.status === "failed" || job.status === "partial") return;
+    if (!syncing || !job) return;
+    if (!shouldTrackSyncJob(job)) return;
     const t = setInterval(() => pollJob(), 2000);
     return () => clearInterval(t);
   }, [syncing, job, pollJob]);
@@ -665,7 +739,9 @@ function AnunciosPageContent() {
       const res = await fetch(`/api/mercadolivre/${account.id}/sync`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.job_id) {
-        setJob({
+        syncStallPollsRef.current = 0;
+        syncLastProcessedRef.current = null;
+        applyTrackedJob({
           id: data.job_id,
           status: "queued",
           total: 0,
@@ -675,10 +751,12 @@ function AnunciosPageContent() {
         });
       } else {
         setSyncing(false);
+        forgetSyncJob();
         alert(data.error || "Erro ao iniciar sincronização");
       }
     } catch {
       setSyncing(false);
+      forgetSyncJob();
       alert("Erro ao sincronizar");
     }
   }
@@ -1155,7 +1233,8 @@ function AnunciosPageContent() {
                   job={job}
                   tone="app"
                   actions={
-                    job.status === "running" ? (
+                    job.status === "running" ||
+                    (job.status === "failed" && isIncompleteJob(job)) ? (
                       <button
                         type="button"
                         onClick={async () => {
@@ -1163,6 +1242,7 @@ function AnunciosPageContent() {
                             await fetch(`/api/jobs/${job.id}`, { method: "PATCH" });
                           } finally {
                             setSyncing(false);
+                            forgetSyncJob();
                           }
                         }}
                         className="btn btn-secondary btn-mini"
