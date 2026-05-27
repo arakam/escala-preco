@@ -15,6 +15,7 @@ import {
   AdmintyIconSettings,
   AdmintyIconShoppingCart,
   AdmintyIconTag,
+  AdmintyIconWallet,
 } from "@/components/adminty-nav-icons";
 import { OnboardingProvider, useOnboarding } from "@/contexts/onboarding-context";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -29,6 +30,7 @@ const admintyUiFont = Open_Sans({
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
 const ADMINTY_SIDEBAR_COLLAPSED_KEY = "escalapreco_adminty_sidebar_collapsed";
+const IS_NEXT_DEV = process.env.NODE_ENV === "development";
 
 interface MLAccount {
   id: string;
@@ -86,6 +88,7 @@ const APP_PAGE_TITLES: Record<string, string> = {
   configuracao: "Configuração",
   vendas: "Vendas",
   historico: "Histórico",
+  recebimento: "Recebimento",
 };
 
 function appPageSection(pathname: string | null): string | null {
@@ -391,6 +394,22 @@ function AdmintyDashboardShell({
             <AdmintyIconSettings />
             <span className={labelClass}>Configuração</span>
           </Link>
+          {IS_NEXT_DEV ? (
+            <Link
+              href="/app/dev/recebimento"
+              onClick={() => setIsMenuOpen(false)}
+              className={sidebarLink(navItemActive(pathname, "/app/dev/recebimento"), false)}
+              title={sidebarCollapsed ? "Recebimento (dev)" : undefined}
+            >
+              <AdmintyIconWallet />
+              <span className={labelClass}>
+                Recebimento
+                <span className="ml-1 rounded bg-violet-500/30 px-1 text-[10px] font-medium text-violet-100">
+                  dev
+                </span>
+              </span>
+            </Link>
+          ) : null}
         </nav>
 
         <div className={`shrink-0 border-t border-white/10 p-3 ${sidebarCollapsed ? "md:px-2 md:py-2" : ""}`}>

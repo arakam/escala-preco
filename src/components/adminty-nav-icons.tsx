@@ -77,6 +77,17 @@ export function AdmintyIconCurrency() {
   );
 }
 
+/** Carteira / recebimento — menu dev Recebimento. */
+export function AdmintyIconWallet() {
+  return (
+    <svg viewBox="0 0 24 24" className={iconBase} aria-hidden="true">
+      <path {...stroke()} d="M3 7a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v1H5a2 2 0 0 1-2-2z" />
+      <path {...stroke()} d="M3 10h18v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7z" />
+      <path {...stroke()} d="M16 14h2" />
+    </svg>
+  );
+}
+
 /** Carrinho de compras (estilo Feather shopping-cart) — menu Vendas. */
 export function AdmintyIconShoppingCart() {
   return (

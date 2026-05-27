@@ -17,9 +17,15 @@ export type MlSalesMaps = {
 };
 
 export function last30DaysRangeIso(): { dateFrom: string; dateTo: string } {
+  return paidOrdersLastNDaysRangeIso(30);
+}
+
+/** Intervalo em ISO para `orders/search` (pedidos pagos criados nos últimos `days` dias, máx. 90). */
+export function paidOrdersLastNDaysRangeIso(days: number): { dateFrom: string; dateTo: string } {
+  const d = Math.min(Math.max(Math.floor(Number(days)) || 0, 1), 90);
   const to = new Date();
   const from = new Date(to);
-  from.setDate(from.getDate() - 30);
+  from.setDate(from.getDate() - d);
   return {
     dateFrom: from.toISOString().replace(/\.\d{3}Z/, ".000Z"),
     dateTo: to.toISOString().replace(/\.\d{3}Z/, ".999Z"),
@@ -700,6 +706,136 @@ export async function backfillPaidOrdersLast30Days(
     );
     throw e;
   }
+}
+
+export type SyncMissingPaidOrdersResult = {
+  date_from: string;
+  date_to: string;
+  scanned: number;
+  synced: number;
+  skipped_existing: number;
+  items_upserted: number;
+  shipments_enriched: number;
+  errors: string[];
+};
+
+/**
+ * Pagina `orders/search` (paid) no intervalo e persiste apenas pedidos que ainda não existem em `ml_orders`.
+ * Enriquece envios e `pricing_cache` como no backfill (sem alterar `initial_backfill_status`).
+ */
+export async function syncMissingPaidOrdersLastNDays(
+  supabase: SupabaseClient,
+  accountId: string,
+  userId: string,
+  accessToken: string,
+  sellerId: number,
+  days: number
+): Promise<SyncMissingPaidOrdersResult> {
+  const { dateFrom, dateTo } = paidOrdersLastNDaysRangeIso(days);
+  let offset = 0;
+  let hasMore = true;
+  let scanned = 0;
+  let synced = 0;
+  let skipped_existing = 0;
+  let items_upserted = 0;
+  const shippingIds = new Set<string>();
+  const affectedItemIds = new Set<string>();
+  const errors: string[] = [];
+
+  while (hasMore) {
+    const page = await fetchPaidOrdersSearchPage(accessToken, sellerId, dateFrom, dateTo, offset);
+    const candidates: { id: string; raw: Record<string, unknown> }[] = [];
+    for (const raw of page.results) {
+      const parsed = parseMlOrderPayload(raw);
+      if (!parsed) continue;
+      candidates.push({ id: parsed.ml_order_id, raw });
+    }
+    scanned += candidates.length;
+
+    if (candidates.length > 0) {
+      const ids = candidates.map((c) => c.id);
+      const { data: existingRows, error: exErr } = await supabase
+        .from("ml_orders")
+        .select("ml_order_id")
+        .eq("account_id", accountId)
+        .in("ml_order_id", ids);
+      if (exErr) {
+        errors.push(`Consulta pedidos existentes: ${exErr.message}`);
+      }
+      const existingSet = new Set((existingRows ?? []).map((r) => String(r.ml_order_id)));
+
+      for (const c of candidates) {
+        if (existingSet.has(c.id)) {
+          skipped_existing += 1;
+          continue;
+        }
+        const parsed = parseMlOrderPayload(c.raw);
+        if (!parsed) continue;
+        try {
+          await upsertMlOrderForAccount(supabase, accountId, userId, parsed, {
+            accessToken,
+            skipShipmentEnrichment: true,
+          });
+          synced += 1;
+          items_upserted += parsed.items.length;
+          for (const it of parsed.items) affectedItemIds.add(it.item_id);
+          if (parsed.shipping_id) shippingIds.add(parsed.shipping_id);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          errors.push(`Pedido ${c.id}: ${msg.slice(0, 200)}`);
+        }
+      }
+    }
+
+    hasMore = page.hasMore;
+    offset = page.nextOffset;
+  }
+
+  let shipments_enriched = 0;
+  if (shippingIds.size > 0) {
+    shipments_enriched = await enrichShipmentMetaForShippingIds(
+      supabase,
+      accountId,
+      accessToken,
+      Array.from(shippingIds)
+    );
+  }
+
+  const itemIdList = Array.from(affectedItemIds);
+  if (itemIdList.length > 0) {
+    const PATCH_BATCH = 200;
+    for (let i = 0; i < itemIdList.length; i += PATCH_BATCH) {
+      try {
+        await patchPricingCacheSales30dForItems(
+          supabase,
+          accountId,
+          itemIdList.slice(i, i + PATCH_BATCH)
+        );
+      } catch (e) {
+        console.warn("[ml/orders-store] patch pricing_cache após sync missing", e);
+      }
+    }
+  }
+
+  await supabase.from("ml_sales_sync_state").upsert(
+    {
+      account_id: accountId,
+      user_id: userId,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "account_id" }
+  );
+
+  return {
+    date_from: dateFrom,
+    date_to: dateTo,
+    scanned,
+    synced,
+    skipped_existing,
+    items_upserted,
+    shipments_enriched,
+    errors: errors.slice(0, 25),
+  };
 }
 
 export type SyncMlOrderResult =
