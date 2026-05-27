@@ -101,7 +101,7 @@ function parseAttributesDimensions(attributes: unknown): ItemDimensions {
   return out;
 }
 
-function mergeDimensions(...sources: ItemDimensions[]): ItemDimensions {
+export function mergeDimensions(...sources: ItemDimensions[]): ItemDimensions {
   const out: ItemDimensions = { ...EMPTY };
   for (const src of sources) {
     if (out.height_cm == null && src.height_cm != null) out.height_cm = src.height_cm;
@@ -110,6 +110,14 @@ function mergeDimensions(...sources: ItemDimensions[]): ItemDimensions {
     if (out.weight_kg == null && src.weight_kg != null) out.weight_kg = src.weight_kg;
   }
   return out;
+}
+
+/** Medidas da variação; campos ausentes (ex. sem PACKAGE_*) vêm do item pai. */
+export function resolveVariationDimensions(
+  variation: MLVariationDetail,
+  parent: ItemDimensions
+): ItemDimensions {
+  return mergeDimensions(extractVariationDimensions(variation), parent);
 }
 
 /** Extrai medidas e peso do payload do item ML (shipping.dimensions e atributos PACKAGE_*). */

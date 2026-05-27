@@ -1,10 +1,16 @@
 /**
  * Após sync de anúncios: cria produtos faltantes e atualiza peso/medidas quando o ML informar
- * SKU + altura + largura + comprimento + peso. Em seguida vincula MLB via link_ml_items_to_products.
+ * SKU + altura + largura + comprimento + peso. Variações sem PACKAGE_* herdam medidas do item pai.
+ * Em seguida vincula MLB via link_ml_items_to_products.
  */
 import { createServiceClient } from "@/lib/supabase/service";
-import { extractVariationDimensions } from "@/lib/mercadolivre/item-dimensions";
-import type { MLVariationDetail } from "@/lib/mercadolivre/client";
+import {
+  extractItemDimensions,
+  mergeDimensions,
+  resolveVariationDimensions,
+  type ItemDimensions,
+} from "@/lib/mercadolivre/item-dimensions";
+import type { MLItemDetail, MLVariationDetail } from "@/lib/mercadolivre/client";
 import { extractSkuFromMlListing, normalizeMlSku } from "@/lib/products/ml-sku";
 
 const PAGE_SIZE = 1000;
@@ -63,17 +69,40 @@ function candidateFromItemRow(row: {
   };
 }
 
+function parentDimensionsFromItemRow(row: {
+  weight_kg: number | null;
+  height_cm: number | null;
+  width_cm: number | null;
+  length_cm: number | null;
+  raw_json: unknown;
+}): ItemDimensions {
+  const fromColumns: ItemDimensions = {
+    weight_kg: positiveNum(row.weight_kg),
+    height_cm: positiveNum(row.height_cm),
+    width_cm: positiveNum(row.width_cm),
+    length_cm: positiveNum(row.length_cm),
+  };
+  if (row.raw_json && typeof row.raw_json === "object") {
+    return mergeDimensions(fromColumns, extractItemDimensions(row.raw_json as MLItemDetail));
+  }
+  return fromColumns;
+}
+
 function candidateFromVariationRow(row: {
   raw_json: unknown;
   seller_custom_field: string | null;
   item_title: string | null;
+  parent_dimensions: ItemDimensions;
 }): CatalogCandidate | null {
   const sku = extractSkuFromMlListing({
     rawJson: row.raw_json,
     sellerCustomField: row.seller_custom_field,
   });
   if (!sku) return null;
-  const dims = extractVariationDimensions(row.raw_json as MLVariationDetail);
+  const dims = resolveVariationDimensions(
+    row.raw_json as MLVariationDetail,
+    row.parent_dimensions
+  );
   const weight = positiveNum(dims.weight_kg);
   const height = positiveNum(dims.height_cm);
   const width = positiveNum(dims.width_cm);
@@ -126,6 +155,7 @@ export async function autoCreateProductsFromMlSync(
 
   const bySku = new Map<string, CatalogCandidate>();
   const titleByItemId = new Map<string, string | null>();
+  const parentDimsByItemId = new Map<string, ItemDimensions>();
 
   let offset = 0;
   for (;;) {
@@ -144,7 +174,9 @@ export async function autoCreateProductsFromMlSync(
     }
     const batch = data ?? [];
     for (const row of batch) {
-      titleByItemId.set(row.item_id as string, (row.title as string | null) ?? null);
+      const itemId = row.item_id as string;
+      titleByItemId.set(itemId, (row.title as string | null) ?? null);
+      parentDimsByItemId.set(itemId, parentDimensionsFromItemRow(row));
       const c = candidateFromItemRow(row);
       if (c && !bySku.has(c.sku)) bySku.set(c.sku, c);
     }
@@ -174,6 +206,12 @@ export async function autoCreateProductsFromMlSync(
         raw_json: row.raw_json,
         seller_custom_field: (row.seller_custom_field as string | null) ?? null,
         item_title: titleByItemId.get(itemId) ?? null,
+        parent_dimensions: parentDimsByItemId.get(itemId) ?? {
+          weight_kg: null,
+          height_cm: null,
+          width_cm: null,
+          length_cm: null,
+        },
       });
       if (c && !bySku.has(c.sku)) bySku.set(c.sku, c);
     }
