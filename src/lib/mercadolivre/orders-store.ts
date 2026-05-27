@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchWithRetry, runWithConcurrency } from "@/lib/mercadolivre/client";
 import { parseMlOrderTags } from "@/lib/mercadolivre/order-tags";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 
@@ -204,6 +205,67 @@ function parseShipmentSenderCost(data: { senders?: Array<{ cost?: number }> }): 
   return any ? Math.round(total * 100) / 100 : 0;
 }
 
+/** Paralelismo na fase de envios do backfill (4 GETs por shipping_id, deduplicado). */
+function getMlShipmentEnrichConcurrency(): number {
+  const raw = process.env.ML_SHIPMENT_ENRICH_CONCURRENCY;
+  if (raw === undefined || raw === "") return 2;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= 1 && n <= 8) return Math.floor(n);
+  return 2;
+}
+
+function shipmentMetaToOrderPatch(meta: MlShipmentShippingMeta): Record<string, unknown> {
+  return {
+    shipping_cost_sender: meta.shipping_cost_sender,
+    shipping_logistic_mode: meta.shipping_logistic_mode,
+    shipping_logistic_type: meta.shipping_logistic_type,
+    shipping_carrier: meta.shipping_carrier,
+    shipping_sla_expected_at: meta.shipping_sla_expected_at,
+    shipping_sla_status: meta.shipping_sla_status,
+  };
+}
+
+/**
+ * Busca meta de envio por shipping_id (deduplicado) e aplica em todos os pedidos da conta com esse envio.
+ */
+export async function enrichShipmentMetaForShippingIds(
+  supabase: SupabaseClient,
+  accountId: string,
+  accessToken: string,
+  shippingIds: string[],
+  options?: {
+    onProgress?: (done: number, total: number) => void | Promise<void>;
+  }
+): Promise<number> {
+  const unique = Array.from(new Set(shippingIds.map((s) => String(s).trim()).filter(Boolean)));
+  if (unique.length === 0) return 0;
+
+  const concurrency = getMlShipmentEnrichConcurrency();
+  const metaById = new Map<string, MlShipmentShippingMeta>();
+  let done = 0;
+
+  await runWithConcurrency(unique, concurrency, async (shippingId) => {
+    const meta = await fetchMlShipmentShippingMeta(accessToken, shippingId);
+    metaById.set(shippingId, meta);
+    done += 1;
+    await options?.onProgress?.(done, unique.length);
+  });
+
+  const now = new Date().toISOString();
+  for (const [shippingId, meta] of metaById) {
+    const { error } = await supabase
+      .from("ml_orders")
+      .update({ ...shipmentMetaToOrderPatch(meta), synced_at: now })
+      .eq("account_id", accountId)
+      .eq("shipping_id", shippingId);
+    if (error) {
+      console.warn(`[ml/orders-store] enrich shipment ${shippingId}`, error.message);
+    }
+  }
+
+  return unique.length;
+}
+
 /** Custo, modo/tipo logístico e transportadora do envio (API ML). */
 export async function fetchMlShipmentShippingMeta(
   accessToken: string,
@@ -221,14 +283,14 @@ export async function fetchMlShipmentShippingMeta(
   const id = String(shippingId).trim();
   if (!id) return empty;
 
-  const authHeaders = { Authorization: `Bearer ${accessToken}` };
-  const headersNew = { ...authHeaders, "x-format-new": "true" };
+  const base = `https://api.mercadolibre.com/shipments/${id}`;
+  const fmtNew = { "x-format-new": "true" };
 
   const [shipmentRes, costsRes, carrierRes, slaRes] = await Promise.all([
-    fetch(`https://api.mercadolibre.com/shipments/${id}`, { headers: headersNew }),
-    fetch(`https://api.mercadolibre.com/shipments/${id}/costs`, { headers: headersNew }),
-    fetch(`https://api.mercadolibre.com/shipments/${id}/carrier`, { headers: headersNew }),
-    fetch(`https://api.mercadolibre.com/shipments/${id}/sla`, { headers: authHeaders }),
+    fetchWithRetry(base, accessToken, { headers: fmtNew }),
+    fetchWithRetry(`${base}/costs`, accessToken, { headers: fmtNew }),
+    fetchWithRetry(`${base}/carrier`, accessToken, { headers: fmtNew }),
+    fetchWithRetry(`${base}/sla`, accessToken),
   ]);
 
   let shipping_cost_sender: number | null = null;
@@ -443,9 +505,7 @@ async function fetchPaidOrdersSearchPage(
   url.searchParams.set("limit", String(ORDERS_PAGE_LIMIT));
   url.searchParams.set("offset", String(offset));
 
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const res = await fetchWithRetry(url.toString(), accessToken);
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`orders/search ${res.status}: ${errText.slice(0, 200)}`);
@@ -478,13 +538,16 @@ export type SalesBackfillProgress = {
   total: number;
   ordersUpserted: number;
   itemsUpserted: number;
-  phase: "orders" | "pricing_cache";
+  phase: "orders" | "shipments" | "pricing_cache";
+  shipmentsProcessed?: number;
+  shipmentsTotal?: number;
 };
 
 export type Backfill30dResult = {
   ok: true;
   ordersUpserted: number;
   itemsUpserted: number;
+  shipmentsEnriched: number;
 };
 
 /**
@@ -508,15 +571,37 @@ export async function backfillPaidOrdersLast30Days(
   let itemsUpserted = 0;
   let orderTotal: number | null = null;
   const affectedItemIds = new Set<string>();
+  const shippingIds = new Set<string>();
+  const enrichShipments = !options?.skipShipmentEnrichment;
+  let shipmentsEnriched = 0;
+
   const reportProgress = async (phase: SalesBackfillProgress["phase"]) => {
     if (!options?.onProgress) return;
-    const total = orderTotal ?? Math.max(ordersUpserted, 1);
+    const orderCap = orderTotal ?? Math.max(ordersUpserted, 1);
+    const shipTotal = shippingIds.size;
+    const shipDone = shipmentsEnriched;
+
+    let combinedTotal: number;
+    let combinedProcessed: number;
+    if (phase === "orders") {
+      combinedTotal = orderCap;
+      combinedProcessed = ordersUpserted;
+    } else if (phase === "shipments") {
+      combinedTotal = orderCap + shipTotal;
+      combinedProcessed = ordersUpserted + shipDone;
+    } else {
+      combinedTotal = orderCap + (enrichShipments ? shipTotal : 0);
+      combinedProcessed = ordersUpserted + (enrichShipments ? shipTotal : 0);
+    }
+
     await options.onProgress({
-      processed: ordersUpserted,
-      total,
+      processed: combinedProcessed,
+      total: combinedTotal,
       ordersUpserted,
       itemsUpserted,
       phase,
+      shipmentsProcessed: shipDone,
+      shipmentsTotal: shipTotal,
     });
   };
 
@@ -541,8 +626,11 @@ export async function backfillPaidOrdersLast30Days(
         if (!parsed) continue;
         await upsertMlOrderForAccount(supabase, accountId, userId, parsed, {
           accessToken,
-          skipShipmentEnrichment: options?.skipShipmentEnrichment,
+          skipShipmentEnrichment: true,
         });
+        if (enrichShipments && parsed.shipping_id) {
+          shippingIds.add(parsed.shipping_id);
+        }
         ordersUpserted += 1;
         itemsUpserted += parsed.items.length;
         for (const it of parsed.items) affectedItemIds.add(it.item_id);
@@ -550,6 +638,22 @@ export async function backfillPaidOrdersLast30Days(
       hasMore = page.hasMore;
       offset = page.nextOffset;
       await reportProgress("orders");
+    }
+
+    if (enrichShipments && shippingIds.size > 0) {
+      await reportProgress("shipments");
+      shipmentsEnriched = await enrichShipmentMetaForShippingIds(
+        supabase,
+        accountId,
+        accessToken,
+        Array.from(shippingIds),
+        {
+          onProgress: async (done) => {
+            shipmentsEnriched = done;
+            await reportProgress("shipments");
+          },
+        }
+      );
     }
 
     const itemIdList = Array.from(affectedItemIds);
@@ -581,7 +685,7 @@ export async function backfillPaidOrdersLast30Days(
       { onConflict: "account_id" }
     );
 
-    return { ok: true, ordersUpserted, itemsUpserted };
+    return { ok: true, ordersUpserted, itemsUpserted, shipmentsEnriched };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await supabase.from("ml_sales_sync_state").upsert(
@@ -790,7 +894,8 @@ export async function runSalesBackfillForAccount(
 }
 
 /** Backfill em `running` sem atualização recente (processo caiu ou proxy cortou). */
-export const SALES_BACKFILL_STALE_MS = 45 * 60 * 1000;
+/** Alinhado ao timeout de job running (enriquecimento de envio por pedido). */
+export const SALES_BACKFILL_STALE_MS = 3 * 60 * 60 * 1000;
 
 export function isSalesBackfillStale(updatedAt: string | null | undefined): boolean {
   if (!updatedAt) return true;

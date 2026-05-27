@@ -165,7 +165,7 @@ function VendasHelpContent() {
         <h3 className="mb-2 font-medium text-fg-strong">Fluxo</h3>
         <ul className="list-inside list-disc space-y-1">
           <li>
-            <strong>Carga inicial 30 dias</strong> — busca pedidos pagos no ML e grava no banco em segundo plano (use na primeira vez ou para repor histórico). O progresso aparece na tela; detalhes de envio podem ser completados depois via webhooks.
+            <strong>Carga inicial 30 dias</strong> — grava pedidos pagos e, em seguida, completa envio e prazo de despacho (uma consulta por <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">shipping_id</code>, em paralelo). Dispara após a primeira sync de anúncios ou manualmente abaixo.
           </li>
           <li>
             <strong>Webhooks</strong> (<code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">orders_v2</code>) — cada pedido novo ou
@@ -913,7 +913,8 @@ function VendasPageContent() {
     ? [
         "Carga inicial de vendas (30 dias) em segundo plano…",
         backfillProgressLabel ?? "Consultando pedidos pagos no Mercado Livre…",
-        "Gravando pedidos e atualizando Preços…",
+        "Completando prazo de despacho e dados de envio…",
+        "Atualizando Preços (vendas 30d)…",
         "Você pode manter esta aba aberta até concluir.",
       ]
     : syncingPending

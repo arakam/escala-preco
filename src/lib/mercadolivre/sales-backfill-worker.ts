@@ -1,5 +1,6 @@
 /**
- * Worker da carga inicial de vendas (30 dias). Roda em background após POST /api/sales/backfill.
+ * Worker da carga inicial de vendas (30 dias). Roda após POST /api/sales/backfill ou auto após sync_items.
+ * Fase 1: pedidos pagos; fase 2: envios deduplicados por shipping_id (SLA, modo/tipo, transportadora, frete).
  */
 import { addJobLog, updateJob } from "@/lib/jobs";
 import { runSalesBackfillForAccount } from "@/lib/mercadolivre/orders-store";
@@ -15,14 +16,20 @@ export async function runSalesBackfillJob(
   const now = new Date().toISOString();
 
   try {
+    const progressHeartbeat = () => new Date().toISOString();
     const result = await runSalesBackfillForAccount(supabase, accountId, userId, mlUserId, {
-      skipShipmentEnrichment: true,
       onProgress: async (p) => {
+        const now = progressHeartbeat();
         await updateJob(supabase, jobId, {
           total: p.total,
           processed: p.processed,
           ok: p.ordersUpserted,
+          started_at: now,
         });
+        await supabase
+          .from("ml_sales_sync_state")
+          .update({ updated_at: now })
+          .eq("account_id", accountId);
       },
     });
 
@@ -35,7 +42,7 @@ export async function runSalesBackfillJob(
     });
     await addJobLog(supabase, jobId, {
       status: "ok",
-      message: `Carga concluída: ${result.ordersUpserted} pedido(s), ${result.itemsUpserted} linha(s).`,
+      message: `Carga concluída: ${result.ordersUpserted} pedido(s), ${result.itemsUpserted} linha(s), ${result.shipmentsEnriched} envio(s) enriquecido(s).`,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro na carga inicial";

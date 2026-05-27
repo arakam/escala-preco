@@ -430,6 +430,24 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       refreshPricingCache(accountId).catch((err) =>
         console.error(`[sync:${jobId}] pricing cache refresh`, err)
       );
+
+      try {
+        const { maybeKickSalesBackfillAfterItemsSync } = await import(
+          "@/lib/mercadolivre/schedule-sales-backfill"
+        );
+        const backfill = await maybeKickSalesBackfillAfterItemsSync(accountId, {
+          triggerSyncJobId: jobId,
+        });
+        if (backfill.started) {
+          syncLog(jobId, "carga inicial vendas 30d (envio + SLA) em background", {
+            salesBackfillJobId: backfill.jobId,
+          });
+        } else {
+          syncLog(jobId, "carga inicial vendas 30d não disparada", { reason: backfill.reason });
+        }
+      } catch (err) {
+        console.error(`[sync:${jobId}] auto sales backfill`, err);
+      }
     }
   } catch (e) {
     syncLog(jobId, "erro fatal no worker", {

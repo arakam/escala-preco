@@ -31,7 +31,8 @@ const STALE_RUNNING_MS = 8 * 60 * 1000;
 const STALE_RUNNING_MS_BY_TYPE: Partial<Record<JobType, number>> = {
   /** Sync grande pode levar horas; inatividade real é medida via `started_at` atualizado a cada item. */
   sync_items: 30 * 60 * 1000,
-  sales_backfill_30d: 45 * 60 * 1000,
+  /** Com enriquecimento de envio (4 chamadas/pedido) pode levar horas em contas grandes. */
+  sales_backfill_30d: 3 * 60 * 60 * 1000,
 };
 const STALE_QUEUED_MS = 5 * 60 * 1000;
 const STALE_QUEUED_MS_BY_TYPE: Partial<Record<JobType, number>> = {
