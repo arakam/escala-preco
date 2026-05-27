@@ -235,9 +235,11 @@ export async function fetchAllItemIds(
  */
 export async function fetchItemDetail(
   itemId: string,
-  accessToken: string
+  accessToken: string,
+  options?: { includeAttributesAll?: boolean }
 ): Promise<MLItemDetail> {
-  const url = `https://api.mercadolibre.com/items/${itemId}`;
+  const include = options?.includeAttributesAll ? "?include_attributes=all" : "";
+  const url = `https://api.mercadolibre.com/items/${itemId}${include}`;
   const res = await fetchWithRetry(url, accessToken);
   if (!res.ok) {
     const text = await res.text();

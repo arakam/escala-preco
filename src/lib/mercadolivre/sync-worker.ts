@@ -18,7 +18,7 @@ import {
   getStandardPriceAmount,
   runWithConcurrency,
 } from "./client";
-import { extractItemDimensions } from "./item-dimensions";
+import { extractItemDimensions, extractVariationDimensions } from "./item-dimensions";
 import { getLatestValidAccessToken, getValidAccessToken } from "./refresh";
 import { syncHeartbeatMs, syncLog, syncLogVerbose } from "./sync-log";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -45,6 +45,66 @@ function getMlSyncConcurrency(): number {
 }
 
 const CONCURRENCY = getMlSyncConcurrency();
+
+function variationHasAnyPackageAttribute(v: { attributes?: Array<{ id?: string }> } | null | undefined) {
+  const attrs = v?.attributes;
+  if (!Array.isArray(attrs) || attrs.length === 0) return false;
+  // IDs que o `extractVariationDimensions` consegue converter para dimensões/peso.
+  const ids = new Set([
+    "PACKAGE_HEIGHT",
+    "HEIGHT",
+    "SELLER_PACKAGE_HEIGHT",
+    "PACKAGE_WIDTH",
+    "WIDTH",
+    "SELLER_PACKAGE_WIDTH",
+    "PACKAGE_LENGTH",
+    "LENGTH",
+    "SELLER_PACKAGE_LENGTH",
+    "PACKAGE_DEPTH",
+    "DEPTH",
+    "PACKAGE_WEIGHT",
+    "WEIGHT",
+    "SELLER_PACKAGE_WEIGHT",
+    "PRODUCT_WEIGHT",
+  ]);
+  return attrs.some((a) => a?.id && ids.has(a.id));
+}
+
+function variationLooksLikeWeHaveSku(v: MLVariationDetail): boolean {
+  const sellerFieldRaw = v.seller_custom_field?.trim() || null;
+  if (sellerFieldRaw && !isMlPlaceholderSku(sellerFieldRaw)) return true;
+
+  const skuAttrValue = Array.isArray(v.attributes)
+    ? v.attributes.find((a) => a.id === "SELLER_SKU")?.value_name ?? null
+    : null;
+  if (skuAttrValue && !isMlPlaceholderSku(String(skuAttrValue))) return true;
+
+  return false;
+}
+
+function variationNeedsExtraDetail(v: MLVariationDetail): boolean {
+  // Se atributos não vieram no /items/{id} (include_attributes=all), precisamos buscar a variação completa.
+  if (!Array.isArray(v.attributes) || v.attributes.length === 0) return true;
+
+  // Se não conseguimos montar SKU (SELLER_SKU ou seller_custom_field), buscarmos a variação completa.
+  if (!variationLooksLikeWeHaveSku(v)) return true;
+
+  // Se existem atributos de pacote, mas não conseguimos extrair dimensões/peso,
+  // pode ser que falte value_struct na resposta do item. Faz fallback para não perder medidas.
+  if (variationHasAnyPackageAttribute(v)) {
+    const dims = extractVariationDimensions(v);
+    if (
+      dims.weight_kg == null ||
+      dims.height_cm == null ||
+      dims.width_cm == null ||
+      dims.length_cm == null
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 function looksLikeMlAuthError(e: unknown): boolean {
   const m = e instanceof Error ? e.message : String(e);
@@ -247,7 +307,8 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       if (syncLogVerbose()) {
         syncLog(jobId, "ML GET item + prices + variações", { itemId });
       }
-      const item = await fetchItemDetail(itemId, token);
+      // include_attributes=all ajuda a trazer attributes dentro das variações, reduzindo chamadas extras.
+      const item = await fetchItemDetail(itemId, token, { includeAttributesAll: true });
       const pricesResponse = await getItemPrices(itemId, token, { showAllPrices: true });
       const standardPrice = getStandardPriceAmount(pricesResponse);
       const salePriceResponse = await getItemSalePrice(itemId, token);
@@ -292,7 +353,11 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
         for (const v of item.variations) {
           let variationDetail: MLVariationDetail;
           try {
-            variationDetail = await fetchVariationDetail(item.id, v.id, token);
+            if (variationNeedsExtraDetail(v as MLVariationDetail)) {
+              variationDetail = await fetchVariationDetail(item.id, v.id, token);
+            } else {
+              variationDetail = v as MLVariationDetail;
+            }
           } catch {
             variationDetail = v as MLVariationDetail;
           }
@@ -512,7 +577,7 @@ export async function syncSingleItem(
   }
 
   try {
-    const item = await fetchItemDetail(itemIdClean, accessToken);
+    const item = await fetchItemDetail(itemIdClean, accessToken, { includeAttributesAll: true });
     const pricesResponse = await getItemPrices(itemIdClean, accessToken, { showAllPrices: true });
     const standardPrice = getStandardPriceAmount(pricesResponse);
     const salePriceResponse = await getItemSalePrice(itemIdClean, accessToken);
@@ -552,7 +617,11 @@ export async function syncSingleItem(
         // Buscar detalhes completos da variação (inclui attributes com SELLER_SKU)
         let variationDetail: MLVariationDetail;
         try {
-          variationDetail = await fetchVariationDetail(item.id, v.id, accessToken);
+          if (variationNeedsExtraDetail(v as MLVariationDetail)) {
+            variationDetail = await fetchVariationDetail(item.id, v.id, accessToken);
+          } else {
+            variationDetail = v as MLVariationDetail;
+          }
         } catch {
           // Se falhar, usar os dados básicos da variação do item
           variationDetail = v as MLVariationDetail;
