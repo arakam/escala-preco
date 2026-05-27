@@ -339,7 +339,7 @@ export async function upsertMlOrderForAccount(
   accountId: string,
   userId: string,
   parsed: ParsedMlOrder,
-  options?: { accessToken?: string }
+  options?: { accessToken?: string; skipShipmentEnrichment?: boolean }
 ): Promise<void> {
   const now = new Date().toISOString();
   let shippingCostSender = parsed.shipping_cost_sender;
@@ -349,7 +349,7 @@ export async function upsertMlOrderForAccount(
   let shippingSlaExpectedAt = parsed.shipping_sla_expected_at;
   let shippingSlaStatus = parsed.shipping_sla_status;
 
-  if (parsed.shipping_id && options?.accessToken) {
+  if (parsed.shipping_id && options?.accessToken && !options?.skipShipmentEnrichment) {
     const needsMeta =
       shippingCostSender == null ||
       shippingLogisticMode == null ||
@@ -433,6 +433,7 @@ async function fetchPaidOrdersSearchPage(
   results: Record<string, unknown>[];
   hasMore: boolean;
   nextOffset: number;
+  total: number | null;
 }> {
   const url = new URL("https://api.mercadolibre.com/orders/search");
   url.searchParams.set("seller", String(sellerId));
@@ -468,8 +469,17 @@ async function fetchPaidOrdersSearchPage(
     hasMore = false;
     nextOffset = currentOffset + results.length;
   }
-  return { results, hasMore, nextOffset };
+  const totalNum = Number.isFinite(total) && total > 0 ? total : null;
+  return { results, hasMore, nextOffset, total: totalNum };
 }
+
+export type SalesBackfillProgress = {
+  processed: number;
+  total: number;
+  ordersUpserted: number;
+  itemsUpserted: number;
+  phase: "orders" | "pricing_cache";
+};
 
 export type Backfill30dResult = {
   ok: true;
@@ -485,14 +495,30 @@ export async function backfillPaidOrdersLast30Days(
   accountId: string,
   userId: string,
   accessToken: string,
-  sellerId: number
+  sellerId: number,
+  options?: {
+    skipShipmentEnrichment?: boolean;
+    onProgress?: (progress: SalesBackfillProgress) => void | Promise<void>;
+  }
 ): Promise<Backfill30dResult> {
   const { dateFrom, dateTo } = last30DaysRangeIso();
   let offset = 0;
   let hasMore = true;
   let ordersUpserted = 0;
   let itemsUpserted = 0;
+  let orderTotal: number | null = null;
   const affectedItemIds = new Set<string>();
+  const reportProgress = async (phase: SalesBackfillProgress["phase"]) => {
+    if (!options?.onProgress) return;
+    const total = orderTotal ?? Math.max(ordersUpserted, 1);
+    await options.onProgress({
+      processed: ordersUpserted,
+      total,
+      ordersUpserted,
+      itemsUpserted,
+      phase,
+    });
+  };
 
   await supabase.from("ml_sales_sync_state").upsert(
     {
@@ -506,13 +532,16 @@ export async function backfillPaidOrdersLast30Days(
   );
 
   try {
+    await reportProgress("orders");
     while (hasMore) {
       const page = await fetchPaidOrdersSearchPage(accessToken, sellerId, dateFrom, dateTo, offset);
+      if (orderTotal == null && page.total != null) orderTotal = page.total;
       for (const raw of page.results) {
         const parsed = parseMlOrderPayload(raw);
         if (!parsed) continue;
         await upsertMlOrderForAccount(supabase, accountId, userId, parsed, {
           accessToken,
+          skipShipmentEnrichment: options?.skipShipmentEnrichment,
         });
         ordersUpserted += 1;
         itemsUpserted += parsed.items.length;
@@ -520,10 +549,12 @@ export async function backfillPaidOrdersLast30Days(
       }
       hasMore = page.hasMore;
       offset = page.nextOffset;
+      await reportProgress("orders");
     }
 
     const itemIdList = Array.from(affectedItemIds);
     if (itemIdList.length > 0) {
+      await reportProgress("pricing_cache");
       const PATCH_BATCH = 200;
       for (let i = 0; i < itemIdList.length; i += PATCH_BATCH) {
         try {
@@ -732,7 +763,11 @@ export async function runSalesBackfillForAccount(
   supabase: SupabaseClient,
   accountId: string,
   userId: string,
-  mlUserId: number
+  mlUserId: number,
+  options?: {
+    skipShipmentEnrichment?: boolean;
+    onProgress?: (progress: SalesBackfillProgress) => void | Promise<void>;
+  }
 ): Promise<Backfill30dResult> {
   const { data: tokenData, error: tokenErr } = await supabase
     .from("ml_tokens")
@@ -751,5 +786,15 @@ export async function runSalesBackfillForAccount(
     supabase
   );
   if (!accessToken) throw new Error("Não foi possível obter access token válido");
-  return backfillPaidOrdersLast30Days(supabase, accountId, userId, accessToken, mlUserId);
+  return backfillPaidOrdersLast30Days(supabase, accountId, userId, accessToken, mlUserId, options);
+}
+
+/** Backfill em `running` sem atualização recente (processo caiu ou proxy cortou). */
+export const SALES_BACKFILL_STALE_MS = 45 * 60 * 1000;
+
+export function isSalesBackfillStale(updatedAt: string | null | undefined): boolean {
+  if (!updatedAt) return true;
+  const t = new Date(updatedAt).getTime();
+  if (Number.isNaN(t)) return true;
+  return Date.now() - t > SALES_BACKFILL_STALE_MS;
 }

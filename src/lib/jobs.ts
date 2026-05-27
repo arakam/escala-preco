@@ -7,6 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type JobStatus = "queued" | "running" | "success" | "failed" | "partial";
 export type JobType =
   | "sync_items"
+  | "sales_backfill_30d"
   | "apply_wholesale_prices"
   | "refresh_price_references"
   | "refresh_promotions_cache";
@@ -27,7 +28,21 @@ export interface JobRow {
 
 /** Jobs presos após crash do processo, timeout de proxy ou deploy (VPS/serverless). */
 const STALE_RUNNING_MS = 8 * 60 * 1000;
+const STALE_RUNNING_MS_BY_TYPE: Partial<Record<JobType, number>> = {
+  sales_backfill_30d: 45 * 60 * 1000,
+};
 const STALE_QUEUED_MS = 5 * 60 * 1000;
+const STALE_QUEUED_MS_BY_TYPE: Partial<Record<JobType, number>> = {
+  sales_backfill_30d: 10 * 60 * 1000,
+};
+
+function staleRunningMs(type: JobType): number {
+  return STALE_RUNNING_MS_BY_TYPE[type] ?? STALE_RUNNING_MS;
+}
+
+function staleQueuedMs(type: JobType): number {
+  return STALE_QUEUED_MS_BY_TYPE[type] ?? STALE_QUEUED_MS;
+}
 /** Fila sem worker (ex.: setImmediate não rodou) — reagendar após este intervalo. */
 export const STUCK_QUEUED_RESTART_MS = 30 * 1000;
 
@@ -48,8 +63,8 @@ export async function expireStaleJobsForAccount(
   type: JobType = "sync_items"
 ): Promise<void> {
   const now = new Date().toISOString();
-  const runningCutoff = new Date(Date.now() - STALE_RUNNING_MS).toISOString();
-  const queuedCutoff = new Date(Date.now() - STALE_QUEUED_MS).toISOString();
+  const runningCutoff = new Date(Date.now() - staleRunningMs(type)).toISOString();
+  const queuedCutoff = new Date(Date.now() - staleQueuedMs(type)).toISOString();
 
   const { data: staleRunning } = await supabase
     .from("ml_jobs")

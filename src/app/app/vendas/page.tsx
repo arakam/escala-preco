@@ -34,6 +34,16 @@ type SyncState = {
   initial_backfill_at?: string | null;
   initial_backfill_error?: string | null;
   last_webhook_sync_at?: string | null;
+  updated_at?: string | null;
+};
+
+type BackfillJobState = {
+  id: string;
+  status: string;
+  total: number;
+  processed: number;
+  ok: number;
+  errors: number;
 };
 
 type OrderRow = {
@@ -155,7 +165,7 @@ function VendasHelpContent() {
         <h3 className="mb-2 font-medium text-fg-strong">Fluxo</h3>
         <ul className="list-inside list-disc space-y-1">
           <li>
-            <strong>Carga inicial 30 dias</strong> — busca pedidos pagos no ML e grava no banco (use na primeira vez ou para repor histórico).
+            <strong>Carga inicial 30 dias</strong> — busca pedidos pagos no ML e grava no banco em segundo plano (use na primeira vez ou para repor histórico). O progresso aparece na tela; detalhes de envio podem ser completados depois via webhooks.
           </li>
           <li>
             <strong>Webhooks</strong> (<code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">orders_v2</code>) — cada pedido novo ou
@@ -372,6 +382,8 @@ function VendasPageContent() {
   const [tab, setTab] = useState<VendasTab>("vendas");
   const [loading, setLoading] = useState(true);
   const [backfilling, setBackfilling] = useState(false);
+  const [backfillJob, setBackfillJob] = useState<BackfillJobState | null>(null);
+  const [backfillSuccess, setBackfillSuccess] = useState<string | null>(null);
   const [syncingPending, setSyncingPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<SyncState | null>(null);
@@ -465,6 +477,104 @@ function VendasPageContent() {
     void load();
   }, [load]);
 
+  const restoreBackfillState = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sales/backfill", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.sync_state) setSyncState(data.sync_state as SyncState);
+      const j = data.job as BackfillJobState | null | undefined;
+      if (data.running && j) {
+        setBackfilling(true);
+        setBackfillJob({
+          id: j.id,
+          status: j.status,
+          total: j.total ?? 0,
+          processed: j.processed ?? 0,
+          ok: j.ok ?? 0,
+          errors: j.errors ?? 0,
+        });
+      } else if (data.running && !j) {
+        setBackfilling(true);
+        setBackfillJob(null);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    void restoreBackfillState();
+  }, [restoreBackfillState]);
+
+  const pollBackfillJob = useCallback(async () => {
+    if (!backfillJob?.id) {
+      try {
+        const res = await fetch("/api/sales/backfill", { cache: "no-store" });
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data.sync_state) setSyncState(data.sync_state as SyncState);
+        if (data.running) return false;
+        const st = String(
+          (data.sync_state as SyncState | null)?.initial_backfill_status ?? ""
+        ).toLowerCase();
+        if (st === "done") {
+          setBackfilling(false);
+          setBackfillSuccess("Carga inicial concluída.");
+          await load();
+          return true;
+        }
+        if (st === "error") {
+          setBackfilling(false);
+          setError(
+            (data.sync_state as SyncState | null)?.initial_backfill_error ||
+              "Falha na carga inicial"
+          );
+          await load();
+          return true;
+        }
+        setBackfilling(false);
+      } catch {
+        // ignore
+      }
+      return false;
+    }
+    const res = await fetch(`/api/jobs/${backfillJob.id}`, { cache: "no-store" });
+    if (!res.ok) return false;
+    const data = await res.json();
+    const j = data.job as BackfillJobState | undefined;
+    if (!j) return false;
+    setBackfillJob(j);
+    if (j.status === "success") {
+      setBackfilling(false);
+      setBackfillJob(null);
+      setBackfillSuccess(
+        `Carga concluída: ${j.ok || j.processed} pedido(s) gravado(s) no banco.`
+      );
+      await load();
+      return true;
+    }
+    if (j.status === "failed" || j.status === "partial") {
+      setBackfilling(false);
+      setBackfillJob(null);
+      const errLog = (data.logs as { message?: string }[] | undefined)?.find(
+        (l) => l.message
+      )?.message;
+      setError(errLog || "Falha na carga inicial");
+      await load();
+      return true;
+    }
+    return false;
+  }, [backfillJob?.id, load, restoreBackfillState]);
+
+  useEffect(() => {
+    if (!backfilling) return;
+    const t = setInterval(() => {
+      void pollBackfillJob();
+    }, 2000);
+    return () => clearInterval(t);
+  }, [backfilling, pollBackfillJob]);
+
   const runSyncPendingWebhooks = async () => {
     setSyncingPending(true);
     setError(null);
@@ -492,28 +602,51 @@ function VendasPageContent() {
   const runBackfill = async () => {
     if (
       !confirm(
-        "Buscar no ML todos os pedidos pagos dos últimos 30 dias e gravar no banco? Pode levar alguns minutos."
+        "Buscar no ML todos os pedidos pagos dos últimos 30 dias e gravar no banco? A operação roda em segundo plano e pode levar vários minutos."
       )
     ) {
       return;
     }
     setBackfilling(true);
+    setBackfillSuccess(null);
     setError(null);
     try {
       const res = await fetch("/api/sales/backfill", { method: "POST" });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || "Falha na carga inicial");
+        setBackfilling(false);
+        setError(data.error || "Falha ao iniciar a carga inicial");
         return;
       }
-      alert(
-        `Carga concluída: ${data.orders_upserted} pedido(s), ${data.items_upserted} linha(s) de item.`
-      );
-      await load();
+      if (data.started === false) {
+        if (data.job_id) {
+          setBackfillJob({
+            id: data.job_id,
+            status: "running",
+            total: 0,
+            processed: 0,
+            ok: 0,
+            errors: 0,
+          });
+        } else {
+          setError(data.message || "Carga inicial já em andamento");
+          setBackfilling(false);
+        }
+        return;
+      }
+      if (data.job_id) {
+        setBackfillJob({
+          id: data.job_id,
+          status: "queued",
+          total: 0,
+          processed: 0,
+          ok: 0,
+          errors: 0,
+        });
+      }
     } catch {
-      setError("Erro de rede na carga inicial");
-    } finally {
       setBackfilling(false);
+      setError("Não foi possível iniciar a carga inicial. Verifique a conexão e tente novamente.");
     }
   };
 
@@ -769,8 +902,20 @@ function VendasPageContent() {
 
   const syncBadge = syncStatusBadge(syncState?.initial_backfill_status);
   const loaderOpen = loading || backfilling || syncingPending;
+  const backfillProgressLabel =
+    backfilling && backfillJob && backfillJob.total > 0
+      ? `${backfillJob.processed} de ${backfillJob.total} pedido(s)`
+      : backfilling && backfillJob && backfillJob.processed > 0
+        ? `${backfillJob.processed} pedido(s) processado(s)`
+        : null;
+
   const loaderMessages = backfilling
-    ? ["Carga inicial de vendas (30 dias)…", "Consultando pedidos pagos no Mercado Livre…", "Gravando pedidos e atualizando Preços…"]
+    ? [
+        "Carga inicial de vendas (30 dias) em segundo plano…",
+        backfillProgressLabel ?? "Consultando pedidos pagos no Mercado Livre…",
+        "Gravando pedidos e atualizando Preços…",
+        "Você pode manter esta aba aberta até concluir.",
+      ]
     : syncingPending
       ? ["Reprocessando webhooks orders_v2…", "Buscando pedidos no ML e gravando no banco…"]
       : ["Carregando vendas do banco…"];
@@ -881,6 +1026,20 @@ function VendasPageContent() {
             {error && (
               <div className="border-b border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
                 {error}
+              </div>
+            )}
+
+            {backfillSuccess && (
+              <div className="border-b border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-200">
+                {backfillSuccess}
+              </div>
+            )}
+
+            {backfilling && (
+              <div className="border-b border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-100">
+                Carga inicial em andamento
+                {backfillProgressLabel ? ` — ${backfillProgressLabel}` : ""}
+                . Não é necessário aguardar na mesma requisição; o progresso atualiza automaticamente.
               </div>
             )}
 

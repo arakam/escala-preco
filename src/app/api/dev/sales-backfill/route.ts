@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
+import { createJob, getActiveJob } from "@/lib/jobs";
 import { isDevEnvironment } from "@/lib/dev-only";
-import { runSalesBackfillForAccount } from "@/lib/mercadolivre/orders-store";
+import { kickSalesBackfillJob } from "@/lib/mercadolivre/schedule-sales-backfill";
 import { NextResponse } from "next/server";
 
 /**
@@ -31,22 +31,12 @@ export async function POST() {
     return NextResponse.json({ error: "Conta ML não encontrada" }, { status: 404 });
   }
 
-  const service = createServiceClient();
-  try {
-    const result = await runSalesBackfillForAccount(
-      service,
-      account.id,
-      user.id,
-      account.ml_user_id as number
-    );
-    return NextResponse.json({
-      ok: true,
-      orders_upserted: result.ordersUpserted,
-      items_upserted: result.itemsUpserted,
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Erro na carga inicial";
-    console.error("[dev/sales-backfill]", e);
-    return NextResponse.json({ error: msg }, { status: 500 });
+  const active = await getActiveJob(supabase, account.id, "sales_backfill_30d");
+  if (active) {
+    return NextResponse.json({ started: false, job_id: active.id, message: "Já em andamento" });
   }
+
+  const { id: jobId } = await createJob(supabase, account.id, "sales_backfill_30d");
+  await kickSalesBackfillJob(jobId, account.id, user.id, account.ml_user_id as number);
+  return NextResponse.json({ started: true, job_id: jobId });
 }
