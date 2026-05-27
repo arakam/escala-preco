@@ -98,6 +98,67 @@ function competitivenessBadge(status: string | undefined): { label: string; clas
   }
 }
 
+function LinkStatusIcon({ linked }: { linked: boolean }) {
+  // SVG inline para evitar dependências e sem fetch extra
+  if (linked) {
+    return (
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        fill="none"
+        className="h-3.5 w-3.5 text-slate-400 dark:text-slate-300"
+      >
+        <path
+          d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0 0-7.07a5 5 0 0 0-7.07 0L10.5 5"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M14 11a5 5 0 0 0-7.07 0L5.5 12.5a5 5 0 0 0 0 7.07a5 5 0 0 0 7.07 0L13.5 19"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  // "link-2-off": mesmo ícone com barra diagonal
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      className="h-3.5 w-3.5 text-slate-400 dark:text-slate-300"
+    >
+      <path
+        d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0 0-7.07a5 5 0 0 0-7.07 0L10.5 5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 11a5 5 0 0 0-7.07 0L5.5 12.5a5 5 0 0 0 0 7.07a5 5 0 0 0 7.07 0L13.5 19"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3 3l18 18"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Mesmo padrão visual do badge de Competitividade (`inline-flex rounded px-2 py-0.5 text-xs font-medium`). */
 function mlPromotionsBadge(count: number): { label: string; className: string } {
   if (count <= 0) {
@@ -4331,6 +4392,7 @@ function PrecosPageContent() {
                         (() => {
                           const { primary, extraCount } = skuDisplayParts(listing.sku);
                           if (!primary) return <span className="text-fg-muted">—</span>;
+                          const linked = Boolean(listing.product_id);
                           return (
                         <span
                           role="button"
@@ -4350,6 +4412,12 @@ function PrecosPageContent() {
                                   +{extraCount}
                                 </span>
                               )}
+                              <span
+                                title={linked ? "Vinculado a produto" : "Sem vínculo com produto"}
+                                className="ml-0.5 inline-flex"
+                              >
+                                <LinkStatusIcon linked={linked} />
+                              </span>
                             </>
                           )}
                         </span>
