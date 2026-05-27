@@ -5,7 +5,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { extractVariationDimensions } from "@/lib/mercadolivre/item-dimensions";
 import type { MLVariationDetail } from "@/lib/mercadolivre/client";
-import { extractSkuFromMlRawJson, normalizeMlSku } from "@/lib/products/ml-sku";
+import { extractSkuFromMlListing, normalizeMlSku } from "@/lib/products/ml-sku";
 
 const PAGE_SIZE = 1000;
 
@@ -37,13 +37,17 @@ function positiveNum(v: unknown): number | null {
 
 function candidateFromItemRow(row: {
   title: string | null;
+  seller_custom_field: string | null;
   weight_kg: number | null;
   height_cm: number | null;
   width_cm: number | null;
   length_cm: number | null;
   raw_json: unknown;
 }): CatalogCandidate | null {
-  const sku = extractSkuFromMlRawJson(row.raw_json);
+  const sku = extractSkuFromMlListing({
+    rawJson: row.raw_json,
+    sellerCustomField: row.seller_custom_field,
+  });
   const weight = positiveNum(row.weight_kg);
   const height = positiveNum(row.height_cm);
   const width = positiveNum(row.width_cm);
@@ -61,9 +65,13 @@ function candidateFromItemRow(row: {
 
 function candidateFromVariationRow(row: {
   raw_json: unknown;
+  seller_custom_field: string | null;
   item_title: string | null;
 }): CatalogCandidate | null {
-  const sku = extractSkuFromMlRawJson(row.raw_json);
+  const sku = extractSkuFromMlListing({
+    rawJson: row.raw_json,
+    sellerCustomField: row.seller_custom_field,
+  });
   if (!sku) return null;
   const dims = extractVariationDimensions(row.raw_json as MLVariationDetail);
   const weight = positiveNum(dims.weight_kg);
@@ -123,7 +131,7 @@ export async function autoCreateProductsFromMlSync(
   for (;;) {
     let q = supabase
       .from("ml_items")
-      .select("item_id, title, weight_kg, height_cm, width_cm, length_cm, raw_json")
+      .select("item_id, title, seller_custom_field, weight_kg, height_cm, width_cm, length_cm, raw_json")
       .eq("account_id", accountId)
       .order("updated_at", { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -148,7 +156,7 @@ export async function autoCreateProductsFromMlSync(
   for (;;) {
     let q = supabase
       .from("ml_variations")
-      .select("item_id, raw_json")
+      .select("item_id, seller_custom_field, raw_json")
       .eq("account_id", accountId)
       .order("updated_at", { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -164,6 +172,7 @@ export async function autoCreateProductsFromMlSync(
       const itemId = row.item_id as string;
       const c = candidateFromVariationRow({
         raw_json: row.raw_json,
+        seller_custom_field: (row.seller_custom_field as string | null) ?? null,
         item_title: titleByItemId.get(itemId) ?? null,
       });
       if (c && !bySku.has(c.sku)) bySku.set(c.sku, c);

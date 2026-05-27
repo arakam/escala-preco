@@ -23,6 +23,7 @@ import { getLatestValidAccessToken, getValidAccessToken } from "./refresh";
 import { syncHeartbeatMs, syncLog, syncLogVerbose } from "./sync-log";
 import { createServiceClient } from "@/lib/supabase/service";
 import { upsertCategoryFeeReferenceFromSample } from "@/lib/pricing/ml-category-fee-reference";
+import { isMlPlaceholderSku } from "@/lib/products/ml-sku";
 import {
   getJobStatus,
   isActiveJobStatus,
@@ -76,7 +77,10 @@ function mapItemToRow(accountId: string, item: MLItemDetail) {
       : null,
     condition: item.condition ?? null,
     shipping_json: item.shipping != null ? (item.shipping as object) : null,
-    seller_custom_field: item.seller_custom_field ?? null,
+    seller_custom_field:
+      item.seller_custom_field?.trim() && !isMlPlaceholderSku(item.seller_custom_field)
+        ? item.seller_custom_field.trim()
+        : null,
     has_variations: hasVariations,
     user_product_id: item.user_product_id ?? null,
     family_id: item.family_id ?? null,
@@ -111,20 +115,24 @@ function mapVariationToRow(
   itemId: string,
   v: MLVariationDetail
 ) {
-  // Extrair SKU do array attributes (onde fica SELLER_SKU nas variações)
   let skuFromAttributes: string | null = null;
   if (Array.isArray(v.attributes)) {
     const skuAttr = v.attributes.find((a) => a.id === "SELLER_SKU");
-    if (skuAttr?.value_name) {
+    if (skuAttr?.value_name && !isMlPlaceholderSku(skuAttr.value_name)) {
       skuFromAttributes = skuAttr.value_name;
     }
   }
-  
+  const sellerFieldRaw = v.seller_custom_field?.trim() || null;
+  const sellerCustomField =
+    sellerFieldRaw && !isMlPlaceholderSku(sellerFieldRaw)
+      ? sellerFieldRaw
+      : skuFromAttributes;
+
   return {
     account_id: accountId,
     item_id: itemId,
     variation_id: v.id,
-    seller_custom_field: v.seller_custom_field ?? skuFromAttributes ?? null,
+    seller_custom_field: sellerCustomField,
     attributes_json: Array.isArray(v.attribute_combinations) ? v.attribute_combinations : null,
     price: v.price ?? null,
     available_quantity: v.available_quantity ?? null,

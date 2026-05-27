@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { computeItemsFees, type PricingFeeInputItem } from "@/lib/pricing/compute-items-fees";
 import { calculateFullPricing } from "@/lib/pricing/full-net";
 import { loadPricingRulesSnapshot } from "@/lib/pricing/pricing-rules-cache";
-import { extractSkuFromMlRawJson } from "@/lib/products/ml-sku";
+import { extractSkuFromMlListing } from "@/lib/products/ml-sku";
 
 const VARIATION_ID_ITEM = -1;
 
@@ -268,11 +268,11 @@ function variationDbRowToListingCtx(
   const p = Array.isArray(prod) ? prod[0] : prod;
   const productSku = p && typeof p.sku === "string" ? p.sku : null;
   const sku =
-    extractSkuFromMlRawJson(raw.raw_json) ??
-    (raw.seller_custom_field != null && String(raw.seller_custom_field).trim()
-      ? String(raw.seller_custom_field).trim()
-      : null) ??
-    productSku;
+    extractSkuFromMlListing({
+      rawJson: raw.raw_json,
+      sellerCustomField:
+        raw.seller_custom_field != null ? String(raw.seller_custom_field) : null,
+    }) ?? productSku;
   return {
     item_id: itemId,
     listing_type_id: null,

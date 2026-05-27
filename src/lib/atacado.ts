@@ -3,6 +3,8 @@
  * Serviço e validações para drafts de atacado.
  */
 
+import { extractSkuFromMlListing } from "@/lib/products/ml-sku";
+
 export interface Tier {
   min_qty: number;
   price: number;
@@ -185,18 +187,6 @@ export function productSkuFromJoin(products: unknown): string | null {
   return sku || null;
 }
 
-function extractSkuFromAttributes(attributes: unknown): string | null {
-  if (!Array.isArray(attributes)) return null;
-  const skuAttr = attributes.find(
-    (a: { id?: string }) => a?.id === "SELLER_SKU" || a?.id === "SKU" || a?.id === "CUSTOM_SKU"
-  );
-  if (skuAttr && typeof skuAttr === "object" && "value_name" in skuAttr) {
-    const v = (skuAttr as { value_name?: string }).value_name;
-    return v ? String(v).trim() : null;
-  }
-  return null;
-}
-
 /**
  * SKU exibido na tela de atacado: atributos ML → seller_custom_field → produto vinculado.
  * Alinhado à tela de Preços (`pricing-cache`).
@@ -210,23 +200,27 @@ export function resolveMlListingSku(opts: {
 }): string | null {
   const variationRaw = opts.variationRawJson as Record<string, unknown> | null | undefined;
   if (variationRaw) {
-    const fromVarAttrs = extractSkuFromAttributes(variationRaw.attributes);
-    if (fromVarAttrs) return fromVarAttrs;
-  }
-  const fromAttrsJson = extractSkuFromAttributes(opts.attributesJson);
-  if (fromAttrsJson) return fromAttrsJson;
-
-  const raw = opts.rawJson as Record<string, unknown> | null | undefined;
-  if (raw) {
-    const fromItemAttrs = extractSkuFromAttributes(raw.attributes);
-    if (fromItemAttrs) return fromItemAttrs;
-    if (typeof raw.seller_custom_field === "string" && raw.seller_custom_field.trim()) {
-      return raw.seller_custom_field.trim();
-    }
+    const fromVar = extractSkuFromMlListing({
+      rawJson: variationRaw,
+      sellerCustomField: opts.sellerCustomField,
+    });
+    if (fromVar) return fromVar;
   }
 
-  const scf = opts.sellerCustomField;
-  if (scf != null && String(scf).trim() !== "") return String(scf).trim();
+  const attrsPayload =
+    opts.attributesJson != null
+      ? { attributes: opts.attributesJson }
+      : null;
+  if (attrsPayload) {
+    const fromAttrsJson = extractSkuFromMlListing({ rawJson: attrsPayload });
+    if (fromAttrsJson) return fromAttrsJson;
+  }
+
+  const fromItem = extractSkuFromMlListing({
+    rawJson: opts.rawJson,
+    sellerCustomField: opts.sellerCustomField,
+  });
+  if (fromItem) return fromItem;
 
   return opts.productSku?.trim() ? opts.productSku.trim() : null;
 }

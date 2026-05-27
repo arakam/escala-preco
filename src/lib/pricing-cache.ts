@@ -15,6 +15,7 @@ import { loadMlActivePromotionsByItemIdFromPromotionsCache } from "@/lib/mercado
 import { aggregateSales30dFromDb } from "@/lib/mercadolivre/orders-store";
 import { getSalesMap } from "@/lib/mercadolivre/sales";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
+import { extractSkuFromMlListing } from "@/lib/products/ml-sku";
 
 const VARIATION_ID_ITEM = -1;
 
@@ -27,16 +28,17 @@ function cacheRowId(accountId: string, itemId: string, variationId: number): str
 const PAGE_SIZE = 1000;
 const INSERT_BATCH = 500;
 
-function extractSku(rawJson: Record<string, unknown> | null, productSku: string | null): string | null {
-  if (!rawJson) return productSku ?? null;
-  const attrs = rawJson.attributes as Array<{ id?: string; value_name?: string }> | undefined;
-  if (Array.isArray(attrs)) {
-    const skuAttr = attrs.find((a) => a.id === "SELLER_SKU");
-    if (skuAttr?.value_name) return skuAttr.value_name;
-  }
-  if (typeof rawJson.seller_custom_field === "string" && rawJson.seller_custom_field.trim())
-    return rawJson.seller_custom_field.trim();
-  return productSku ?? null;
+function extractSku(
+  rawJson: Record<string, unknown> | null,
+  productSku: string | null,
+  sellerCustomField?: string | null
+): string | null {
+  const fromMl = extractSkuFromMlListing({
+    rawJson: rawJson ?? undefined,
+    sellerCustomField,
+  });
+  if (fromMl) return fromMl;
+  return productSku?.trim() ? productSku.trim() : null;
 }
 
 function resolvePlannedPriceForParentListing(
@@ -111,7 +113,11 @@ function mergeParentListingProductFields(
     const prod = parentRaw.products as Record<string, unknown> | Record<string, unknown>[] | null;
     const p = Array.isArray(prod) ? prod[0] : prod;
     const productSku = p && typeof p.sku === "string" ? p.sku : null;
-    const sku = extractSku((parentRaw.raw_json as Record<string, unknown>) || null, productSku);
+    const sku = extractSku(
+      (parentRaw.raw_json as Record<string, unknown>) || null,
+      productSku,
+      parentRaw.seller_custom_field as string | null | undefined
+    );
     return {
       product_id: parentPid,
       sku,
@@ -129,7 +135,11 @@ function mergeParentListingProductFields(
   if (variationRows.length === 0) {
     return {
       product_id: null,
-      sku: extractSku((parentRaw.raw_json as Record<string, unknown>) || null, null),
+      sku: extractSku(
+        (parentRaw.raw_json as Record<string, unknown>) || null,
+        null,
+        parentRaw.seller_custom_field as string | null | undefined
+      ),
       cost_price: null,
       ...mlDims,
       tax_percent: null,
@@ -143,7 +153,11 @@ function mergeParentListingProductFields(
       const prod = raw.products as Record<string, unknown> | Record<string, unknown>[] | null;
       const p = Array.isArray(prod) ? prod[0] : prod;
       const productSku = p && typeof p.sku === "string" ? p.sku : null;
-      const sku = extractSku((raw.raw_json as Record<string, unknown>) || null, productSku);
+      const sku = extractSku(
+        (raw.raw_json as Record<string, unknown>) || null,
+        productSku,
+        raw.seller_custom_field as string | null | undefined
+      );
       const pid = raw.product_id != null && raw.product_id !== "" ? String(raw.product_id) : null;
       return {
         variation_id: Number(raw.variation_id),
@@ -455,7 +469,11 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
     const prod = raw.products as Record<string, unknown> | Record<string, unknown>[] | null;
     const p = Array.isArray(prod) ? prod[0] : prod;
     const productSku = p && typeof p.sku === "string" ? p.sku : null;
-    const sku = extractSku((raw.raw_json as Record<string, unknown>) || null, productSku);
+    const sku = extractSku(
+      (raw.raw_json as Record<string, unknown>) || null,
+      productSku,
+      raw.seller_custom_field as string | null | undefined
+    );
     const currentPrice = Number(raw.price) || 0;
     const key = `${raw.item_id}:${VARIATION_ID_ITEM}`;
     const plannedPrice = plannedByKey.get(key) ?? currentPrice;
