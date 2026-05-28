@@ -2864,6 +2864,46 @@ function PrecosPageContent() {
     return sorted.slice(start, start + pageSize);
   }, [filteredListings, sortBy, clientSideFiltering, page, pageSize]);
 
+  const filteredSelectionKeys = useMemo(
+    () => new Set(filteredListings.map((l) => listingSelectionKey(l))),
+    [filteredListings]
+  );
+  const visibleSelectionKeys = useMemo(
+    () => sortedListings.map((l) => listingSelectionKey(l)),
+    [sortedListings]
+  );
+  const visibleSelectionIndexByKey = useMemo(() => {
+    const map = new Map<string, number>();
+    visibleSelectionKeys.forEach((key, index) => map.set(key, index));
+    return map;
+  }, [visibleSelectionKeys]);
+  const lastSelectedKeyRef = useRef<string | null>(null);
+  /** Shift é lido no mouseDown (antes do onChange do checkbox). */
+  const rowSelectShiftRef = useRef(false);
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Set<string>();
+      for (const key of prev) {
+        if (filteredSelectionKeys.has(key)) {
+          next.add(key);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [filteredSelectionKeys]);
+
+  useEffect(() => {
+    const last = lastSelectedKeyRef.current;
+    if (last && !filteredSelectionKeys.has(last)) {
+      lastSelectedKeyRef.current = null;
+    }
+  }, [filteredSelectionKeys]);
+
   const selectedCount = useMemo(() => selectedIds.size, [selectedIds]);
 
   const handleToggleSelectAll = useCallback(() => {
@@ -2885,17 +2925,35 @@ function PrecosPageContent() {
     });
   }, [selectedIds, sortedListings]);
 
-  const handleToggleSelectOne = useCallback((selectionKey: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(selectionKey)) {
-        next.delete(selectionKey);
-      } else {
-        next.add(selectionKey);
-      }
-      return next;
-    });
-  }, []);
+  const handleRowSelectChange = useCallback(
+    (selectionKey: string, shiftKey: boolean, checked: boolean) => {
+      const currentIndex = visibleSelectionIndexByKey.get(selectionKey);
+      const anchorKey = lastSelectedKeyRef.current;
+      const anchorIndex = anchorKey != null ? visibleSelectionIndexByKey.get(anchorKey) : undefined;
+
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+
+        if (shiftKey && currentIndex != null && anchorIndex != null && anchorKey !== selectionKey) {
+          const [start, end] =
+            currentIndex < anchorIndex ? [currentIndex, anchorIndex] : [anchorIndex, currentIndex];
+          for (let i = start; i <= end; i++) {
+            const key = visibleSelectionKeys[i];
+            if (key) next.add(key);
+          }
+        } else if (checked) {
+          next.add(selectionKey);
+        } else {
+          next.delete(selectionKey);
+        }
+
+        return next;
+      });
+
+      lastSelectedKeyRef.current = selectionKey;
+    },
+    [visibleSelectionIndexByKey, visibleSelectionKeys]
+  );
 
   const handleOpenCampaign = useCallback(() => {
     const selectedListings = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
@@ -4568,7 +4626,16 @@ function PrecosPageContent() {
                         type="checkbox"
                         className="rounded border-gray-300"
                         checked={isSelected}
-                        onChange={() => handleToggleSelectOne(listingSelectionKey(listing))}
+                        onMouseDown={(e) => {
+                          rowSelectShiftRef.current = e.shiftKey;
+                        }}
+                        onChange={(e) => {
+                          handleRowSelectChange(
+                            listingSelectionKey(listing),
+                            rowSelectShiftRef.current,
+                            e.target.checked
+                          );
+                        }}
                       />
                     </td>
                     <td
