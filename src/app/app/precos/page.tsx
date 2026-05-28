@@ -18,6 +18,11 @@ import {
   isValidMlSellerCampaignName,
   ML_SELLER_CAMPAIGN_NAME_HINT,
 } from "@/lib/mercadolivre/campaign-name";
+import {
+  STOCK_COMPARE_OPS,
+  stockCompareLabel,
+  type StockCompareOp,
+} from "@/lib/mercadolivre/item-tags";
 import { splitMlActivePromotionsCell } from "@/lib/mercadolivre/seller-promotions-item";
 import type { ProductTag } from "@/lib/db/types";
 import {
@@ -1074,9 +1079,11 @@ function PrecosPageContent() {
   const [reputationLoading, setReputationLoading] = useState(true);
   const [precosTab, setPrecosTab] = useState<"calculadora" | "como-funciona">("calculadora");
   const [saveMessage, setSaveMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
-  /** Filtro por % de lucro: "" = todos, "high" = >20%, "medium" = 10-20%, "low" = 0-10%, "negative" = ≤0% */
-  const [profitFilter, setProfitFilter] = useState<"" | "high" | "medium" | "low" | "negative">("");
-  const [draftProfitFilter, setDraftProfitFilter] = useState<"" | "high" | "medium" | "low" | "negative">("");
+  /** Filtro por lucratividade (%): condição + quantidade, no mesmo padrão de Vendidos. */
+  const [profitOpFilter, setProfitOpFilter] = useState<StockCompareOp | "">("");
+  const [profitQtyFilter, setProfitQtyFilter] = useState("");
+  const [draftProfitOpFilter, setDraftProfitOpFilter] = useState<StockCompareOp | "">("");
+  const [draftProfitQtyFilter, setDraftProfitQtyFilter] = useState("");
   /** Quantidade vendida (soma das quantidades nos pedidos) últimos 30 dias por item_id */
   /** Número de pedidos (pagados) que contêm o item nos últimos 30 dias por item_id */
   const [ordersData, setOrdersData] = useState<Record<string, number>>({});
@@ -1093,11 +1100,20 @@ function PrecosPageContent() {
   /** Há linhas com `product_id` em toda a conta (API); evita aviso “vincule” na página atual quando o filtro é só não vinculados. */
   const [accountHasLinkedProducts, setAccountHasLinkedProducts] = useState<boolean | null>(null);
   const [refreshingItemId, setRefreshingItemId] = useState<string | null>(null);
-  /** Ordenação: "" = padrão; orders_* = por quantidade de vendas (pedidos pagos) nos últimos 30 dias */
-  const [sortBy, setSortBy] = useState<"" | "orders_desc" | "orders_asc">("");
-  /** Mostrar somente itens com vendas nos últimos 30 dias */
-  const [onlyWithSales30d, setOnlyWithSales30d] = useState(false);
-  const [draftOnlyWithSales30d, setDraftOnlyWithSales30d] = useState(false);
+  /** Ordenação ativa na tabela */
+  const [sortBy, setSortBy] = useState<
+    "" | "orders_desc" | "orders_asc" | "cost_desc" | "cost_asc" | "profit_desc" | "profit_asc"
+  >("");
+  /** Filtro por vendas 30d (pedidos pagos): condição + quantidade. */
+  const [sales30dOpFilter, setSales30dOpFilter] = useState<StockCompareOp | "">("");
+  const [sales30dQtyFilter, setSales30dQtyFilter] = useState("");
+  const [draftSales30dOpFilter, setDraftSales30dOpFilter] = useState<StockCompareOp | "">("");
+  const [draftSales30dQtyFilter, setDraftSales30dQtyFilter] = useState("");
+  /** Filtro por custo (R$): condição + quantidade. */
+  const [costOpFilter, setCostOpFilter] = useState<StockCompareOp | "">("");
+  const [costQtyFilter, setCostQtyFilter] = useState("");
+  const [draftCostOpFilter, setDraftCostOpFilter] = useState<StockCompareOp | "">("");
+  const [draftCostQtyFilter, setDraftCostQtyFilter] = useState("");
   /** Promoção (planejada) igual ao preço atual do anúncio — sem desconto em relação ao ML */
   const [semPromocao, setSemPromocao] = useState(false);
   const [draftSemPromocao, setDraftSemPromocao] = useState(false);
@@ -1210,8 +1226,19 @@ function PrecosPageContent() {
     }
   }, []);
 
-  /** Com filtro de lucro, "só com vendas 30d", "sem promoção" ou "fora do mín. 5% ML" ativo, busca mais itens e aplica filtros no cliente (paginação no cliente) */
-  const clientSideFiltering = !!(profitFilter || onlyWithSales30d || semPromocao || foraDescontoMin5Ml || semPromoMlAtiva);
+  /** Com filtros/ordenações locais, busca mais itens e aplica paginação no cliente. */
+  const clientSideFiltering = !!(
+    profitOpFilter ||
+    sales30dOpFilter ||
+    costOpFilter ||
+    semPromocao ||
+    foraDescontoMin5Ml ||
+    semPromoMlAtiva ||
+    sortBy === "cost_desc" ||
+    sortBy === "cost_asc" ||
+    sortBy === "profit_desc" ||
+    sortBy === "profit_asc"
+  );
   const MAX_CLIENT_SIDE_LOAD = 10000;
   const DEFAULT_CLIENT_SIDE_LOAD = 2000;
   const limitForRequest = clientSideFiltering
@@ -1236,7 +1263,6 @@ function PrecosPageContent() {
     if (sortBy === "orders_desc" || sortBy === "orders_asc") params.set("order_by", sortBy);
     if (skuFilter) params.set("sku", skuFilter);
     if (supplierFilter) params.set("supplier", supplierFilter);
-    if (onlyWithSales30d) params.set("only_with_sales", "1");
     if (filterTagIds.length > 0) params.set("tags", filterTagIds.join(","));
 
     try {
@@ -1318,7 +1344,7 @@ function PrecosPageContent() {
       setLoading(false);
       setListingsRefetching(false);
     }
-  }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, supplierFilter, onlyWithSales30d, filterTagIds]);
+  }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, supplierFilter, filterTagIds]);
 
   const fetchRefJob = useCallback(
     async (jobId: string) => {
@@ -1454,7 +1480,7 @@ function PrecosPageContent() {
 
   useEffect(() => {
     setPage(1);
-  }, [profitFilter, onlyWithSales30d, semPromocao, foraDescontoMin5Ml, semPromoMlAtiva]);
+  }, [profitOpFilter, sales30dOpFilter, costOpFilter, semPromocao, foraDescontoMin5Ml, semPromoMlAtiva]);
 
   /** Dados sempre vêm do cache (listings já inclui orders_30d). Não busca vendas em separado. */
 
@@ -2341,11 +2367,15 @@ function PrecosPageContent() {
     setDraftStatusFilter(statusFilter);
     setDraftLinkFilter(linkFilter);
     setDraftFilterTagIds(filterTagIds);
-    setDraftOnlyWithSales30d(onlyWithSales30d);
+    setDraftSales30dOpFilter(sales30dOpFilter);
+    setDraftSales30dQtyFilter(sales30dQtyFilter);
+    setDraftCostOpFilter(costOpFilter);
+    setDraftCostQtyFilter(costQtyFilter);
     setDraftSemPromocao(semPromocao);
     setDraftForaDescontoMin5Ml(foraDescontoMin5Ml);
     setDraftSemPromoMlAtiva(semPromoMlAtiva);
-    setDraftProfitFilter(profitFilter);
+    setDraftProfitOpFilter(profitOpFilter);
+    setDraftProfitQtyFilter(profitQtyFilter);
   }, [
     search,
     skuFilter,
@@ -2353,11 +2383,15 @@ function PrecosPageContent() {
     statusFilter,
     linkFilter,
     filterTagIds,
-    onlyWithSales30d,
+    sales30dOpFilter,
+    sales30dQtyFilter,
+    costOpFilter,
+    costQtyFilter,
     semPromocao,
     foraDescontoMin5Ml,
     semPromoMlAtiva,
-    profitFilter,
+    profitOpFilter,
+    profitQtyFilter,
   ]);
 
   const handleFiltersApply = useCallback(
@@ -2369,11 +2403,15 @@ function PrecosPageContent() {
       setStatusFilter(draftStatusFilter);
       setLinkFilter(draftLinkFilter);
       setFilterTagIds(draftFilterTagIds);
-      setOnlyWithSales30d(draftOnlyWithSales30d);
+      setSales30dOpFilter(draftSales30dOpFilter);
+      setSales30dQtyFilter(draftSales30dQtyFilter.trim());
+      setCostOpFilter(draftCostOpFilter);
+      setCostQtyFilter(draftCostQtyFilter.trim());
       setSemPromocao(draftSemPromocao);
       setForaDescontoMin5Ml(draftForaDescontoMin5Ml);
       setSemPromoMlAtiva(draftSemPromoMlAtiva);
-      setProfitFilter(draftProfitFilter);
+      setProfitOpFilter(draftProfitOpFilter);
+      setProfitQtyFilter(draftProfitQtyFilter.trim());
       setPage(1);
       setFiltersModalOpen(false);
     },
@@ -2384,11 +2422,15 @@ function PrecosPageContent() {
       draftStatusFilter,
       draftLinkFilter,
       draftFilterTagIds,
-      draftOnlyWithSales30d,
+      draftSales30dOpFilter,
+      draftSales30dQtyFilter,
+      draftCostOpFilter,
+      draftCostQtyFilter,
       draftSemPromocao,
       draftForaDescontoMin5Ml,
       draftSemPromoMlAtiva,
-      draftProfitFilter,
+      draftProfitOpFilter,
+      draftProfitQtyFilter,
     ]
   );
 
@@ -2420,16 +2462,33 @@ function PrecosPageContent() {
     }
     if (linkFilter === "linked") labels.push("Vínculo: só vinculados");
     if (linkFilter === "unlinked") labels.push("Vínculo: só não vinculados");
-    if (onlyWithSales30d) labels.push("Só com vendas (30d)");
+    if (sales30dOpFilter) {
+      const qty = parseInt(sales30dQtyFilter.trim(), 10);
+      if (Number.isFinite(qty) && qty >= 0) {
+        labels.push(`Vendas 30d ${stockCompareLabel(sales30dOpFilter)} ${qty}`);
+      }
+    }
+    if (costOpFilter) {
+      const qty = Number(costQtyFilter.trim().replace(",", "."));
+      if (Number.isFinite(qty) && qty >= 0) {
+        labels.push(`Custo ${stockCompareLabel(costOpFilter)} ${qty.toFixed(2)}`);
+      }
+    }
     if (semPromocao) labels.push("Sem promoção");
     if (foraDescontoMin5Ml) labels.push("Desconto < 5% (promo ML)");
     if (semPromoMlAtiva) labels.push("Sem Promo ML ativa");
-    if (profitFilter === "high") labels.push("Lucro: > 20%");
-    if (profitFilter === "medium") labels.push("Lucro: 10–20%");
-    if (profitFilter === "low") labels.push("Lucro: 0–10%");
-    if (profitFilter === "negative") labels.push("Lucro: prejuízo");
+    if (profitOpFilter) {
+      const qty = parseInt(profitQtyFilter.trim(), 10);
+      if (Number.isFinite(qty) && qty >= 0) {
+        labels.push(`Lucratividade ${stockCompareLabel(profitOpFilter)} ${qty}%`);
+      }
+    }
     if (sortBy === "orders_desc") labels.push("Ordenação: vendas ↓");
     if (sortBy === "orders_asc") labels.push("Ordenação: vendas ↑");
+    if (sortBy === "cost_desc") labels.push("Ordenação: custo ↓");
+    if (sortBy === "cost_asc") labels.push("Ordenação: custo ↑");
+    if (sortBy === "profit_desc") labels.push("Ordenação: lucro ↓");
+    if (sortBy === "profit_asc") labels.push("Ordenação: lucro ↑");
     for (const id of filterTagIds) {
       const name = tagNameById.get(id);
       if (name) labels.push(`Tag: ${name}`);
@@ -2441,11 +2500,15 @@ function PrecosPageContent() {
     supplierFilter,
     statusFilter,
     linkFilter,
-    onlyWithSales30d,
+    sales30dOpFilter,
+    sales30dQtyFilter,
+    costOpFilter,
+    costQtyFilter,
     semPromocao,
     foraDescontoMin5Ml,
     semPromoMlAtiva,
-    profitFilter,
+    profitOpFilter,
+    profitQtyFilter,
     sortBy,
     filterTagIds,
     tagNameById,
@@ -2464,16 +2527,24 @@ function PrecosPageContent() {
     setDraftStatusFilter("");
     setLinkFilter("all");
     setDraftLinkFilter("all");
-    setOnlyWithSales30d(false);
-    setDraftOnlyWithSales30d(false);
+    setSales30dOpFilter("");
+    setDraftSales30dOpFilter("");
+    setSales30dQtyFilter("");
+    setDraftSales30dQtyFilter("");
+    setCostOpFilter("");
+    setDraftCostOpFilter("");
+    setCostQtyFilter("");
+    setDraftCostQtyFilter("");
     setSemPromocao(false);
     setDraftSemPromocao(false);
     setForaDescontoMin5Ml(false);
     setDraftForaDescontoMin5Ml(false);
     setSemPromoMlAtiva(false);
     setDraftSemPromoMlAtiva(false);
-    setProfitFilter("");
-    setDraftProfitFilter("");
+    setProfitOpFilter("");
+    setDraftProfitOpFilter("");
+    setProfitQtyFilter("");
+    setDraftProfitQtyFilter("");
     setSortBy("");
     setPage(1);
     setFiltersModalOpen(false);
@@ -2545,23 +2616,30 @@ function PrecosPageContent() {
   const filteredListings = useMemo(() => {
     let base = listings;
 
-    if (profitFilter) {
+    if (profitOpFilter) {
+      const qty = parseInt(profitQtyFilter.trim(), 10);
+      if (!(Number.isFinite(qty) && qty >= 0)) {
+        base = [];
+      } else {
       base = base.filter((listing) => {
         const pct = getProfitPercent(listing);
         if (pct == null) return false;
-        switch (profitFilter) {
-          case "high":
-            return pct > 20;
-          case "medium":
-            return pct > 10 && pct <= 20;
-          case "low":
-            return pct > 0 && pct <= 10;
-          case "negative":
-            return pct <= 0;
+        switch (profitOpFilter) {
+          case "gt":
+            return pct > qty;
+          case "gte":
+            return pct >= qty;
+          case "lt":
+            return pct < qty;
+          case "lte":
+            return pct <= qty;
+          case "eq":
+            return pct === qty;
           default:
             return true;
         }
       });
+    }
     }
 
     const skuTerm = skuFilter.trim().toLowerCase();
@@ -2569,8 +2647,54 @@ function PrecosPageContent() {
       base = base.filter((listing) => (listing.sku ?? "").toLowerCase().includes(skuTerm));
     }
 
-    if (onlyWithSales30d) {
-      base = base.filter((listing) => (ordersData[listing.item_id] ?? 0) > 0);
+    if (sales30dOpFilter) {
+      const qty = parseInt(sales30dQtyFilter.trim(), 10);
+      if (!(Number.isFinite(qty) && qty >= 0)) {
+        base = [];
+      } else {
+        base = base.filter((listing) => {
+          const sales30d = ordersData[listing.item_id] ?? 0;
+          switch (sales30dOpFilter) {
+            case "gt":
+              return sales30d > qty;
+            case "gte":
+              return sales30d >= qty;
+            case "lt":
+              return sales30d < qty;
+            case "lte":
+              return sales30d <= qty;
+            case "eq":
+              return sales30d === qty;
+            default:
+              return true;
+          }
+        });
+      }
+    }
+    if (costOpFilter) {
+      const qty = Number(costQtyFilter.trim().replace(",", "."));
+      if (!(Number.isFinite(qty) && qty >= 0)) {
+        base = [];
+      } else {
+        base = base.filter((listing) => {
+          const cost = listing.cost_price;
+          if (cost == null) return false;
+          switch (costOpFilter) {
+            case "gt":
+              return cost > qty;
+            case "gte":
+              return cost >= qty;
+            case "lt":
+              return cost < qty;
+            case "lte":
+              return cost <= qty;
+            case "eq":
+              return cost === qty;
+            default:
+              return true;
+          }
+        });
+      }
     }
 
     if (semPromocao) {
@@ -2598,10 +2722,14 @@ function PrecosPageContent() {
     return base;
   }, [
     listings,
-    profitFilter,
+    profitOpFilter,
+    profitQtyFilter,
     skuFilter,
     getProfitPercent,
-    onlyWithSales30d,
+    sales30dOpFilter,
+    sales30dQtyFilter,
+    costOpFilter,
+    costQtyFilter,
     ordersData,
     semPromocao,
     foraDescontoMin5Ml,
@@ -2705,13 +2833,36 @@ function PrecosPageContent() {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [globalActionsOpen]);
 
-  /** Com filtros no cliente (lucro, vendas 30d, sem promoção, fora do mínimo 5% ML), mostra só a fatia da página atual; senão mostra todos da página */
+  /** Com filtros/ordenações locais, mostra só a fatia da página atual; senão mostra todos da página. */
   const sortedListings = useMemo(() => {
-    if (!clientSideFiltering) return filteredListings;
-    if (isAllPageSize(pageSize)) return filteredListings;
+    const sorted = [...filteredListings];
+    if (sortBy === "cost_desc" || sortBy === "cost_asc") {
+      const dir = sortBy === "cost_desc" ? -1 : 1;
+      sorted.sort((a, b) => {
+        const av = a.cost_price;
+        const bv = b.cost_price;
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return (av - bv) * dir;
+      });
+    } else if (sortBy === "profit_desc" || sortBy === "profit_asc") {
+      const dir = sortBy === "profit_desc" ? -1 : 1;
+      sorted.sort((a, b) => {
+        const av = a.calculated && a.cost_price != null ? a.calculated.net_amount - a.cost_price : null;
+        const bv = b.calculated && b.cost_price != null ? b.calculated.net_amount - b.cost_price : null;
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return (av - bv) * dir;
+      });
+    }
+
+    if (!clientSideFiltering) return sorted;
+    if (isAllPageSize(pageSize)) return sorted;
     const start = (page - 1) * pageSize;
-    return filteredListings.slice(start, start + pageSize);
-  }, [filteredListings, clientSideFiltering, page, pageSize]);
+    return sorted.slice(start, start + pageSize);
+  }, [filteredListings, sortBy, clientSideFiltering, page, pageSize]);
 
   const selectedCount = useMemo(() => selectedIds.size, [selectedIds]);
 
@@ -3116,11 +3267,14 @@ function PrecosPageContent() {
     );
   }
 
-  function renderPricingHeaderMenu(colIndex: number, opts?: { sortable?: boolean }) {
+  function renderPricingHeaderMenu(
+    colIndex: number,
+    opts?: { sortMode?: "orders" | "cost" | "profit" }
+  ) {
     if (headerMenuColumn !== colIndex) return null;
     return (
       <div className="btn-dropdown-menu left-1 top-full z-50 mt-1 w-52 font-normal normal-case tracking-normal shadow-xl">
-        {opts?.sortable && (
+        {opts?.sortMode === "orders" && (
           <>
             <button
               type="button"
@@ -3157,10 +3311,84 @@ function PrecosPageContent() {
             </button>
           </>
         )}
+        {opts?.sortMode === "cost" && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setSortBy("cost_desc");
+                setPage(1);
+                setHeaderMenuColumn(null);
+              }}
+              className="btn-dropdown-item"
+            >
+              Maior custo primeiro
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSortBy("cost_asc");
+                setPage(1);
+                setHeaderMenuColumn(null);
+              }}
+              className="btn-dropdown-item"
+            >
+              Menor custo primeiro
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSortBy("");
+                setPage(1);
+                setHeaderMenuColumn(null);
+              }}
+              className="btn-dropdown-item"
+            >
+              Sem ordenação por custo
+            </button>
+          </>
+        )}
+        {opts?.sortMode === "profit" && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setSortBy("profit_desc");
+                setPage(1);
+                setHeaderMenuColumn(null);
+              }}
+              className="btn-dropdown-item"
+            >
+              Maior lucro primeiro
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSortBy("profit_asc");
+                setPage(1);
+                setHeaderMenuColumn(null);
+              }}
+              className="btn-dropdown-item"
+            >
+              Menor lucro primeiro
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSortBy("");
+                setPage(1);
+                setHeaderMenuColumn(null);
+              }}
+              className="btn-dropdown-item"
+            >
+              Sem ordenação por lucro
+            </button>
+          </>
+        )}
         <button
           type="button"
           onClick={() => toggleStickyColumn(colIndex)}
-          className={`btn-dropdown-item ${opts?.sortable ? "border-t border-slate-100 dark:border-slate-600" : ""}`}
+          className={`btn-dropdown-item ${opts?.sortMode ? "border-t border-slate-100 dark:border-slate-600" : ""}`}
         >
           {stickyColumns.has(colIndex) ? "Descongelar coluna" : "Congelar coluna"}
         </button>
@@ -3171,7 +3399,12 @@ function PrecosPageContent() {
   function renderPricingColumnHeader(
     colIndex: number,
     label: ReactNode,
-    options?: { align?: "left" | "right"; sortable?: boolean; title?: string; thExtraClass?: string }
+    options?: {
+      align?: "left" | "right";
+      sortMode?: "orders" | "cost" | "profit";
+      title?: string;
+      thExtraClass?: string;
+    }
   ) {
     const align = options?.align ?? "left";
     const stickyClass = stickyColumns.has(colIndex) ? "sticky-col" : "";
@@ -3205,7 +3438,7 @@ function PrecosPageContent() {
           </span>
           <span className="shrink-0 text-[10px] leading-none text-white/65">▾</span>
         </button>
-        {renderPricingHeaderMenu(colIndex, { sortable: options?.sortable })}
+        {renderPricingHeaderMenu(colIndex, { sortMode: options?.sortMode })}
       </th>
     );
   }
@@ -4238,11 +4471,19 @@ function PrecosPageContent() {
                   </>,
                   {
                     align: "right",
-                    sortable: true,
+                    sortMode: "orders",
                     title: "Pedidos pagos nos últimos 30 dias. Ordene pelo menu ▾.",
                   }
                 )}
-                {renderPricingColumnHeader(6, "Custo", { align: "right" })}
+                {renderPricingColumnHeader(
+                  6,
+                  <>
+                    Custo
+                    {sortBy === "cost_desc" && " ↓"}
+                    {sortBy === "cost_asc" && " ↑"}
+                  </>,
+                  { align: "right", sortMode: "cost" }
+                )}
                 {renderPricingColumnHeader(7, "Promo ML", {
                   align: "right",
                   title:
@@ -4263,7 +4504,15 @@ function PrecosPageContent() {
                   align: "right",
                   title: "Valor bruto (Promoção) − taxa ML − frete",
                 })}
-                {renderPricingColumnHeader(13, "Lucro", { align: "right" })}
+                {renderPricingColumnHeader(
+                  13,
+                  <>
+                    Lucro
+                    {sortBy === "profit_desc" && " ↓"}
+                    {sortBy === "profit_asc" && " ↑"}
+                  </>,
+                  { align: "right", sortMode: "profit" }
+                )}
                 {renderPricingColumnHeader(14, "Taxa ML", {
                   align: "right",
                   title:
@@ -4725,7 +4974,7 @@ function PrecosPageContent() {
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-800">Filtros</h2>
-                <p className="text-xs text-slate-500">Refine busca, status, vínculo, fornecedor, tags de produto e lucratividade.</p>
+                <p className="text-xs text-slate-500">Refine busca, status, vínculo, fornecedor, tags, vendas 30d, custo e lucratividade.</p>
               </div>
               <button
                 type="button"
@@ -4827,15 +5076,110 @@ function PrecosPageContent() {
                   </div>
                 </div>
               )}
-              <label className="flex cursor-pointer items-center gap-2" title="Exibe apenas anúncios com pelo menos 1 venda nos últimos 30 dias">
-                <input
-                  type="checkbox"
-                  checked={draftOnlyWithSales30d}
-                  onChange={(e) => setDraftOnlyWithSales30d(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
-                />
-                <span className="text-xs text-slate-700">Só com vendas (30d)</span>
-              </label>
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Vendas 30d
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="precos-sales30d-op"
+                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                    >
+                      Condição
+                    </label>
+                    <select
+                      id="precos-sales30d-op"
+                      value={draftSales30dOpFilter}
+                      onChange={(e) => setDraftSales30dOpFilter(e.target.value as StockCompareOp | "")}
+                      className="input w-full"
+                    >
+                      <option value="">Sem filtro de vendas 30d</option>
+                      {STOCK_COMPARE_OPS.map((op) => (
+                        <option key={op} value={op}>
+                          {stockCompareLabel(op)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="precos-sales30d-qty"
+                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                    >
+                      Quantidade
+                    </label>
+                    <input
+                      id="precos-sales30d-qty"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={draftSales30dQtyFilter}
+                      onChange={(e) => setDraftSales30dQtyFilter(e.target.value)}
+                      disabled={!draftSales30dOpFilter}
+                      placeholder={draftSales30dOpFilter ? "Ex.: 1" : "Escolha a condição"}
+                      className="input w-full disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  </div>
+                  {draftSales30dOpFilter && draftSales30dQtyFilter.trim() === "" && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2">
+                      Informe a quantidade para aplicar o filtro de vendas 30d.
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Custo
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="precos-cost-op"
+                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                    >
+                      Condição
+                    </label>
+                    <select
+                      id="precos-cost-op"
+                      value={draftCostOpFilter}
+                      onChange={(e) => setDraftCostOpFilter(e.target.value as StockCompareOp | "")}
+                      className="input w-full"
+                    >
+                      <option value="">Sem filtro de custo</option>
+                      {STOCK_COMPARE_OPS.map((op) => (
+                        <option key={op} value={op}>
+                          {stockCompareLabel(op)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="precos-cost-qty"
+                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                    >
+                      Quantidade (R$)
+                    </label>
+                    <input
+                      id="precos-cost-qty"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={draftCostQtyFilter}
+                      onChange={(e) => setDraftCostQtyFilter(e.target.value)}
+                      disabled={!draftCostOpFilter}
+                      placeholder={draftCostOpFilter ? "Ex.: 50,00" : "Escolha a condição"}
+                      className="input w-full disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  </div>
+                  {draftCostOpFilter && draftCostQtyFilter.trim() === "" && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2">
+                      Informe a quantidade para aplicar o filtro de custo.
+                    </p>
+                  )}
+                </div>
+              </div>
               <label
                 className="flex cursor-pointer items-center gap-2"
                 title="Promoção planejada igual ao preço atual no Mercado Livre (sem desconto em relação ao anúncio)"
@@ -4873,28 +5217,55 @@ function PrecosPageContent() {
                 <span className="text-xs text-slate-700">Sem Promo ML ativa</span>
               </label>
               <div>
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Lucratividade</span>
-                <div className="flex flex-wrap gap-1">
-                  {(
-                    [
-                      { value: "", label: "Todos" },
-                      { value: "high", label: "> 20%" },
-                      { value: "medium", label: "10–20%" },
-                      { value: "low", label: "0–10%" },
-                      { value: "negative", label: "Prejuízo" },
-                    ]
-                  ).map(({ value, label }) => (
-                    <button
-                      key={value || "all"}
-                      type="button"
-                      onClick={() =>
-                        setDraftProfitFilter(value as "" | "high" | "medium" | "low" | "negative")
-                      }
-                      className={`btn btn-mini ${draftProfitFilter === value ? "btn-primary" : "btn-outline-secondary"}`}
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Lucratividade
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="precos-profit-op"
+                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
                     >
-                      {label}
-                    </button>
-                  ))}
+                      Condição
+                    </label>
+                    <select
+                      id="precos-profit-op"
+                      value={draftProfitOpFilter}
+                      onChange={(e) => setDraftProfitOpFilter(e.target.value as StockCompareOp | "")}
+                      className="input w-full"
+                    >
+                      <option value="">Sem filtro de lucratividade</option>
+                      {STOCK_COMPARE_OPS.map((op) => (
+                        <option key={op} value={op}>
+                          {stockCompareLabel(op)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="precos-profit-qty"
+                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                    >
+                      Quantidade (%)
+                    </label>
+                    <input
+                      id="precos-profit-qty"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={draftProfitQtyFilter}
+                      onChange={(e) => setDraftProfitQtyFilter(e.target.value)}
+                      disabled={!draftProfitOpFilter}
+                      placeholder={draftProfitOpFilter ? "Ex.: 20" : "Escolha a condição"}
+                      className="input w-full disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  </div>
+                  {draftProfitOpFilter && draftProfitQtyFilter.trim() === "" && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2">
+                      Informe a quantidade para aplicar o filtro de lucratividade.
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">

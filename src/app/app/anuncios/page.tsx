@@ -58,11 +58,16 @@ const LISTING_TYPE_FILTER_IDS = Object.keys(LISTING_TYPE_LABELS).sort((a, b) =>
   formatListingTypeLabel(a).localeCompare(formatListingTypeLabel(b), "pt-BR")
 );
 
+function isFullListing(item: ItemRow): boolean {
+  return parseMlItemTags(item.tags_json).includes("fulfillment");
+}
+
 const COLUMN_ORDER: ColumnKey[] = [
   "image",
   "item_id",
   "title",
   "listing_type",
+  "full",
   "category",
   "status",
   "price",
@@ -82,6 +87,7 @@ const COLUMN_WIDTHS: Record<ColumnKey, number> = {
   item_id: 120,
   title: 280,
   listing_type: 120,
+  full: 84,
   category: 140,
   status: 112,
   price: 108,
@@ -403,6 +409,7 @@ function AnunciosPageContent() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [listingTypeFilter, setListingTypeFilter] = useState("");
+  const [fullOnly, setFullOnly] = useState(false);
   const [mlbuOnly, setMlbuOnly] = useState(false);
   const [mlbuCodeFilter, setMlbuCodeFilter] = useState("");
   const [mlAlertFilter, setMlAlertFilter] = useState("");
@@ -413,6 +420,7 @@ function AnunciosPageContent() {
   const [searchInput, setSearchInput] = useState("");
   const [statusDraft, setStatusDraft] = useState("");
   const [listingTypeDraft, setListingTypeDraft] = useState("");
+  const [fullOnlyDraft, setFullOnlyDraft] = useState(false);
   const [mlbuOnlyDraft, setMlbuOnlyDraft] = useState(false);
   const [mlbuCodeDraft, setMlbuCodeDraft] = useState("");
   const [mlAlertDraft, setMlAlertDraft] = useState("");
@@ -549,6 +557,7 @@ function AnunciosPageContent() {
     if (search) params.set("search", search);
     if (statusFilter) params.set("status", statusFilter);
     if (listingTypeFilter) params.set("listing_type_id", listingTypeFilter);
+    if (fullOnly) params.set("full_only", "1");
     if (mlbuOnly) params.set("mlbu", "1");
     if (mlbuCodeFilter.trim()) params.set("mlbu_code", mlbuCodeFilter.trim());
     if (mlAlertFilter) params.set("ml_alert", mlAlertFilter);
@@ -580,6 +589,7 @@ function AnunciosPageContent() {
     search,
     statusFilter,
     listingTypeFilter,
+    fullOnly,
     mlbuOnly,
     mlbuCodeFilter,
     mlAlertFilter,
@@ -593,6 +603,7 @@ function AnunciosPageContent() {
     setSearchInput(search);
     setStatusDraft(statusFilter);
     setListingTypeDraft(listingTypeFilter);
+    setFullOnlyDraft(fullOnly);
     setMlbuOnlyDraft(mlbuOnly);
     setMlbuCodeDraft(mlbuCodeFilter);
     setMlAlertDraft(mlAlertFilter);
@@ -602,6 +613,7 @@ function AnunciosPageContent() {
     setSoldQtyDraft(soldQtyFilter);
   }, [
     listingTypeFilter,
+    fullOnly,
     mlAlertFilter,
     mlbuCodeFilter,
     mlbuOnly,
@@ -796,6 +808,7 @@ function AnunciosPageContent() {
     setSearch(searchInput.trim());
     setStatusFilter(statusDraft);
     setListingTypeFilter(listingTypeDraft);
+    setFullOnly(fullOnlyDraft);
     setMlbuOnly(mlbuOnlyDraft);
     setMlbuCodeFilter(mlbuCodeDraft.trim());
     setMlAlertFilter(mlAlertDraft);
@@ -818,6 +831,7 @@ function AnunciosPageContent() {
     if (listingTypeFilter) {
       filters.push(`Tipo: ${formatListingTypeLabel(listingTypeFilter)}`);
     }
+    if (fullOnly) filters.push("Somente Full");
     if (mlbuOnly) filters.push("Somente MLBU");
     if (mlbuCodeFilter.trim()) filters.push(`Cód. MLBU: ${mlbuCodeFilter.trim()}`);
     if (mlAlertFilter) {
@@ -839,6 +853,7 @@ function AnunciosPageContent() {
     return filters;
   }, [
     listingTypeFilter,
+    fullOnly,
     mlbuCodeFilter,
     mlbuOnly,
     mlAlertFilter,
@@ -857,6 +872,8 @@ function AnunciosPageContent() {
     setStatusDraft("");
     setListingTypeFilter("");
     setListingTypeDraft("");
+    setFullOnly(false);
+    setFullOnlyDraft(false);
     setMlbuOnly(false);
     setMlbuOnlyDraft(false);
     setMlbuCodeFilter("");
@@ -879,6 +896,7 @@ function AnunciosPageContent() {
       "MLB",
       "Título",
       "Tipo de anúncio",
+      "É Full",
       "Categoria",
       "Status",
       "Preço ML",
@@ -896,6 +914,7 @@ function AnunciosPageContent() {
       item.item_id,
       item.title ?? "",
       formatListingTypeLabel(item.listing_type_id) || (item.listing_type_id ?? ""),
+      isFullListing(item) ? "Sim" : "Não",
       item.category_id ?? "",
       formatMlItemStatusLabel(item.status),
       item.price != null ? Number(item.price).toFixed(2) : "",
@@ -1344,6 +1363,7 @@ function AnunciosPageContent() {
                   {renderColumnHeader("item_id", "MLB", "item_id")}
                   {renderColumnHeader("title", "Título", "title")}
                   {renderColumnHeader("listing_type", "Tipo de anúncio", "listing_type_id")}
+                  {renderColumnHeader("full", "Full")}
                   {renderColumnHeader("category", "Categoria", "category_id")}
                   {renderColumnHeader("status", "Status", "status")}
                   {renderColumnHeader("price", "Preço ML", "price", "whitespace-nowrap")}
@@ -1418,6 +1438,18 @@ function AnunciosPageContent() {
                         </span>
                       ) : (
                         <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
+                      )}
+                    </td>
+                    <td
+                      className={frozenCellClass("full", "p-2 text-xs text-slate-700 dark:text-slate-200")}
+                      style={frozenCellStyle("full")}
+                    >
+                      {isFullListing(item) ? (
+                        <span className="inline-flex items-center rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-900 ring-1 ring-inset ring-emerald-300/90 dark:bg-emerald-950 dark:text-emerald-100 dark:ring-emerald-700/90">
+                          Sim
+                        </span>
+                      ) : (
+                        <span className="text-fg-muted dark:text-slate-400">Não</span>
                       )}
                     </td>
                     <td
@@ -1696,6 +1728,16 @@ function AnunciosPageContent() {
                   />
                 </div>
               </div>
+
+              <label className="flex items-center gap-2 rounded border border-slate-200 bg-card px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={fullOnlyDraft}
+                  onChange={(e) => setFullOnlyDraft(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-[#0d6efd] focus:ring-[#0d6efd]"
+                />
+                Mostrar somente anúncios Full
+              </label>
 
               <label className="flex items-center gap-2 rounded border border-slate-200 bg-card px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:text-slate-200">
                 <input

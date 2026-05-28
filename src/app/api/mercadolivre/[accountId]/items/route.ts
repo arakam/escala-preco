@@ -79,7 +79,7 @@ const MAX_PAGE_SIZE = 1000;
 const MAX_PAGE_SIZE_FAMILY = 100;
 
 /**
- * GET /api/mercadolivre/{accountId}/items?search=&status=&listing_type_id=&mlbu=&mlbu_code=
+ * GET /api/mercadolivre/{accountId}/items?search=&status=&listing_type_id=&full_only=&mlbu=&mlbu_code=
  *   &ml_alert=&stock_op=&stock_qty=&sold_op=&sold_qty=&page=&limit=
  * Lista itens sincronizados do banco para a conta (do usuário logado).
  */
@@ -113,6 +113,7 @@ export async function GET(
   const { searchParams } = new URL(request.url);
   const search = searchParams.get("search")?.trim() ?? "";
   const statusFilter = searchParams.get("status")?.trim() ?? "";
+  const fullOnly = searchParams.get("full_only") === "1" || searchParams.get("full_only") === "true";
   const mlbuOnly = searchParams.get("mlbu") === "1" || searchParams.get("mlbu") === "true";
   const familyId = searchParams.get("family_id")?.trim() ?? "";
   const mlbuCode = searchParams.get("mlbu_code")?.trim() ?? "";
@@ -170,6 +171,7 @@ export async function GET(
       );
     }
     if (statusFilter) q = q.eq("status", statusFilter);
+    if (fullOnly) q = q.contains("tags_text", ["fulfillment"]);
     if (mlbuOnly) q = q.not("user_product_id", "is", null);
     if (familyId) q = q.eq("family_id", familyId);
     if (mlbuCode) q = q.ilike("user_product_id", `%${mlbuCode}%`);
