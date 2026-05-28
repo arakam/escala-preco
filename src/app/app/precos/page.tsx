@@ -14,6 +14,12 @@ import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 import { PRICING_CALCULATE_CLIENT_BATCH_SIZE } from "@/lib/pricing/calculate-limits";
 import { calculateFullPricing as computeFullPricingBreakdown, type FullPricingBreakdown } from "@/lib/pricing/full-net";
 import {
+  effectiveCalcularFreteMl,
+  isMercadoLiderPowerSeller,
+  PRICING_FRETE_PREFERENCE_EVENT,
+  readCalcularFretePreference,
+} from "@/lib/pricing/mercado-lider-freight";
+import {
   sanitizeMlSellerCampaignNameInput,
   isValidMlSellerCampaignName,
   ML_SELLER_CAMPAIGN_NAME_HINT,
@@ -1078,7 +1084,8 @@ function PrecosPageContent() {
   const [draftLinkFilter, setDraftLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
   const [calculating, setCalculating] = useState(false);
   const [isMercadoLider, setIsMercadoLider] = useState(false);
-  const [reputationLoading, setReputationLoading] = useState(true);
+  /** Gold/Platinum na API de reputação — frete sempre incluído nos cálculos. */
+  const [detectedMercadoLider, setDetectedMercadoLider] = useState(false);
   const [precosTab, setPrecosTab] = useState<"calculadora" | "como-funciona">("calculadora");
   const [saveMessage, setSaveMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   /** Filtro por lucratividade (%): condição + quantidade, no mesmo padrão de Vendidos. */
@@ -1160,7 +1167,7 @@ function PrecosPageContent() {
   /** Menu suspenso de ações em massa (linhas selecionadas) */
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const bulkActionsRef = useRef<HTMLDivElement | null>(null);
-  /** Menu Atualizar dados / referência / Calcular todos */
+  /** Menu Atualizar dados / competitividade / Recalcular taxa e frete */
   const [globalActionsOpen, setGlobalActionsOpen] = useState(false);
   const globalActionsRef = useRef<HTMLDivElement | null>(null);
   const bulkDiscountBusyRef = useRef(false);
@@ -1213,20 +1220,28 @@ function PrecosPageContent() {
   }, [loadAllTags]);
 
   const loadReputation = useCallback(async () => {
-    setReputationLoading(true);
     try {
       const res = await fetch("/api/mercadolivre/reputation");
       if (res.ok) {
         const data = (await res.json()) as ReputationData;
-        const powerSeller = data.reputation?.power_seller_status;
-        setIsMercadoLider(powerSeller === "gold" || powerSeller === "platinum");
+        const detected = isMercadoLiderPowerSeller(data.reputation?.power_seller_status);
+        setDetectedMercadoLider(detected);
+        setIsMercadoLider(effectiveCalcularFreteMl(detected));
       }
     } catch {
       // ignore
-    } finally {
-      setReputationLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const syncFretePreference = () => {
+      if (!detectedMercadoLider) {
+        setIsMercadoLider(readCalcularFretePreference());
+      }
+    };
+    window.addEventListener(PRICING_FRETE_PREFERENCE_EVENT, syncFretePreference);
+    return () => window.removeEventListener(PRICING_FRETE_PREFERENCE_EVENT, syncFretePreference);
+  }, [detectedMercadoLider]);
 
   /** Com filtros/ordenações locais, busca mais itens e aplica paginação no cliente. */
   const clientSideFiltering = !!(
@@ -1393,12 +1408,12 @@ function PrecosPageContent() {
       }
       setSaveMessage({
         type: "error",
-        text: data.error ?? "Não foi possível iniciar a atualização da referência de preço.",
+        text: data.error ?? "Não foi possível iniciar a atualização da competitividade.",
       });
     } catch {
       setSaveMessage({
         type: "error",
-        text: "Erro de conexão ao atualizar referência de preço.",
+        text: "Erro de conexão ao atualizar competitividade.",
       });
     }
   }, [mlAccountId, listings]);
@@ -2064,7 +2079,7 @@ function PrecosPageContent() {
       const errCount = errors.length;
       let msg = `Promoção ajustada para desconto de ${targetDiscountPct}% em ${eligible.length} anúncio(s) (taxa por referência, sem listing_prices por item).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem dados para cálculo).`;
-      if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); ajuste manual ou use Calcular Todos.`;
+      if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); ajuste manual ou use Recalcular taxa e frete.`;
       if (pres.ok) msg += " Alterações salvas automaticamente.";
       else msg += ` Falha ao gravar no servidor${pres.error ? `: ${pres.error}` : ""}.`;
       setSaveMessage({ type: errCount > 0 || !pres.ok ? "error" : "ok", text: msg });
@@ -2180,7 +2195,7 @@ function PrecosPageContent() {
       const errCount = errors.length;
       let msg = `Promoção restaurada para o preço do ML em ${eligible.length} anúncio(s) (taxa por referência, sem listing_prices por item).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem preço ou dados para cálculo).`;
-      if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); use Calcular Todos se precisar.`;
+      if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); use Recalcular taxa e frete se precisar.`;
       if (presRestore.ok) msg += " Alterações salvas automaticamente.";
       else msg += ` Falha ao gravar no servidor${presRestore.error ? `: ${presRestore.error}` : ""}.`;
       setSaveMessage({ type: errCount > 0 || !presRestore.ok ? "error" : "ok", text: msg });
@@ -3572,9 +3587,9 @@ function PrecosPageContent() {
         ? [bulkBatchLoaderMessage(bulkRestoreLoaderProgress)]
         : refRefreshing
           ? [
-              "Atualizando referências de preço…",
+              "Atualizando competitividade…",
               "Consultando sugestões no Mercado Livre…",
-              "Gravando referências para a tabela…",
+              "Gravando indicadores na tabela…",
             ]
           : undefined;
   const loaderPhase = cacheRefreshing ? "refresh-cache" : calculating ? "calculate" : "default";
@@ -3741,7 +3756,7 @@ function PrecosPageContent() {
           <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
             <h2 className="mb-2 text-lg font-semibold">Desconto em massa (selecionados)</h2>
             <p className="mb-4 text-xs text-fg-muted">
-              Defina o desconto de promoção para os itens selecionados. Mínimo {ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}% (regra ML) e máximo {ML_MAX_CAMPAIGN_DISCOUNT_PERCENT}% para modalidades configuráveis pelo seller (LIGHTNING, DOD, SELLER_CAMPAIGN, DEAL e PRICE_DISCOUNT). Ao aplicar, o modal fecha e a taxa é estimada pela referência do cache (sem listing_prices por item); use &quot;Calcular Todos&quot; se quiser alinhar ao ML.
+              Defina o desconto de promoção para os itens selecionados. Mínimo {ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}% (regra ML) e máximo {ML_MAX_CAMPAIGN_DISCOUNT_PERCENT}% para modalidades configuráveis pelo seller (LIGHTNING, DOD, SELLER_CAMPAIGN, DEAL e PRICE_DISCOUNT). Ao aplicar, o modal fecha e a taxa é estimada pela referência do cache (sem listing_prices por item); use <strong>Recalcular taxa e frete</strong> (menu Ações) se quiser alinhar ao ML.
             </p>
             <form
               className="space-y-4"
@@ -3793,7 +3808,7 @@ function PrecosPageContent() {
           <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
             <h2 className="mb-2 text-lg font-semibold">Margem nos selecionados</h2>
             <p className="mb-4 text-xs text-fg-muted">
-              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço de promoção) em todos os anúncios marcados que tenham custo e tipo de listagem. Processamento em lote no servidor (taxa de referência + frete em tabela, até 3 passadas por faixa de frete). Confira depois com &quot;Calcular&quot; se quiser alinhar a taxa exata do ML.
+              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço de promoção) em todos os anúncios marcados que tenham custo e tipo de listagem. Processamento em lote no servidor (taxa de referência + frete em tabela, até 3 passadas por faixa de frete). Confira depois com <strong>Recalcular taxa e frete</strong> (menu Ações) se quiser alinhar a taxa exata do ML.
             </p>
             <form
               className="space-y-4"
@@ -3880,22 +3895,12 @@ function PrecosPageContent() {
         />
         <div className="border-b border-slate-100 px-3 py-3 dark:border-slate-700">
           <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-card px-3 py-1.5 text-xs text-slate-700 shadow-sm dark:border-slate-600 dark:text-slate-200">
-            <input
-              type="checkbox"
-              checked={isMercadoLider}
-              onChange={(e) => setIsMercadoLider(e.target.checked)}
-              className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary"
-              disabled={reputationLoading}
-            />
-            <span>Mercado Líder (calcular frete)</span>
-          </label>
           <div className="btn-dropdown relative" ref={globalActionsRef}>
             <button
               type="button"
               onClick={() => setGlobalActionsOpen((o) => !o)}
               className="btn btn-secondary btn-sm"
-              title="Atualizar cache, referências de preço ou recalcular taxas"
+              title="Atualizar cache, competitividade ou recalcular taxa e frete"
               aria-expanded={globalActionsOpen}
               aria-haspopup="menu"
             >
@@ -3906,7 +3911,7 @@ function PrecosPageContent() {
             </button>
             {globalActionsOpen && (
               <div
-                className="btn-dropdown-menu right-0 min-w-[260px]"
+                className="btn-dropdown-menu left-0 top-full min-w-[260px]"
                 role="menu"
               >
                 <button
@@ -3931,9 +3936,9 @@ function PrecosPageContent() {
                     void handleRefreshPriceReferences();
                   }}
                   className="btn-dropdown-item"
-                  title="Atualiza só as referências de preço / competitividade no Mercado Livre, sem refazer o cache inteiro de anúncios"
+                  title="Atualiza a coluna Competitividade no Mercado Livre, sem refazer o cache inteiro de anúncios"
                 >
-                  {refRefreshing ? "Atualizando referência…" : "Atualizar referência"}
+                  {refRefreshing ? "Atualizando competitividade…" : "Atualizar competitividade"}
                 </button>
                 <button
                   type="button"
@@ -3944,9 +3949,9 @@ function PrecosPageContent() {
                     handleCalculateAll();
                   }}
                   className="btn-dropdown-item"
-                  title="Recalcula taxas e valores líquidos para todas as linhas (promoção atual)"
+                  title="Consulta taxa e frete no ML para todas as linhas visíveis (preço da promoção atual)"
                 >
-                  {calculating ? "Calculando…" : "Calcular Todos"}
+                  {calculating ? "Recalculando taxa e frete…" : "Recalcular taxa e frete"}
                 </button>
               </div>
             )}
@@ -3988,7 +3993,7 @@ function PrecosPageContent() {
               </svg>
             </button>
             {bulkActionsOpen && (
-              <div className="btn-dropdown-menu right-0 min-w-[280px]" role="menu">
+              <div className="btn-dropdown-menu left-0 top-full min-w-[280px]" role="menu">
                 <button
                   type="button"
                   role="menuitem"
@@ -4124,7 +4129,7 @@ function PrecosPageContent() {
               <KebabMenuIcon />
             </button>
             {optionsMenuOpen && (
-              <div className="btn-dropdown-menu right-0 top-9 z-20 w-52">
+              <div className="btn-dropdown-menu right-0 top-full w-52">
                 <button
                   type="button"
                   onClick={openPrecosImportCsv}
@@ -4255,8 +4260,8 @@ function PrecosPageContent() {
                 Também aceita o CSV exportado por esta tela (edite só MLB + Promoção ou Margem %).
               </p>
               <p>
-                Para margem, o anúncio precisa ter custo vinculado. A opção <strong>Mercado Líder</strong> afeta o
-                cálculo de frete na importação.
+                Para margem, o anúncio precisa ter custo vinculado. Contas Mercado Líder (Gold/Platinum) incluem frete
+                automaticamente; demais contas podem ativar em <strong>Configuração → Frete</strong>.
               </p>
               <div>
                 <p className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
@@ -4602,7 +4607,7 @@ function PrecosPageContent() {
                 {renderPricingColumnHeader(8, "Preço", { align: "right" })}
                 {renderPricingColumnHeader(9, "Competitividade", {
                   align: "right",
-                  title: "Referência de preço do Mercado Livre (sugestão / faixa competitiva)",
+                  title: "Competitividade no Mercado Livre (sugestão / faixa de preço)",
                 })}
                 {renderPricingColumnHeader(10, "Margem", {
                   align: "right",
@@ -5080,126 +5085,145 @@ function PrecosPageContent() {
 
       {filtersModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4"
           onClick={() => setFiltersModalOpen(false)}
           role="dialog"
           aria-modal="true"
           aria-label="Filtros"
         >
-          <div
-            className="modal-panel-scroll"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div className="modal-panel-filters" onClick={(e) => e.stopPropagation()}>
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-slate-600">
               <div>
-                <h2 className="text-base font-semibold text-slate-800">Filtros</h2>
-                <p className="text-xs text-slate-500">Refine busca, status, vínculo, fornecedor, tags, vendas 30d, custo e lucratividade.</p>
+                <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">Filtros</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Busca, anúncio, tags, métricas e promoção — use as seções abaixo.
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => setFiltersModalOpen(false)}
-                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-800 dark:border-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200"
                 aria-label="Fechar filtros"
               >
                 ✕
               </button>
             </div>
-            <form onSubmit={handleFiltersApply} className="space-y-4 p-4">
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Buscar</label>
-                <input
-                  type="text"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder="Título ou MLB…"
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">SKU</label>
-                <input
-                  type="text"
-                  value={draftSkuFilter}
-                  onChange={(e) => setDraftSkuFilter(e.target.value)}
-                  placeholder="Filtrar por SKU…"
-                  className="input font-mono text-xs"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Fornecedor
-                </label>
-                <input
-                  type="text"
-                  value={draftSupplierFilter}
-                  onChange={(e) => setDraftSupplierFilter(e.target.value)}
-                  placeholder="Nome ou parte do fornecedor…"
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Status</label>
-                <select
-                  value={draftStatusFilter}
-                  onChange={(e) => setDraftStatusFilter(e.target.value)}
-                  className="input text-xs font-medium"
-                >
-                  <option value="">Todos os status</option>
-                  <option value="active">Ativo</option>
-                  <option value="paused">Pausado</option>
-                  <option value="closed">Fechado</option>
-                  <option value="under_review">Em revisão</option>
-                  <option value="inactive">Inativo</option>
-                  <option value="deleted">Removido</option>
-                  <option value="not_yet_active">Aguardando ativação</option>
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Vínculo MLB → produto</label>
-                <select
-                  value={draftLinkFilter}
-                  onChange={(e) =>
-                    setDraftLinkFilter(e.target.value as "all" | "linked" | "unlinked")
-                  }
-                  className="input text-xs font-medium"
-                >
-                  <option value="all">Todos</option>
-                  <option value="linked">Só vinculados</option>
-                  <option value="unlinked">Só não vinculados</option>
-                </select>
-              </div>
-              {allTags.length > 0 && (
-                <div>
-                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Tags do produto vinculado (qualquer uma)
-                  </label>
-                  <div className="flex max-h-36 flex-wrap gap-2 overflow-y-auto">
-                    {allTags.map((t) => (
-                      <label
-                        key={t.id}
-                        className={`cursor-pointer rounded border px-2 py-1 text-xs ${
-                          draftFilterTagIds.includes(t.id)
-                            ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
-                            : "border-slate-200 bg-card text-slate-700 dark:border-slate-600 dark:text-slate-200"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          className="sr-only"
-                          checked={draftFilterTagIds.includes(t.id)}
-                          onChange={() => toggleDraftFilterTag(t.id)}
-                        />
-                        {t.name}
+            <form onSubmit={handleFiltersApply} className="flex min-h-0 flex-1 flex-col">
+              <div className="modal-panel-filters-body space-y-6">
+                <section>
+                  <p className="modal-panel-filters-section-title">Identificação</p>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="sm:col-span-2 lg:col-span-3">
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                        Buscar
                       </label>
-                    ))}
+                      <input
+                        type="text"
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        placeholder="Título ou MLB…"
+                        className="input"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">SKU</label>
+                      <input
+                        type="text"
+                        value={draftSkuFilter}
+                        onChange={(e) => setDraftSkuFilter(e.target.value)}
+                        placeholder="Filtrar por SKU…"
+                        className="input font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                        Fornecedor
+                      </label>
+                      <input
+                        type="text"
+                        value={draftSupplierFilter}
+                        onChange={(e) => setDraftSupplierFilter(e.target.value)}
+                        placeholder="Nome ou parte do fornecedor…"
+                        className="input"
+                      />
+                    </div>
                   </div>
-                </div>
-              )}
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Vendas 30d
-                </p>
-                <div className="grid gap-4 sm:grid-cols-2">
+                </section>
+
+                <section>
+                  <p className="modal-panel-filters-section-title">Anúncio</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">Status</label>
+                      <select
+                        value={draftStatusFilter}
+                        onChange={(e) => setDraftStatusFilter(e.target.value)}
+                        className="input text-xs font-medium"
+                      >
+                        <option value="">Todos os status</option>
+                        <option value="active">Ativo</option>
+                        <option value="paused">Pausado</option>
+                        <option value="closed">Fechado</option>
+                        <option value="under_review">Em revisão</option>
+                        <option value="inactive">Inativo</option>
+                        <option value="deleted">Removido</option>
+                        <option value="not_yet_active">Aguardando ativação</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                        Vínculo MLB → produto
+                      </label>
+                      <select
+                        value={draftLinkFilter}
+                        onChange={(e) =>
+                          setDraftLinkFilter(e.target.value as "all" | "linked" | "unlinked")
+                        }
+                        className="input text-xs font-medium"
+                      >
+                        <option value="all">Todos</option>
+                        <option value="linked">Só vinculados</option>
+                        <option value="unlinked">Só não vinculados</option>
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                {allTags.length > 0 && (
+                  <section>
+                    <p className="modal-panel-filters-section-title">
+                      Tags do produto vinculado (qualquer uma)
+                    </p>
+                    <div className="flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-800/40">
+                      {allTags.map((t) => (
+                        <label
+                          key={t.id}
+                          className={`cursor-pointer rounded border px-2 py-1 text-xs ${
+                            draftFilterTagIds.includes(t.id)
+                              ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
+                              : "border-slate-200 bg-card text-slate-700 dark:border-slate-600 dark:text-slate-200"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="sr-only"
+                            checked={draftFilterTagIds.includes(t.id)}
+                            onChange={() => toggleDraftFilterTag(t.id)}
+                          />
+                          {t.name}
+                        </label>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                <section>
+                  <p className="modal-panel-filters-section-title">Métricas</p>
+                  <div className="grid gap-4 lg:grid-cols-3">
+              <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
+                <p className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">Vendas 30d</p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
                   <div>
                     <label
                       htmlFor="precos-sales30d-op"
@@ -5241,17 +5265,15 @@ function PrecosPageContent() {
                     />
                   </div>
                   {draftSales30dOpFilter && draftSales30dQtyFilter.trim() === "" && (
-                    <p className="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2">
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
                       Informe a quantidade para aplicar o filtro de vendas 30d.
                     </p>
                   )}
                 </div>
               </div>
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Custo
-                </p>
-                <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
+                <p className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">Custo</p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
                   <div>
                     <label
                       htmlFor="precos-cost-op"
@@ -5293,53 +5315,15 @@ function PrecosPageContent() {
                     />
                   </div>
                   {draftCostOpFilter && draftCostQtyFilter.trim() === "" && (
-                    <p className="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2">
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
                       Informe a quantidade para aplicar o filtro de custo.
                     </p>
                   )}
                 </div>
               </div>
-              <label
-                className="flex cursor-pointer items-center gap-2"
-                title="Promoção planejada igual ao preço atual no Mercado Livre (sem desconto em relação ao anúncio)"
-              >
-                <input
-                  type="checkbox"
-                  checked={draftSemPromocao}
-                  onChange={(e) => setDraftSemPromocao(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
-                />
-                <span className="text-xs text-slate-700">Sem promoção</span>
-              </label>
-              <label
-                className="flex cursor-pointer items-center gap-2"
-                title="Promoção acima de 95% do preço do anúncio (desconto menor que 5%) — não serve para campanha de promoção do ML até ajustar"
-              >
-                <input
-                  type="checkbox"
-                  checked={draftForaDescontoMin5Ml}
-                  onChange={(e) => setDraftForaDescontoMin5Ml(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
-                />
-                <span className="text-xs text-slate-700">Desconto &lt; 5% (promo ML)</span>
-              </label>
-              <label
-                className="flex cursor-pointer items-center gap-2"
-                title="Exibe apenas anúncios sem promoções ativas no cache de Promoções (coluna Promo ML = 0)"
-              >
-                <input
-                  type="checkbox"
-                  checked={draftSemPromoMlAtiva}
-                  onChange={(e) => setDraftSemPromoMlAtiva(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary"
-                />
-                <span className="text-xs text-slate-700">Sem Promo ML ativa</span>
-              </label>
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Lucratividade
-                </p>
-                <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
+                <p className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">Lucratividade</p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
                   <div>
                     <label
                       htmlFor="precos-profit-op"
@@ -5381,13 +5365,58 @@ function PrecosPageContent() {
                     />
                   </div>
                   {draftProfitOpFilter && draftProfitQtyFilter.trim() === "" && (
-                    <p className="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2">
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
                       Informe a quantidade para aplicar o filtro de lucratividade.
                     </p>
                   )}
                 </div>
               </div>
-              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                  </div>
+                </section>
+
+                <section>
+                  <p className="modal-panel-filters-section-title">Promoção</p>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <label
+                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-card px-3 py-2.5 text-xs text-slate-700 dark:border-slate-600 dark:text-slate-200"
+                      title="Promoção planejada igual ao preço atual no Mercado Livre (sem desconto em relação ao anúncio)"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={draftSemPromocao}
+                        onChange={(e) => setDraftSemPromocao(e.target.checked)}
+                        className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      Sem promoção
+                    </label>
+                    <label
+                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-card px-3 py-2.5 text-xs text-slate-700 dark:border-slate-600 dark:text-slate-200"
+                      title="Promoção acima de 95% do preço do anúncio (desconto menor que 5%) — não serve para campanha de promoção do ML até ajustar"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={draftForaDescontoMin5Ml}
+                        onChange={(e) => setDraftForaDescontoMin5Ml(e.target.checked)}
+                        className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      Desconto &lt; 5% (promo ML)
+                    </label>
+                    <label
+                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-card px-3 py-2.5 text-xs text-slate-700 dark:border-slate-600 dark:text-slate-200 sm:col-span-2 lg:col-span-1"
+                      title="Exibe apenas anúncios sem promoções ativas no cache de Promoções (coluna Promo ML = 0)"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={draftSemPromoMlAtiva}
+                        onChange={(e) => setDraftSemPromoMlAtiva(e.target.checked)}
+                        className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      Sem Promo ML ativa
+                    </label>
+                  </div>
+                </section>
+              </div>
+              <div className="modal-panel-filters-footer flex justify-end gap-2">
                 <button type="button" onClick={() => clearPrecosFilters()} className="btn btn-secondary btn-sm">
                   Limpar filtros
                 </button>

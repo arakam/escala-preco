@@ -140,7 +140,7 @@ body {
   @apply relative inline-flex align-middle;
 }
 .btn-dropdown-menu {
-  @apply absolute z-40 mt-1 min-w-[200px] overflow-hidden rounded-app-lg border border-slate-200 bg-white py-1 text-left shadow-dropdown dark:border-slate-600 dark:bg-slate-800;
+  @apply absolute z-50 mt-1 min-w-[200px] overflow-hidden rounded-app-lg border border-slate-200 bg-white py-1 text-left shadow-dropdown dark:border-slate-600 dark:bg-slate-800;
 }
 .btn-dropdown-item {
   @apply flex w-full cursor-pointer items-center border-0 bg-transparent px-3 py-2 text-left text-xs font-normal text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700/50;
@@ -269,7 +269,8 @@ body {
 
 /* ========== Table page shell (grids de Preços, Produtos, Anúncios, etc.) ========== */
 .table-page-shell {
-  @apply overflow-hidden rounded border border-slate-200/90 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:border-slate-700;
+  /* Sem overflow-hidden: toolbars com dropdown (Ações, etc.) não podem ser cortados nem ficar sob o menu lateral. */
+  @apply rounded border border-slate-200/90 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:border-slate-700;
 }
 .table-page-toolbar {
   @apply border-b border-slate-200 bg-card px-3 pt-3 dark:border-slate-700;
@@ -294,6 +295,19 @@ body {
 }
 .modal-panel-scroll {
   @apply max-h-[85vh] w-full max-w-lg overflow-y-auto rounded border border-slate-200 bg-card shadow-xl dark:border-slate-600;
+}
+/* Modal de filtros (Preços, etc.): painel largo, corpo rolável e rodapé fixo */
+.modal-panel-filters {
+  @apply flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded border border-slate-200 bg-card shadow-xl dark:border-slate-600;
+}
+.modal-panel-filters-body {
+  @apply min-h-0 flex-1 overflow-y-auto px-5 py-4;
+}
+.modal-panel-filters-footer {
+  @apply shrink-0 border-t border-slate-200 bg-card px-5 py-3 dark:border-slate-600;
+}
+.modal-panel-filters-section-title {
+  @apply mb-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400;
 }
 .sticky-col-surface {
   @apply sticky z-[5] bg-card shadow-[2px_0_5px_rgba(15,23,42,0.12)];

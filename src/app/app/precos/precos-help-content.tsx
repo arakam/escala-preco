@@ -93,7 +93,7 @@ export function PrecosHelpContent() {
             <strong>Atualizar dados</strong>.
           </li>
           <li>
-            Marque <strong>Mercado Líder (calcular frete)</strong> se sua conta for Líder; clique no ícone de{" "}
+            Contas Mercado Líder (Gold/Platinum) incluem frete nos cálculos automaticamente. Clique no ícone de{" "}
             <strong>funil</strong>, preencha o modal <strong>Filtros</strong> e clique em <strong>Aplicar</strong>.
           </li>
           <li>
@@ -102,7 +102,7 @@ export function PrecosHelpContent() {
           </li>
           <li>
             Para várias linhas, marque a coluna de seleção, abra <strong>Ações em massa</strong> (desconto, margem ou
-            voltar promoção) ou use o menu <strong>Ações</strong> → <strong>Calcular Todos</strong>.
+            voltar promoção) ou use o menu <strong>Ações</strong> → <strong>Recalcular taxa e frete</strong>.
           </li>
           <li>
             Com linhas selecionadas, clique em <strong>Criar campanha ML</strong> (promoção no ML via campanha do
@@ -123,12 +123,13 @@ export function PrecosHelpContent() {
             Barra de ferramentas (aba Calculadora)
           </h3>
           <div className="space-y-2">
-            <HelpFieldRow kind="optional" name="Mercado Líder (calcular frete)">
-              Inclui frete estimado no cálculo; marque só se a conta for Mercado Líder.
+            <HelpFieldRow kind="optional" name="Frete nos cálculos">
+              Contas Mercado Líder (Gold/Platinum): frete incluído automaticamente. Outras contas: opcional em{" "}
+              <strong>Configuração → Frete</strong>.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Ações">
-              Menu com <strong>Atualizar dados</strong> (cache de anúncios), <strong>Atualizar referência</strong>{" "}
-              (competitividade) e <strong>Calcular Todos</strong>.
+              Menu com <strong>Atualizar dados</strong> (cache de anúncios), <strong>Atualizar competitividade</strong>{" "}
+              e <strong>Recalcular taxa e frete</strong> (taxa ML + frete para as linhas visíveis).
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Criar campanha ML">
               Cria campanha do vendedor no ML com o preço da <strong>Promoção</strong> salva; exige seleção na tabela e
@@ -224,8 +225,8 @@ export function PrecosHelpContent() {
               Preço atual do anúncio no ML na última sincronização.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Competitividade">
-              Indicador de referência de preço do ML; atualize via <strong>Ações</strong> →{" "}
-              <strong>Atualizar referência</strong>.
+              Indicador de competitividade do ML (sugestão de preço); atualize via <strong>Ações</strong> →{" "}
+              <strong>Atualizar competitividade</strong>.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Vai Receber">
               Promoção − taxa ML − frete (calculado).

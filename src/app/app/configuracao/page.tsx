@@ -9,6 +9,12 @@ import {
   communicationTagTypeLabel,
 } from "@/lib/mercadolivre/communication-labels";
 import type { MLCommunicationNoticeRow } from "@/components/MlCommunicationsBell";
+import {
+  effectiveCalcularFreteMl,
+  isMercadoLiderPowerSeller,
+  readCalcularFretePreference,
+  writeCalcularFretePreference,
+} from "@/lib/pricing/mercado-lider-freight";
 
 const IS_NEXT_DEV = process.env.NODE_ENV === "development";
 const STORAGE_KEY_ACCOUNT = "escalapreco_dashboard_account_id";
@@ -170,8 +176,17 @@ function ConfiguracaoContent() {
     Object.fromEntries(AUTO_SYNC_NESTED_OPTIONS.map((o) => [o.id, false]))
   );
   const [devResetting, setDevResetting] = useState(false);
+  const [calcularFretePrecos, setCalcularFretePrecos] = useState(false);
+  const [calcularFreteHydrated, setCalcularFreteHydrated] = useState(false);
   const { theme, setTheme } = useTheme();
   const searchParams = useSearchParams();
+
+  const detectedMercadoLider = isMercadoLiderPowerSeller(reputation?.reputation?.power_seller_status);
+
+  useEffect(() => {
+    setCalcularFretePrecos(readCalcularFretePreference());
+    setCalcularFreteHydrated(true);
+  }, []);
 
   const loadAccounts = useCallback(async () => {
     const res = await fetch("/api/mercadolivre/accounts");
@@ -1240,6 +1255,45 @@ function ConfiguracaoContent() {
             Custos de envio para MercadoLíderes e vendedores com reputação verde.
             Válido para Agências ML, Envios com Coleta e Full.
           </p>
+
+          <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-600 dark:bg-slate-800/50">
+            <h3 className="mb-2 text-sm font-semibold text-fg-strong">Cálculos na tela de Preços</h3>
+            {reputationLoading ? (
+              <p className="text-sm text-gray-500 dark:text-slate-400">Verificando reputação da conta…</p>
+            ) : detectedMercadoLider ? (
+              <p className="text-sm text-gray-700 dark:text-slate-200">
+                Sua conta é <strong>Mercado Líder</strong> (
+                {getMercadoLiderLabel(reputation?.reputation?.power_seller_status ?? null)?.label ?? "Gold/Platinum"}
+                ). O frete estimado é incluído automaticamente em taxa, margem e lucro na calculadora de preços.
+              </p>
+            ) : (
+              <>
+                <label className="flex cursor-pointer items-start gap-2 text-sm text-gray-700 dark:text-slate-200">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                    checked={calcularFreteHydrated ? calcularFretePrecos : false}
+                    disabled={!calcularFreteHydrated}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setCalcularFretePrecos(next);
+                      writeCalcularFretePreference(next);
+                    }}
+                  />
+                  <span>
+                    <strong>Incluir frete Mercado Líder</strong> nos cálculos de Preços (taxa ML, margem e coluna
+                    Frete). Use apenas se sua conta tiver benefício de frete de Líder; contas Gold/Platinum ativam isso
+                    sozinhas quando a reputação é sincronizada.
+                  </span>
+                </label>
+                {calcularFreteHydrated && effectiveCalcularFreteMl(false, calcularFretePrecos) && (
+                  <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
+                    Ativo: os próximos cálculos em Preços considerarão frete pela tabela abaixo.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
 
           <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-950/40">
             <p className="text-sm text-blue-800 dark:text-blue-200">
