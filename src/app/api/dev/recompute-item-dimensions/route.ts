@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 500 });
     }
-    return NextResponse.json({ ok: true, dry_run: dryRun, ...result });
+    return NextResponse.json({ ...result, dry_run: dryRun });
   } catch (e) {
     console.error("[dev recompute-item-dimensions]", e);
     return NextResponse.json({ error: "Erro ao recalcular dimensões" }, { status: 500 });

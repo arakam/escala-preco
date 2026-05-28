@@ -26,7 +26,7 @@ async function handle(request: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: 500 });
     }
     console.info("[cron recompute-item-dimensions]", { dryRun, ...result });
-    return NextResponse.json({ ok: true, dry_run: dryRun, ...result });
+    return NextResponse.json({ ...result, dry_run: dryRun });
   } catch (e) {
     console.error("[cron recompute-item-dimensions]", e);
     return NextResponse.json({ error: "Erro ao recalcular dimensões" }, { status: 500 });
