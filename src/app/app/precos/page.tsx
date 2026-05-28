@@ -1054,6 +1054,8 @@ async function fetchPricingCalculateBatches(
 function PrecosPageContent() {
   const [listings, setListings] = useState<ListingWithPricing[]>([]);
   const listingsRef = useRef<ListingWithPricing[]>([]);
+  /** Ignora respostas antigas de /api/pricing/listings (corrida ao trocar filtros rápido). */
+  const listingsFetchGenRef = useRef(0);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -1249,6 +1251,7 @@ function PrecosPageContent() {
   const pageForRequest = clientSideFiltering ? 1 : apiListPage(pageSize, page);
 
   const loadListings = useCallback(async () => {
+    const fetchGen = ++listingsFetchGenRef.current;
     const isRefetch = listingsRef.current.length > 0;
     if (isRefetch) setListingsRefetching(true);
     else setLoading(true);
@@ -1270,6 +1273,8 @@ function PrecosPageContent() {
         fetch(`/api/pricing/listings?${params}`, { cache: "no-store" }),
         fetch("/api/pricing/planned-prices", { cache: "no-store" }),
       ]);
+
+      if (fetchGen !== listingsFetchGenRef.current) return;
 
       const listingsData = listingsRes.ok ? await listingsRes.json() : { listings: [], total: 0 };
       const items = (listingsData.listings ?? []) as PricingListing[];
@@ -1293,6 +1298,8 @@ function PrecosPageContent() {
           plannedMap.set(key, p.planned_price);
         }
       }
+
+      if (fetchGen !== listingsFetchGenRef.current) return;
 
       setListings(
         items.map((item) => {
@@ -1341,8 +1348,10 @@ function PrecosPageContent() {
     } catch {
       // ignore
     } finally {
-      setLoading(false);
-      setListingsRefetching(false);
+      if (fetchGen === listingsFetchGenRef.current) {
+        setLoading(false);
+        setListingsRefetching(false);
+      }
     }
   }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, supplierFilter, filterTagIds]);
 
@@ -2741,6 +2750,49 @@ function PrecosPageContent() {
     ? computeTotalPages(filteredListings.length, pageSize)
     : computeTotalPages(total, pageSize);
 
+  useEffect(() => {
+    if (page > totalPages) setPage(Math.max(1, totalPages));
+  }, [page, totalPages]);
+
+  /** Força remontagem das linhas ao mudar filtros (evita 1ª linha “fantasma” por reconciliação). */
+  const tableFilterEpoch = useMemo(
+    () =>
+      [
+        search,
+        statusFilter,
+        linkFilter,
+        skuFilter,
+        supplierFilter,
+        filterTagIds.join(","),
+        profitOpFilter,
+        profitQtyFilter,
+        sales30dOpFilter,
+        sales30dQtyFilter,
+        costOpFilter,
+        costQtyFilter,
+        semPromocao ? "1" : "0",
+        foraDescontoMin5Ml ? "1" : "0",
+        semPromoMlAtiva ? "1" : "0",
+      ].join("|"),
+    [
+      search,
+      statusFilter,
+      linkFilter,
+      skuFilter,
+      supplierFilter,
+      filterTagIds,
+      profitOpFilter,
+      profitQtyFilter,
+      sales30dOpFilter,
+      sales30dQtyFilter,
+      costOpFilter,
+      costQtyFilter,
+      semPromocao,
+      foraDescontoMin5Ml,
+      semPromoMlAtiva,
+    ]
+  );
+
   /**
    * Colunas congeladas: `left` = soma dos minWidth das colunas pinadas anteriores (igual ao `<colgroup>`).
    * Largura vem só do col — não forçar width/maxWidth na célula (evita truncar título/SKU e desalinhar ao pinar colunas extras).
@@ -2886,13 +2938,13 @@ function PrecosPageContent() {
       if (prev.size === 0) return prev;
       let changed = false;
       const next = new Set<string>();
-      for (const key of prev) {
+      prev.forEach((key) => {
         if (filteredSelectionKeys.has(key)) {
           next.add(key);
         } else {
           changed = true;
         }
-      }
+      });
       return changed ? next : prev;
     });
   }, [filteredSelectionKeys]);
@@ -4586,7 +4638,7 @@ function PrecosPageContent() {
                 {renderPricingColumnHeader(19, "Link")}
               </tr>
             </thead>
-            <tbody>
+            <tbody key={tableFilterEpoch}>
               {sortedListings.map((listing) => {
                 const profit =
                   listing.calculated && listing.cost_price != null
@@ -4615,7 +4667,7 @@ function PrecosPageContent() {
 
                 return (
                   <tr
-                    key={`${listing.id}-${listing.variation_id ?? "item"}`}
+                    key={listingSelectionKey(listing)}
                     className="table-body-row"
                   >
                     <td
