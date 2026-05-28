@@ -14,6 +14,12 @@ const EMPTY: ItemDimensions = {
   length_cm: null,
 };
 
+type MlAttribute = {
+  id?: string;
+  value_name?: string | null;
+  value_struct?: { number?: number; unit?: string } | null;
+};
+
 function parseNumeric(value: unknown): number | null {
   if (value == null) return null;
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -27,78 +33,164 @@ function parseNumeric(value: unknown): number | null {
   return null;
 }
 
-/** Valores do ML em shipping.dimensions costumam vir em gramas; atributos podem vir em kg. */
-function gramsToKg(value: number, forceFromGrams = false): number {
-  if (forceFromGrams || value > 500) return Math.round((value / 1000) * 10000) / 10000;
-  return value;
+function gramsToKg(grams: number): number {
+  return Math.round((grams / 1000) * 10000) / 10000;
 }
 
-function parseShippingDimensions(shipping: unknown): ItemDimensions {
-  if (!shipping || typeof shipping !== "object") return { ...EMPTY };
-  const dims = (shipping as { dimensions?: unknown }).dimensions;
-  if (typeof dims !== "string" || !dims.trim()) return { ...EMPTY };
+function findAttr(attributes: unknown, id: string): MlAttribute | undefined {
+  if (!Array.isArray(attributes)) return undefined;
+  return (attributes as MlAttribute[]).find((a) => a.id === id);
+}
 
-  const parts = dims.split(",").map((p) => p.trim());
-  if (parts.length < 2) return { ...EMPTY };
+/** Converte valor + unidade do ML para kg (atributos number_unit). */
+function weightKgFromUnit(number: number, unitRaw: string | undefined | null): number | null {
+  if (!Number.isFinite(number)) return null;
+  const unit = (unitRaw ?? "").toLowerCase().trim();
+  if (unit === "g" || unit === "gram" || unit === "grams") return gramsToKg(number);
+  if (unit === "kg" || unit === "kilogram" || unit === "kilograms") return number;
+  if (unit === "mg") return gramsToKg(number / 1000);
+  if (unit === "mcg") return gramsToKg(number / 1_000_000);
+  if (unit === "lb") return Math.round(number * 0.453592 * 10000) / 10000;
+  if (unit === "oz") return Math.round(number * 0.0283495 * 10000) / 10000;
+  return null;
+}
 
-  const sizePart = parts[0];
-  const weightRaw = parseNumeric(parts[1]);
-  const sizeTokens = sizePart.split(/x/i).map((t) => parseNumeric(t.trim()));
-  if (sizeTokens.length < 3 || sizeTokens.some((t) => t == null)) {
-    return {
-      ...EMPTY,
-      weight_kg: weightRaw != null ? gramsToKg(weightRaw, true) : null,
-    };
+/** Interpreta value_name como peso (ex.: "340 g", "1.5 kg"). */
+function weightKgFromValueName(valueName: string | null | undefined): number | null {
+  if (!valueName?.trim()) return null;
+  const s = valueName.trim().toLowerCase().replace(",", ".");
+  const m =
+    s.match(/^(-?\d+(?:\.\d+)?)\s*(mcg|mg|g|kg|oz|lb)\s*$/i) ??
+    s.match(/(-?\d+(?:\.\d+)?)\s*(kg|g|mg|mcg|oz|lb)\b/i);
+  if (!m) {
+    const n = parseNumeric(s);
+    return n != null && n > 0 ? n : null;
   }
-
-  const [height, width, length] = sizeTokens as [number, number, number];
-  return {
-    height_cm: height,
-    width_cm: width,
-    length_cm: length,
-    weight_kg: weightRaw != null ? gramsToKg(weightRaw, true) : null,
-  };
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return null;
+  return weightKgFromUnit(n, m[2]) ?? (m[2] ? null : n);
 }
 
-type MlAttribute = {
-  id?: string;
-  value_name?: string | null;
-  value_struct?: { number?: number; unit?: string } | null;
-};
-
-const DIM_ATTR: Record<keyof Omit<ItemDimensions, never>, string[]> = {
-  height_cm: ["PACKAGE_HEIGHT", "HEIGHT", "SELLER_PACKAGE_HEIGHT"],
-  width_cm: ["PACKAGE_WIDTH", "WIDTH", "SELLER_PACKAGE_WIDTH"],
-  length_cm: ["PACKAGE_LENGTH", "LENGTH", "SELLER_PACKAGE_LENGTH", "PACKAGE_DEPTH", "DEPTH"],
-  weight_kg: ["PACKAGE_WEIGHT", "WEIGHT", "SELLER_PACKAGE_WEIGHT", "PRODUCT_WEIGHT"],
-};
-
-function attrValue(attr: MlAttribute): number | null {
+function weightKgFromAttribute(attr: MlAttribute, options: { forceGrams: boolean }): number | null {
   const struct = attr.value_struct;
   if (struct && typeof struct.number === "number" && Number.isFinite(struct.number)) {
-    const unit = (struct.unit ?? "").toLowerCase();
-    if (attr.id && DIM_ATTR.weight_kg.includes(attr.id) && (unit === "g" || unit === "gram" || unit === "grams")) {
-      return gramsToKg(struct.number, true);
+    if (options.forceGrams) return gramsToKg(struct.number);
+    const fromUnit = weightKgFromUnit(struct.number, struct.unit);
+    if (fromUnit != null) return fromUnit;
+    return struct.number;
+  }
+  if (options.forceGrams) {
+    const n = parseNumeric(attr.value_name);
+    return n != null ? gramsToKg(n) : null;
+  }
+  return weightKgFromValueName(attr.value_name);
+}
+
+/** Peso em gramas: shipping.dimensions (último segmento) ou SELLER_PACKAGE_WEIGHT; fallback PACKAGE_WEIGHT com unidade. */
+export function extractWeightKgFromMlPayload(payload: {
+  shipping?: unknown;
+  attributes?: unknown;
+}): number | null {
+  if (payload.shipping && typeof payload.shipping === "object") {
+    const dims = (payload.shipping as { dimensions?: unknown }).dimensions;
+    if (typeof dims === "string" && dims.trim()) {
+      const parts = dims.split(",").map((p) => p.trim());
+      if (parts.length >= 2) {
+        const weightRaw = parseNumeric(parts[1]);
+        if (weightRaw != null) return gramsToKg(weightRaw);
+      }
     }
+  }
+
+  const attrs = payload.attributes;
+  const seller = findAttr(attrs, "SELLER_PACKAGE_WEIGHT");
+  if (seller) {
+    const w = weightKgFromAttribute(seller, { forceGrams: true });
+    if (w != null) return w;
+  }
+
+  for (const id of ["PACKAGE_WEIGHT", "WEIGHT", "PRODUCT_WEIGHT"] as const) {
+    const attr = findAttr(attrs, id);
+    if (!attr) continue;
+    const w = weightKgFromAttribute(attr, { forceGrams: false });
+    if (w != null) return w;
+  }
+
+  return null;
+}
+
+const SELLER_SIZE_ATTR: Record<"height_cm" | "width_cm" | "length_cm", string> = {
+  height_cm: "SELLER_PACKAGE_HEIGHT",
+  width_cm: "SELLER_PACKAGE_WIDTH",
+  length_cm: "SELLER_PACKAGE_LENGTH",
+};
+
+const PACKAGE_SIZE_ATTR: Record<"height_cm" | "width_cm" | "length_cm", string[]> = {
+  height_cm: ["PACKAGE_HEIGHT", "HEIGHT"],
+  width_cm: ["PACKAGE_WIDTH", "WIDTH"],
+  length_cm: ["PACKAGE_LENGTH", "LENGTH", "PACKAGE_DEPTH", "DEPTH"],
+};
+
+function sizeCmFromAttribute(attr: MlAttribute): number | null {
+  const struct = attr.value_struct;
+  if (struct && typeof struct.number === "number" && Number.isFinite(struct.number)) {
     return struct.number;
   }
   return parseNumeric(attr.value_name);
 }
 
-function parseAttributesDimensions(attributes: unknown): ItemDimensions {
-  if (!Array.isArray(attributes)) return { ...EMPTY };
-  const attrs = attributes as MlAttribute[];
-  const out: ItemDimensions = { ...EMPTY };
+function extractSizeDimensionsFromAttributes(attributes: unknown): Pick<
+  ItemDimensions,
+  "height_cm" | "width_cm" | "length_cm"
+> {
+  const out: Pick<ItemDimensions, "height_cm" | "width_cm" | "length_cm"> = {
+    height_cm: null,
+    width_cm: null,
+    length_cm: null,
+  };
+  if (!Array.isArray(attributes)) return out;
 
-  for (const [field, ids] of Object.entries(DIM_ATTR) as [keyof ItemDimensions, string[]][]) {
-    const attr = attrs.find((a) => a.id && ids.includes(a.id));
-    if (!attr) continue;
-    let n = attrValue(attr);
-    if (n == null) continue;
-    if (field === "weight_kg" && n > 500) n = gramsToKg(n, true);
-    out[field] = n;
+  const attrs = attributes as MlAttribute[];
+  const findByIds = (ids: string[]) => attrs.find((a) => a.id && ids.includes(a.id));
+
+  for (const field of ["height_cm", "width_cm", "length_cm"] as const) {
+    const sellerAttr = findAttr(attrs, SELLER_SIZE_ATTR[field]);
+    if (sellerAttr) {
+      const n = sizeCmFromAttribute(sellerAttr);
+      if (n != null) {
+        out[field] = n;
+        continue;
+      }
+    }
+    const pkgAttr = findByIds(PACKAGE_SIZE_ATTR[field]);
+    if (pkgAttr) {
+      const n = sizeCmFromAttribute(pkgAttr);
+      if (n != null) out[field] = n;
+    }
   }
   return out;
+}
+
+function extractSizeDimensionsFromShipping(shipping: unknown): Pick<
+  ItemDimensions,
+  "height_cm" | "width_cm" | "length_cm"
+> {
+  const out: Pick<ItemDimensions, "height_cm" | "width_cm" | "length_cm"> = {
+    height_cm: null,
+    width_cm: null,
+    length_cm: null,
+  };
+  if (!shipping || typeof shipping !== "object") return out;
+  const dims = (shipping as { dimensions?: unknown }).dimensions;
+  if (typeof dims !== "string" || !dims.trim()) return out;
+
+  const parts = dims.split(",").map((p) => p.trim());
+  if (parts.length < 1) return out;
+  const sizeTokens = parts[0].split(/x/i).map((t) => parseNumeric(t.trim()));
+  if (sizeTokens.length < 3 || sizeTokens.some((t) => t == null)) return out;
+
+  const [height, width, length] = sizeTokens as [number, number, number];
+  return { height_cm: height, width_cm: width, length_cm: length };
 }
 
 export function mergeDimensions(...sources: ItemDimensions[]): ItemDimensions {
@@ -120,16 +212,26 @@ export function resolveVariationDimensions(
   return mergeDimensions(extractVariationDimensions(variation), parent);
 }
 
-/** Extrai medidas e peso do payload do item ML (shipping.dimensions e atributos PACKAGE_*). */
+/** Extrai medidas e peso do payload do item ML. */
 export function extractItemDimensions(item: MLItemDetail): ItemDimensions {
-  const fromShipping = parseShippingDimensions(item.shipping);
-  const fromAttrs = parseAttributesDimensions(
+  const weight_kg = extractWeightKgFromMlPayload({
+    shipping: item.shipping,
+    attributes: (item as { attributes?: unknown }).attributes,
+  });
+  const fromAttrs = extractSizeDimensionsFromAttributes(
     (item as { attributes?: unknown }).attributes
   );
-  return mergeDimensions(fromShipping, fromAttrs);
+  const fromShipping = extractSizeDimensionsFromShipping(item.shipping);
+  return mergeDimensions(
+    { ...EMPTY, weight_kg },
+    { ...EMPTY, ...fromAttrs },
+    { ...EMPTY, ...fromShipping }
+  );
 }
 
-/** Dimensões de variação (atributos da variação). */
+/** Dimensões de variação (atributos da variação + peso com mesma prioridade do item). */
 export function extractVariationDimensions(variation: MLVariationDetail): ItemDimensions {
-  return parseAttributesDimensions(variation.attributes);
+  const weight_kg = extractWeightKgFromMlPayload({ attributes: variation.attributes });
+  const sizes = extractSizeDimensionsFromAttributes(variation.attributes);
+  return { weight_kg, ...sizes };
 }
