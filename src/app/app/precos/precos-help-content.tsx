@@ -168,11 +168,9 @@ export function PrecosHelpContent() {
             <HelpFieldRow kind="optional" name="Só com vendas (30d)">
               Apenas anúncios com pedido nos últimos 30 dias.
             </HelpFieldRow>
-            <HelpFieldRow kind="optional" name="Sem promoção">
-              Promoção planejada igual ao <strong>Preço</strong> atual no ML.
-            </HelpFieldRow>
-            <HelpFieldRow kind="optional" name="Desconto &lt; 5% (promo ML)">
-              Promoção acima de 95% do preço ML — não atende regra mínima de campanha.
+            <HelpFieldRow kind="optional" name="Desconto (%)">
+              Compara o desconto entre <strong>Preço</strong> ML e <strong>Promoção</strong> (ex.: igual a 0% = sem
+              desconto; menor que 5% = fora do mínimo de campanha ML).
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Sem Promo ML ativa">
               Coluna <strong>Promo ML</strong> sem campanhas ativas no cache.

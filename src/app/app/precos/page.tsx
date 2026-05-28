@@ -229,6 +229,18 @@ function promotionPriceForDiscountPercent(currentPrice: number, discountPercent:
   return Math.floor(currentPrice * factor * 100) / 100;
 }
 
+/** Desconto % entre preço ML (current_price) e promoção planejada (new_price). */
+function getPromotionDiscountPercent(
+  listing: Pick<ListingWithPricing, "current_price" | "new_price">
+): number | null {
+  const price = Number(listing.current_price);
+  const promo = Number(listing.new_price);
+  if (!Number.isFinite(price) || !Number.isFinite(promo) || price <= 0) return null;
+  if (Math.round(promo * 100) === Math.round(price * 100)) return 0;
+  const pct = ((price - promo) / price) * 100;
+  return Math.round(pct * 100) / 100;
+}
+
 /** Resposta por item em POST /api/mercadolivre/seller-campaigns */
 type SellerCampaignItemResult =
   | { item_id: string; variation_id: number | null; status: "ok"; price: number }
@@ -1123,12 +1135,11 @@ function PrecosPageContent() {
   const [costQtyFilter, setCostQtyFilter] = useState("");
   const [draftCostOpFilter, setDraftCostOpFilter] = useState<StockCompareOp | "">("");
   const [draftCostQtyFilter, setDraftCostQtyFilter] = useState("");
-  /** Promoção (planejada) igual ao preço atual do anúncio — sem desconto em relação ao ML */
-  const [semPromocao, setSemPromocao] = useState(false);
-  const [draftSemPromocao, setDraftSemPromocao] = useState(false);
-  /** Promoção acima de 95% do preço (desconto menor que 5%) — não atendem ao mínimo da promoção ML */
-  const [foraDescontoMin5Ml, setForaDescontoMin5Ml] = useState(false);
-  const [draftForaDescontoMin5Ml, setDraftForaDescontoMin5Ml] = useState(false);
+  /** Desconto % (preço ML → promoção): condição + valor, filtro no cliente */
+  const [discountOpFilter, setDiscountOpFilter] = useState<StockCompareOp | "">("");
+  const [discountQtyFilter, setDiscountQtyFilter] = useState("");
+  const [draftDiscountOpFilter, setDraftDiscountOpFilter] = useState<StockCompareOp | "">("");
+  const [draftDiscountQtyFilter, setDraftDiscountQtyFilter] = useState("");
   /** Sem campanhas/promoções ativas no ML (seller-promotions) no último refresh do cache */
   const [semPromoMlAtiva, setSemPromoMlAtiva] = useState(false);
   const [draftSemPromoMlAtiva, setDraftSemPromoMlAtiva] = useState(false);
@@ -1248,8 +1259,7 @@ function PrecosPageContent() {
     profitOpFilter ||
     sales30dOpFilter ||
     costOpFilter ||
-    semPromocao ||
-    foraDescontoMin5Ml ||
+    discountOpFilter ||
     semPromoMlAtiva ||
     sortBy === "cost_desc" ||
     sortBy === "cost_asc" ||
@@ -1504,7 +1514,7 @@ function PrecosPageContent() {
 
   useEffect(() => {
     setPage(1);
-  }, [profitOpFilter, sales30dOpFilter, costOpFilter, semPromocao, foraDescontoMin5Ml, semPromoMlAtiva]);
+  }, [profitOpFilter, sales30dOpFilter, costOpFilter, discountOpFilter, semPromoMlAtiva]);
 
   /** Dados sempre vêm do cache (listings já inclui orders_30d). Não busca vendas em separado. */
 
@@ -2395,8 +2405,8 @@ function PrecosPageContent() {
     setDraftSales30dQtyFilter(sales30dQtyFilter);
     setDraftCostOpFilter(costOpFilter);
     setDraftCostQtyFilter(costQtyFilter);
-    setDraftSemPromocao(semPromocao);
-    setDraftForaDescontoMin5Ml(foraDescontoMin5Ml);
+    setDraftDiscountOpFilter(discountOpFilter);
+    setDraftDiscountQtyFilter(discountQtyFilter);
     setDraftSemPromoMlAtiva(semPromoMlAtiva);
     setDraftProfitOpFilter(profitOpFilter);
     setDraftProfitQtyFilter(profitQtyFilter);
@@ -2411,8 +2421,8 @@ function PrecosPageContent() {
     sales30dQtyFilter,
     costOpFilter,
     costQtyFilter,
-    semPromocao,
-    foraDescontoMin5Ml,
+    discountOpFilter,
+    discountQtyFilter,
     semPromoMlAtiva,
     profitOpFilter,
     profitQtyFilter,
@@ -2431,8 +2441,8 @@ function PrecosPageContent() {
       setSales30dQtyFilter(draftSales30dQtyFilter.trim());
       setCostOpFilter(draftCostOpFilter);
       setCostQtyFilter(draftCostQtyFilter.trim());
-      setSemPromocao(draftSemPromocao);
-      setForaDescontoMin5Ml(draftForaDescontoMin5Ml);
+      setDiscountOpFilter(draftDiscountOpFilter);
+      setDiscountQtyFilter(draftDiscountQtyFilter.trim());
       setSemPromoMlAtiva(draftSemPromoMlAtiva);
       setProfitOpFilter(draftProfitOpFilter);
       setProfitQtyFilter(draftProfitQtyFilter.trim());
@@ -2450,8 +2460,8 @@ function PrecosPageContent() {
       draftSales30dQtyFilter,
       draftCostOpFilter,
       draftCostQtyFilter,
-      draftSemPromocao,
-      draftForaDescontoMin5Ml,
+      draftDiscountOpFilter,
+      draftDiscountQtyFilter,
       draftSemPromoMlAtiva,
       draftProfitOpFilter,
       draftProfitQtyFilter,
@@ -2498,8 +2508,12 @@ function PrecosPageContent() {
         labels.push(`Custo ${stockCompareLabel(costOpFilter)} ${qty.toFixed(2)}`);
       }
     }
-    if (semPromocao) labels.push("Sem promoção");
-    if (foraDescontoMin5Ml) labels.push("Desconto < 5% (promo ML)");
+    if (discountOpFilter) {
+      const qty = Number(discountQtyFilter.trim().replace(",", "."));
+      if (Number.isFinite(qty) && qty >= 0) {
+        labels.push(`Desconto ${stockCompareLabel(discountOpFilter)} ${qty}%`);
+      }
+    }
     if (semPromoMlAtiva) labels.push("Sem Promo ML ativa");
     if (profitOpFilter) {
       const qty = parseInt(profitQtyFilter.trim(), 10);
@@ -2528,8 +2542,8 @@ function PrecosPageContent() {
     sales30dQtyFilter,
     costOpFilter,
     costQtyFilter,
-    semPromocao,
-    foraDescontoMin5Ml,
+    discountOpFilter,
+    discountQtyFilter,
     semPromoMlAtiva,
     profitOpFilter,
     profitQtyFilter,
@@ -2559,10 +2573,10 @@ function PrecosPageContent() {
     setDraftCostOpFilter("");
     setCostQtyFilter("");
     setDraftCostQtyFilter("");
-    setSemPromocao(false);
-    setDraftSemPromocao(false);
-    setForaDescontoMin5Ml(false);
-    setDraftForaDescontoMin5Ml(false);
+    setDiscountOpFilter("");
+    setDraftDiscountOpFilter("");
+    setDiscountQtyFilter("");
+    setDraftDiscountQtyFilter("");
     setSemPromoMlAtiva(false);
     setDraftSemPromoMlAtiva(false);
     setProfitOpFilter("");
@@ -2721,22 +2735,30 @@ function PrecosPageContent() {
       }
     }
 
-    if (semPromocao) {
-      base = base.filter((listing) => {
-        const promo = Number(listing.new_price);
-        const price = Number(listing.current_price);
-        if (!Number.isFinite(promo) || !Number.isFinite(price)) return false;
-        return Math.round(promo * 100) === Math.round(price * 100);
-      });
-    }
-
-    if (foraDescontoMin5Ml) {
-      base = base.filter(
-        (listing) =>
-          listing.current_price > 0 &&
-          listing.new_price > 0 &&
-          !meetsMlMinCampaignDiscount(listing)
-      );
+    if (discountOpFilter) {
+      const qty = Number(discountQtyFilter.trim().replace(",", "."));
+      if (!(Number.isFinite(qty) && qty >= 0)) {
+        base = [];
+      } else {
+        base = base.filter((listing) => {
+          const discount = getPromotionDiscountPercent(listing);
+          if (discount == null) return false;
+          switch (discountOpFilter) {
+            case "gt":
+              return discount > qty;
+            case "gte":
+              return discount >= qty;
+            case "lt":
+              return discount < qty;
+            case "lte":
+              return discount <= qty;
+            case "eq":
+              return discount === qty;
+            default:
+              return true;
+          }
+        });
+      }
     }
 
     if (semPromoMlAtiva) {
@@ -2755,8 +2777,8 @@ function PrecosPageContent() {
     costOpFilter,
     costQtyFilter,
     ordersData,
-    semPromocao,
-    foraDescontoMin5Ml,
+    discountOpFilter,
+    discountQtyFilter,
     semPromoMlAtiva,
   ]);
 
@@ -2785,8 +2807,8 @@ function PrecosPageContent() {
         sales30dQtyFilter,
         costOpFilter,
         costQtyFilter,
-        semPromocao ? "1" : "0",
-        foraDescontoMin5Ml ? "1" : "0",
+        discountOpFilter,
+        discountQtyFilter,
         semPromoMlAtiva ? "1" : "0",
       ].join("|"),
     [
@@ -2802,8 +2824,8 @@ function PrecosPageContent() {
       sales30dQtyFilter,
       costOpFilter,
       costQtyFilter,
-      semPromocao,
-      foraDescontoMin5Ml,
+      discountOpFilter,
+      discountQtyFilter,
       semPromoMlAtiva,
     ]
   );
@@ -5376,33 +5398,68 @@ function PrecosPageContent() {
 
                 <section>
                   <p className="modal-panel-filters-section-title">Promoção</p>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
+                      <p className="mb-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                        Desconto (% entre Preço ML e Promoção)
+                      </p>
+                      <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
+                        Ex.: sem desconto = igual a <strong>0</strong>; abaixo do mínimo de campanha ML = menor que{" "}
+                        <strong>{ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}</strong>.
+                      </p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <label
+                            htmlFor="precos-discount-op"
+                            className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                          >
+                            Condição
+                          </label>
+                          <select
+                            id="precos-discount-op"
+                            value={draftDiscountOpFilter}
+                            onChange={(e) =>
+                              setDraftDiscountOpFilter(e.target.value as StockCompareOp | "")
+                            }
+                            className="input w-full"
+                          >
+                            <option value="">Sem filtro de desconto</option>
+                            {STOCK_COMPARE_OPS.map((op) => (
+                              <option key={op} value={op}>
+                                {stockCompareLabel(op)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label
+                            htmlFor="precos-discount-qty"
+                            className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                          >
+                            Desconto (%)
+                          </label>
+                          <input
+                            id="precos-discount-qty"
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={0.01}
+                            value={draftDiscountQtyFilter}
+                            onChange={(e) => setDraftDiscountQtyFilter(e.target.value)}
+                            disabled={!draftDiscountOpFilter}
+                            placeholder={draftDiscountOpFilter ? "Ex.: 0 ou 5" : "Escolha a condição"}
+                            className="input w-full disabled:cursor-not-allowed disabled:opacity-50"
+                          />
+                        </div>
+                        {draftDiscountOpFilter && draftDiscountQtyFilter.trim() === "" && (
+                          <p className="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2">
+                            Informe o percentual de desconto para aplicar o filtro.
+                          </p>
+                        )}
+                      </div>
+                    </div>
                     <label
                       className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-card px-3 py-2.5 text-xs text-slate-700 dark:border-slate-600 dark:text-slate-200"
-                      title="Promoção planejada igual ao preço atual no Mercado Livre (sem desconto em relação ao anúncio)"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={draftSemPromocao}
-                        onChange={(e) => setDraftSemPromocao(e.target.checked)}
-                        className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-primary focus:ring-primary"
-                      />
-                      Sem promoção
-                    </label>
-                    <label
-                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-card px-3 py-2.5 text-xs text-slate-700 dark:border-slate-600 dark:text-slate-200"
-                      title="Promoção acima de 95% do preço do anúncio (desconto menor que 5%) — não serve para campanha de promoção do ML até ajustar"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={draftForaDescontoMin5Ml}
-                        onChange={(e) => setDraftForaDescontoMin5Ml(e.target.checked)}
-                        className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-primary focus:ring-primary"
-                      />
-                      Desconto &lt; 5% (promo ML)
-                    </label>
-                    <label
-                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-card px-3 py-2.5 text-xs text-slate-700 dark:border-slate-600 dark:text-slate-200 sm:col-span-2 lg:col-span-1"
                       title="Exibe apenas anúncios sem promoções ativas no cache de Promoções (coluna Promo ML = 0)"
                     >
                       <input
