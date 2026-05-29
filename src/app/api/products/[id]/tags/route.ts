@@ -5,6 +5,7 @@ import {
   normalizeTagName,
   setProductTagsByNames,
 } from "@/lib/product-tags";
+import { refreshPricingCacheForProductIds } from "@/lib/products/refresh-pricing-after-product-change";
 
 export async function GET(
   _request: NextRequest,
@@ -78,6 +79,13 @@ export async function PUT(
 
   try {
     await setProductTagsByNames(supabase, user.id, id, tagNames);
+    try {
+      await refreshPricingCacheForProductIds(supabase, user.id, [id], {
+        clearPromotionsSnapshot: false,
+      });
+    } catch (e) {
+      console.error("[products/[id]/tags PUT] refresh pricing_cache:", e);
+    }
     const map = await fetchTagsGroupedByProductId(supabase, [id]);
     return NextResponse.json({ tags: map.get(id) ?? [] });
   } catch (e) {

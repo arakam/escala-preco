@@ -11,6 +11,11 @@ import {
   parseProductListFilters,
 } from "@/lib/product-filters";
 import { fetchAllViaRange, isAllPageSize } from "@/lib/table-pagination";
+import {
+  linkMlItemsToProducts,
+  refreshPricingCacheForProductIds,
+  refreshPricingCacheForUser,
+} from "@/lib/products/refresh-pricing-after-product-change";
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -180,12 +185,35 @@ export async function POST(request: NextRequest) {
     try {
       await setProductTagsByNames(supabase, user.id, product.id, body.tag_names);
       const tagMap = await fetchTagsGroupedByProductId(supabase, [product.id]);
+      try {
+        const link = await linkMlItemsToProducts(supabase, user.id);
+        if (link.total_linked > 0) {
+          await refreshPricingCacheForUser(supabase, user.id);
+        } else {
+          await refreshPricingCacheForProductIds(supabase, user.id, [product.id]);
+        }
+      } catch (e) {
+        console.error("[products POST] refresh pricing_cache:", e);
+      }
       return NextResponse.json(
         { product: { ...product, tags: tagMap.get(product.id) ?? [] } },
         { status: 201 }
       );
     } catch (e) {
       console.error("Erro ao vincular tags ao produto:", e);
+    }
+  }
+
+  if (product) {
+    try {
+      const link = await linkMlItemsToProducts(supabase, user.id);
+      if (link.total_linked > 0) {
+        await refreshPricingCacheForUser(supabase, user.id);
+      } else {
+        await refreshPricingCacheForProductIds(supabase, user.id, [product.id]);
+      }
+    } catch (e) {
+      console.error("[products POST] refresh pricing_cache:", e);
     }
   }
 
@@ -213,6 +241,12 @@ export async function DELETE(request: NextRequest) {
       { error: "Erro ao excluir todos os produtos" },
       { status: 500 }
     );
+  }
+
+  try {
+    await refreshPricingCacheForUser(supabase, user.id);
+  } catch (e) {
+    console.error("[products DELETE all] refresh pricing_cache:", e);
   }
 
   return NextResponse.json({ success: true });

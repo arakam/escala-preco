@@ -33,6 +33,7 @@ export async function recomputeItemDimensionsFromRawJson(options?: {
   let items_scanned = 0;
   let items_updated = 0;
   let products_weight_updated = 0;
+  const mlRefsToRefresh: { account_id: string; item_id: string }[] = [];
 
   for (;;) {
     let q = supabase
@@ -77,6 +78,11 @@ export async function recomputeItemDimensionsFromRawJson(options?: {
           continue;
         }
         items_updated++;
+        const account_id = row.account_id != null ? String(row.account_id) : "";
+        const item_id = row.item_id != null ? String(row.item_id).trim().toUpperCase() : "";
+        if (account_id && item_id) {
+          mlRefsToRefresh.push({ account_id, item_id });
+        }
 
         if (
           row.product_id &&
@@ -97,6 +103,17 @@ export async function recomputeItemDimensionsFromRawJson(options?: {
 
     if (batch.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;
+  }
+
+  if (!dryRun && mlRefsToRefresh.length > 0) {
+    try {
+      const { refreshPricingCacheForMlItems } = await import(
+        "@/lib/products/refresh-pricing-after-product-change"
+      );
+      await refreshPricingCacheForMlItems(mlRefsToRefresh);
+    } catch (e) {
+      console.error("[recompute-item-dimensions] pricing cache refresh:", e);
+    }
   }
 
   return { ok: true, items_scanned, items_updated, products_weight_updated };

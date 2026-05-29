@@ -37,6 +37,10 @@ import {
   type PrecosImportRowValid,
 } from "@/lib/precos-import-csv";
 import { PrecosHelpContent } from "./precos-help-content";
+import {
+  consumePricingListingsStaleFlag,
+  subscribePricingListingsRefresh,
+} from "@/lib/pricing/listings-refresh-events";
 
 interface PricingListing {
   id: string;
@@ -1502,18 +1506,12 @@ function PrecosPageContent() {
 
   useEffect(() => {
     let cancelled = false;
-    const key = "escalapreco_pricing_listings_stale";
     void (async () => {
       await loadListings();
       if (cancelled) return;
-      /** Após “Vincular SKUs”, Produtos grava esta flag: o 1º GET pode ainda refletir cache antigo; o 2º alinha vínculos. */
-      try {
-        if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(key)) {
-          sessionStorage.removeItem(key);
-          await loadListings();
-        }
-      } catch {
-        // ignore
+      /** Produtos/importação podem marcar stale: 2º GET alinha custos/vínculos após refresh do cache no servidor. */
+      if (consumePricingListingsStaleFlag()) {
+        await loadListings();
       }
     })();
     return () => {
@@ -1521,22 +1519,8 @@ function PrecosPageContent() {
     };
   }, [loadListings]);
 
-  /** Após “Vincular SKUs” em Produtos, outra aba pode marcar o storage; ao voltar o foco à aba, recarrega a lista. */
-  useEffect(() => {
-    const key = "escalapreco_pricing_listings_stale";
-    const onVis = () => {
-      if (document.visibilityState !== "visible") return;
-      try {
-        if (typeof sessionStorage === "undefined" || !sessionStorage.getItem(key)) return;
-        sessionStorage.removeItem(key);
-        void loadListings();
-      } catch {
-        // ignore
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [loadListings]);
+  /** Recarrega quando Produtos avisa (mesma aba, outra aba ou ao voltar o foco). */
+  useEffect(() => subscribePricingListingsRefresh(() => void loadListings()), [loadListings]);
 
   useEffect(() => {
     setPage(1);

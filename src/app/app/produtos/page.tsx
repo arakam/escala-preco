@@ -11,6 +11,7 @@ import {
   TABLE_PAGE_SIZE_OPTIONS,
 } from "@/lib/table-pagination";
 import { useOnboarding } from "@/contexts/onboarding-context";
+import { notifyPricingListingsShouldRefresh } from "@/lib/pricing/listings-refresh-events";
 import {
   Product,
   ProductInput,
@@ -530,6 +531,7 @@ function ProdutosPageContent() {
       void loadAllTags();
       void loadUnregisteredSkus();
       reloadOnboarding();
+      notifyPricingListingsShouldRefresh("products_saved");
     } catch {
       setFormError("Erro de conexão");
     } finally {
@@ -547,6 +549,7 @@ function ProdutosPageContent() {
         setDeleteConfirm(null);
         loadProducts();
         reloadOnboarding();
+        notifyPricingListingsShouldRefresh("products_deleted");
       }
     } catch {
       // ignore
@@ -565,6 +568,7 @@ function ProdutosPageContent() {
         setPage(1);
         loadProducts();
         reloadOnboarding();
+        notifyPricingListingsShouldRefresh("products_deleted_all");
       }
     } catch {
       // ignore
@@ -592,14 +596,7 @@ function ProdutosPageContent() {
           cache_refresh_ok: data.cache_refresh?.ok ?? true,
           cache_refresh_error: data.cache_refresh?.error ?? null,
         });
-        const totalLinked = Number(data.items_linked ?? 0) + Number(data.variations_linked ?? 0);
-        if (totalLinked > 0) {
-          try {
-            sessionStorage.setItem("escalapreco_pricing_listings_stale", "1");
-          } catch {
-            // ignore (modo privado, storage cheio, etc.)
-          }
-        }
+        notifyPricingListingsShouldRefresh("products_link");
         if (viewMode === "stats") {
           loadStats();
         }
@@ -672,6 +669,7 @@ function ProdutosPageContent() {
       await loadTagsTab();
       if (viewMode === "products") void loadProducts();
       else if (viewMode === "stats") void loadStats();
+      notifyPricingListingsShouldRefresh("products_tags");
     } catch {
       setTagsTabMessage({ type: "error", text: "Erro de conexão" });
     } finally {
@@ -689,6 +687,7 @@ function ProdutosPageContent() {
         await loadTagsTab();
         if (viewMode === "products") void loadProducts();
         else if (viewMode === "stats") void loadStats();
+        notifyPricingListingsShouldRefresh("products_tags");
       }
     } finally {
       setTagSaving(false);
@@ -763,6 +762,7 @@ function ProdutosPageContent() {
         void loadAllTags();
         void loadUnregisteredSkus();
         reloadOnboarding();
+        notifyPricingListingsShouldRefresh("products_import");
       } else {
         const details = data.details as string[] | undefined;
         const main = (data.error as string) || "Erro ao importar";

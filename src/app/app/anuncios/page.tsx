@@ -12,6 +12,7 @@ import {
 } from "@/lib/table-pagination";
 import { SingleAnuncioImportBar, SyncImportProgress } from "@/components/SyncImportProgress";
 import { useOnboarding } from "@/contexts/onboarding-context";
+import { notifyPricingListingsShouldRefresh } from "@/lib/pricing/listings-refresh-events";
 import {
   filterCriticalMlItemTags,
   formatMlItemHealth,
@@ -834,6 +835,7 @@ function AnunciosPageContent() {
       forgetSyncJob();
       void loadItems({ silent: true });
       void reloadOnboarding();
+      notifyPricingListingsShouldRefresh("listings_sync");
 
       if (!account) return;
       try {
@@ -987,6 +989,7 @@ function AnunciosPageContent() {
         setSingleMlb("");
         loadItems();
         reloadOnboarding();
+        notifyPricingListingsShouldRefresh("listing_sync_single");
       } else {
         setSingleError(data.error || "Erro ao sincronizar anúncio");
       }

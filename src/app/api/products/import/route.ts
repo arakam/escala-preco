@@ -7,6 +7,7 @@ import {
   syncImportedProductTagsBulk,
 } from "@/lib/product-tags";
 import { PRODUCT_CSV_CANONICAL_KEYS } from "@/lib/products-csv";
+import { linkMlItemsAndRefreshPricingCacheForUser } from "@/lib/products/refresh-pricing-after-product-change";
 
 /** PostgREST/Supabase limita ~1000 linhas por request; importar em lotes. */
 const UPSERT_BATCH_SIZE = 500;
@@ -323,6 +324,19 @@ export async function POST(request: NextRequest) {
     } catch (tagErr) {
       const msg = tagErr instanceof Error ? tagErr.message : String(tagErr);
       errors.push(`Tags: ${msg || "erro ao aplicar tags do CSV"}`);
+    }
+  }
+
+  if (imported > 0) {
+    try {
+      const { cache } = await linkMlItemsAndRefreshPricingCacheForUser(supabase, user.id);
+      if (!cache.ok) {
+        errors.push(`Cache de preços: ${cache.error ?? "falha ao atualizar"}`);
+      }
+    } catch (linkErr) {
+      const msg = linkErr instanceof Error ? linkErr.message : String(linkErr);
+      errors.push(`Vínculo/cache de preços: ${msg || "erro ao atualizar após importação"}`);
+      console.error("[Import] link/cache preços:", linkErr);
     }
   }
 

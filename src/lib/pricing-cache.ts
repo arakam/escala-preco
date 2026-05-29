@@ -7,7 +7,8 @@
  * permite preço por variação fora do fluxo User Product). Variações alimentam só o fallback
  * de preço planejado legado (chaves por variation_id).
  *
- * Chamado após: sync de anúncios, vínculo MLB-SKU, ou manualmente (POST /api/pricing/cache/refresh).
+ * Chamado após: sync de anúncios, alteração/importação de produtos, vínculo MLB-SKU,
+ * ou manualmente (POST /api/pricing/cache/refresh).
  */
 import { createHash } from "crypto";
 import { createServiceClient } from "@/lib/supabase/service";
