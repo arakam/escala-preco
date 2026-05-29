@@ -29,6 +29,7 @@ import {
   mlItemStatusBadgeClass,
   ML_ITEM_STATUS_FILTER_OPTIONS,
 } from "@/lib/mercadolivre/item-status";
+import { fulfillmentFieldsFromStoredRow } from "@/lib/mercadolivre/fulfillment-stock";
 import { isIncompleteJob, shouldTrackSyncJob, type JobStatus } from "@/lib/jobs";
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
@@ -58,8 +59,12 @@ const LISTING_TYPE_FILTER_IDS = Object.keys(LISTING_TYPE_LABELS).sort((a, b) =>
   formatListingTypeLabel(a).localeCompare(formatListingTypeLabel(b), "pt-BR")
 );
 
+function getItemFulfillment(item: ItemRow) {
+  return fulfillmentFieldsFromStoredRow(item);
+}
+
 function isFullListing(item: ItemRow): boolean {
-  return parseMlItemTags(item.tags_json).includes("fulfillment");
+  return getItemFulfillment(item).is_fulfillment;
 }
 
 const COLUMN_ORDER: ColumnKey[] = [
@@ -68,6 +73,7 @@ const COLUMN_ORDER: ColumnKey[] = [
   "title",
   "listing_type",
   "full",
+  "full_stock",
   "category",
   "status",
   "price",
@@ -87,7 +93,8 @@ const COLUMN_WIDTHS: Record<ColumnKey, number> = {
   item_id: 120,
   title: 280,
   listing_type: 120,
-  full: 84,
+  full: 72,
+  full_stock: 96,
   category: 140,
   status: 112,
   price: 108,
@@ -119,6 +126,9 @@ interface ItemRow {
   sold_quantity?: number | null;
   health?: number | null;
   tags_json?: string[] | null;
+  inventory_id?: string | null;
+  is_fulfillment?: boolean | null;
+  fulfillment_stock?: number | null;
   user_product_id?: string | null;
   has_variations: boolean;
   thumbnail: string | null;
@@ -319,6 +329,9 @@ function AnunciosHelpContent() {
             <HelpFieldRow kind="optional" name="Tipo de anúncio">
               Tipo de publicação sincronizado (ex.: Clássico, Premium); vem do <code className="text-xs">listing_type_id</code> do ML.
             </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Mostrar somente anúncios Full">
+              Lista apenas anúncios marcados como Full (estoque Full na API ou tag/frete de fulfillment na sync).
+            </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Cód. MLBU">
               Filtra pelo código User Product (ex.: MLAU…); busca parcial no campo sincronizado.
             </HelpFieldRow>
@@ -378,6 +391,18 @@ function AnunciosHelpContent() {
               Preço que o anúncio está <strong>exibindo</strong> agora (preço de venda vencedor /{" "}
               <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">sale_price</code> do ML). Com
               promoção ativa, pode ser menor que o Preço ML.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Full">
+              <strong>Sim</strong> quando o ML informa <code className="text-xs">inventory_id</code> no anúncio (ou
+              variação), há saldo no depósito Full, ou tag/frete de fulfillment na última sync.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Estoque Full">
+              Soma do <code className="text-xs">available_quantity</code> em{" "}
+              <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">
+                GET /inventories/&#123;inventory_id&#125;/stock/fulfillment
+              </code>
+              . O <code className="text-xs">inventory_id</code> vem do GET /items (ex.: LCQI05831), não do MLB/MLBU.
+              Diferente da coluna <strong>Estoque</strong> (quantidade da publicação).
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Estoque / Vendidos">
               Quantidade disponível e unidades vendidas conforme retorno da API na sync.
@@ -897,6 +922,7 @@ function AnunciosPageContent() {
       "Título",
       "Tipo de anúncio",
       "É Full",
+      "Estoque Full",
       "Categoria",
       "Status",
       "Preço ML",
@@ -909,12 +935,14 @@ function AnunciosPageContent() {
       "Atualizado",
     ];
     const rows = sortedItems.map((item) => {
+      const fulfillment = getItemFulfillment(item);
       const criticalTags = filterCriticalMlItemTags(parseMlItemTags(item.tags_json));
       return [
       item.item_id,
       item.title ?? "",
       formatListingTypeLabel(item.listing_type_id) || (item.listing_type_id ?? ""),
-      isFullListing(item) ? "Sim" : "Não",
+      fulfillment.is_fulfillment ? "Sim" : "Não",
+      fulfillment.fulfillment_stock != null ? String(fulfillment.fulfillment_stock) : "",
       item.category_id ?? "",
       formatMlItemStatusLabel(item.status),
       item.price != null ? Number(item.price).toFixed(2) : "",
@@ -1364,6 +1392,7 @@ function AnunciosPageContent() {
                   {renderColumnHeader("title", "Título", "title")}
                   {renderColumnHeader("listing_type", "Tipo de anúncio", "listing_type_id")}
                   {renderColumnHeader("full", "Full")}
+                  {renderColumnHeader("full_stock", "Estoque Full")}
                   {renderColumnHeader("category", "Categoria", "category_id")}
                   {renderColumnHeader("status", "Status", "status")}
                   {renderColumnHeader("price", "Preço ML", "price", "whitespace-nowrap")}
@@ -1451,6 +1480,24 @@ function AnunciosPageContent() {
                       ) : (
                         <span className="text-fg-muted dark:text-slate-400">Não</span>
                       )}
+                    </td>
+                    <td
+                      className={frozenCellClass("full_stock", "p-2 text-right text-xs tabular-nums text-slate-700 dark:text-slate-200")}
+                      style={frozenCellStyle("full_stock")}
+                      title={
+                        isFullListing(item) && getItemFulfillment(item).fulfillment_stock == null
+                          ? "Full confirmado por tag/frete; resincronize para obter o saldo no depósito ML"
+                          : undefined
+                      }
+                    >
+                      {(() => {
+                        const stock = getItemFulfillment(item).fulfillment_stock;
+                        if (stock != null) return <span className="font-medium">{stock}</span>;
+                        if (isFullListing(item)) {
+                          return <span className="text-fg-muted dark:text-slate-500">—</span>;
+                        }
+                        return <span className="text-fg-muted dark:text-slate-400">—</span>;
+                      })()}
                     </td>
                     <td
                       className={frozenCellClass("category", "max-w-[140px] p-2")}

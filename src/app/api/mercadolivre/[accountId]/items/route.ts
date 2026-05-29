@@ -159,7 +159,7 @@ export async function GET(
     let q = supabase
       .from("ml_items")
       .select(
-        "item_id, title, status, price, sale_price, available_quantity, sold_quantity, health, tags_json, has_variations, thumbnail, permalink, updated_at, user_product_id, family_id, family_name, listing_type_id, category_id",
+        "item_id, title, status, price, sale_price, available_quantity, sold_quantity, health, tags_json, has_variations, thumbnail, permalink, updated_at, user_product_id, family_id, family_name, listing_type_id, category_id, inventory_id, is_fulfillment, fulfillment_stock",
         { count: "exact" }
       )
       .eq("account_id", accountId)
@@ -171,7 +171,7 @@ export async function GET(
       );
     }
     if (statusFilter) q = q.eq("status", statusFilter);
-    if (fullOnly) q = q.contains("tags_text", ["fulfillment"]);
+    if (fullOnly) q = q.eq("is_fulfillment", true);
     if (mlbuOnly) q = q.not("user_product_id", "is", null);
     if (familyId) q = q.eq("family_id", familyId);
     if (mlbuCode) q = q.ilike("user_product_id", `%${mlbuCode}%`);

@@ -1094,6 +1094,9 @@ function PrecosPageContent() {
   /** Filtro por vínculo com produto no cache */
   const [linkFilter, setLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
   const [draftLinkFilter, setDraftLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
+  /** Somente anúncios Full (ml_items.is_fulfillment) */
+  const [fullOnly, setFullOnly] = useState(false);
+  const [draftFullOnly, setDraftFullOnly] = useState(false);
   const [calculating, setCalculating] = useState(false);
   const [isMercadoLider, setIsMercadoLider] = useState(false);
   /** Gold/Platinum na API de reputação — frete sempre incluído nos cálculos. */
@@ -1292,6 +1295,7 @@ function PrecosPageContent() {
     if (skuFilter) params.set("sku", skuFilter);
     if (supplierFilter) params.set("supplier", supplierFilter);
     if (filterTagIds.length > 0) params.set("tags", filterTagIds.join(","));
+    if (fullOnly) params.set("full_only", "1");
 
     try {
       const [listingsRes, plannedRes] = await Promise.all([
@@ -1378,7 +1382,18 @@ function PrecosPageContent() {
         setListingsRefetching(false);
       }
     }
-  }, [pageForRequest, limitForRequest, search, statusFilter, linkFilter, sortBy, skuFilter, supplierFilter, filterTagIds]);
+  }, [
+    pageForRequest,
+    limitForRequest,
+    search,
+    statusFilter,
+    linkFilter,
+    fullOnly,
+    sortBy,
+    skuFilter,
+    supplierFilter,
+    filterTagIds,
+  ]);
 
   const fetchRefJob = useCallback(
     async (jobId: string) => {
@@ -2400,6 +2415,7 @@ function PrecosPageContent() {
     setDraftSupplierFilter(supplierFilter);
     setDraftStatusFilter(statusFilter);
     setDraftLinkFilter(linkFilter);
+    setDraftFullOnly(fullOnly);
     setDraftFilterTagIds(filterTagIds);
     setDraftSales30dOpFilter(sales30dOpFilter);
     setDraftSales30dQtyFilter(sales30dQtyFilter);
@@ -2416,6 +2432,7 @@ function PrecosPageContent() {
     supplierFilter,
     statusFilter,
     linkFilter,
+    fullOnly,
     filterTagIds,
     sales30dOpFilter,
     sales30dQtyFilter,
@@ -2436,6 +2453,7 @@ function PrecosPageContent() {
       setSupplierFilter(draftSupplierFilter.trim());
       setStatusFilter(draftStatusFilter);
       setLinkFilter(draftLinkFilter);
+      setFullOnly(draftFullOnly);
       setFilterTagIds(draftFilterTagIds);
       setSales30dOpFilter(draftSales30dOpFilter);
       setSales30dQtyFilter(draftSales30dQtyFilter.trim());
@@ -2455,6 +2473,7 @@ function PrecosPageContent() {
       draftSupplierFilter,
       draftStatusFilter,
       draftLinkFilter,
+      draftFullOnly,
       draftFilterTagIds,
       draftSales30dOpFilter,
       draftSales30dQtyFilter,
@@ -2496,6 +2515,7 @@ function PrecosPageContent() {
     }
     if (linkFilter === "linked") labels.push("Vínculo: só vinculados");
     if (linkFilter === "unlinked") labels.push("Vínculo: só não vinculados");
+    if (fullOnly) labels.push("Somente Full");
     if (sales30dOpFilter) {
       const qty = parseInt(sales30dQtyFilter.trim(), 10);
       if (Number.isFinite(qty) && qty >= 0) {
@@ -2538,6 +2558,7 @@ function PrecosPageContent() {
     supplierFilter,
     statusFilter,
     linkFilter,
+    fullOnly,
     sales30dOpFilter,
     sales30dQtyFilter,
     costOpFilter,
@@ -2565,6 +2586,8 @@ function PrecosPageContent() {
     setDraftStatusFilter("");
     setLinkFilter("all");
     setDraftLinkFilter("all");
+    setFullOnly(false);
+    setDraftFullOnly(false);
     setSales30dOpFilter("");
     setDraftSales30dOpFilter("");
     setSales30dQtyFilter("");
@@ -5208,6 +5231,17 @@ function PrecosPageContent() {
                         <option value="linked">Só vinculados</option>
                         <option value="unlinked">Só não vinculados</option>
                       </select>
+                    </div>
+                    <div className="flex items-end sm:col-span-2">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={draftFullOnly}
+                          onChange={(e) => setDraftFullOnly(e.target.checked)}
+                          className="rounded border-slate-300"
+                        />
+                        Mostrar somente anúncios Full
+                      </label>
                     </div>
                   </div>
                 </section>

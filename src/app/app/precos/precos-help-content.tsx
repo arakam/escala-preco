@@ -162,6 +162,10 @@ export function PrecosHelpContent() {
             <HelpFieldRow kind="optional" name="Vínculo MLB → produto">
               Só vinculados, só não vinculados ou todos.
             </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Mostrar somente anúncios Full">
+              Lista apenas MLB marcados como Full na sincronização de anúncios (
+              <code className="text-xs">is_fulfillment</code>).
+            </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Tags do produto vinculado (qualquer uma)">
               Exibe anúncios cujo produto tenha ao menos uma tag marcada.
             </HelpFieldRow>

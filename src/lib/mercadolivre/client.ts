@@ -75,6 +75,7 @@ export interface MLItemDetail {
     id: number;
     price: number;
     available_quantity: number;
+    inventory_id?: string | null;
     attribute_combinations?: Array<{ id: string; value_name: string }>;
     attributes?: Array<{ id: string; value_name?: string | null }>;
     seller_custom_field?: string;
@@ -85,6 +86,8 @@ export interface MLItemDetail {
   family_id?: string | null;
   /** User Product: nome genérico do produto (família). */
   family_name?: string | null;
+  /** Inventário no ML (estoque Full usa este id ou user_product_id). */
+  inventory_id?: string | null;
   [key: string]: unknown;
 }
 
@@ -252,6 +255,7 @@ export interface MLVariationDetail {
   id: number;
   price?: number;
   available_quantity?: number;
+  inventory_id?: string | null;
   attribute_combinations?: Array<{ id: string; value_name: string }>;
   attributes?: Array<{ id: string; value_name?: string | null }>;
   seller_custom_field?: string | null;

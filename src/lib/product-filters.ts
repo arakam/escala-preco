@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveMlItemIdsByProductIds, resolveProductIdsByTagIds } from "@/lib/product-tags";
+import { fetchAllViaRange } from "@/lib/table-pagination";
 
 export type ProductHasPmaFilter = "yes" | "no" | "";
 
@@ -103,6 +104,23 @@ export async function resolveMlItemIdsByProductSupplier(
   if (productIds.length === 0) return [];
 
   return resolveMlItemIdsByProductIds(supabase, accountId, productIds);
+}
+
+/** MLB da conta marcados como Full em ml_items (is_fulfillment). */
+export async function resolveMlItemIdsByFulfillment(
+  supabase: SupabaseClient,
+  accountId: string
+): Promise<string[]> {
+  const { rows, error } = await fetchAllViaRange<{ item_id: string }>((from, to) =>
+    supabase
+      .from("ml_items")
+      .select("item_id")
+      .eq("account_id", accountId)
+      .eq("is_fulfillment", true)
+      .range(from, to)
+  );
+  if (error) throw error;
+  return rows.map((r) => r.item_id);
 }
 
 /** Interseção de listas de item_id (null = sem restrição). */

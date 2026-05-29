@@ -1,6 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { intersectMlItemIdFilters, resolveMlItemIdsByProductSupplier } from "@/lib/product-filters";
+import {
+  intersectMlItemIdFilters,
+  resolveMlItemIdsByFulfillment,
+  resolveMlItemIdsByProductSupplier,
+} from "@/lib/product-filters";
 import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 import {
   fetchAllViaRange,
@@ -67,6 +71,8 @@ export async function GET(req: NextRequest) {
   const skuFilter = url.searchParams.get("sku")?.trim() || "";
   const supplierFilter = url.searchParams.get("supplier")?.trim() || "";
   const onlyWithSales30d = url.searchParams.get("only_with_sales") === "1";
+  const fullOnly =
+    url.searchParams.get("full_only") === "1" || url.searchParams.get("full_only") === "true";
   const tagIdsParam = url.searchParams.get("tags")?.trim() || "";
   const tagIds = tagIdsParam
     ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean)
@@ -87,9 +93,9 @@ export async function GET(req: NextRequest) {
   // Ler cache com service role (já validamos que a conta é do usuário); evita RLS bloqueando leitura
   const serviceSupabase = createServiceClient();
 
-  /** MLB com produto tagueado ou fornecedor (via ml_items/ml_variations), não só product_id no cache. */
+  /** MLB com produto tagueado, fornecedor ou Full (via ml_items), não só product_id no cache. */
   let allowedItemIds: string[] | null = null;
-  if (tagIds.length > 0 || supplierFilter) {
+  if (tagIds.length > 0 || supplierFilter || fullOnly) {
     try {
       const byTags =
         tagIds.length > 0
@@ -103,7 +109,11 @@ export async function GET(req: NextRequest) {
             supplierFilter
           )
         : null;
-      allowedItemIds = intersectMlItemIdFilters(byTags, bySupplier);
+      const byFull = fullOnly ? await resolveMlItemIdsByFulfillment(serviceSupabase, account.id) : null;
+      allowedItemIds = intersectMlItemIdFilters(
+        intersectMlItemIdFilters(byTags, bySupplier),
+        byFull
+      );
       if (allowedItemIds !== null && allowedItemIds.length === 0) {
         return NextResponse.json({
           listings: [],

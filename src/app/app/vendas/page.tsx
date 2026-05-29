@@ -21,8 +21,8 @@ import {
   formatOrderDispatchDeadline,
   formatOrderShippingLabel,
 } from "@/lib/mercadolivre/shipping-labels";
+import { SALES_RECENT_ORDERS_LIMIT } from "@/lib/mercadolivre/sales-list";
 
-const SALES_ORDERS_FETCH_LIMIT = 500;
 const ORDERS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200] as const;
 
 type OrderStatusFilter = "" | "paid" | "cancelled" | "other";
@@ -110,12 +110,6 @@ function normalizeOrderTags(raw: unknown): string[] {
   return raw.map((t) => String(t).trim().toLowerCase()).filter(Boolean);
 }
 
-function matchesOrderTagsFilter(tags: string[], filterTags: string[]): boolean {
-  if (filterTags.length === 0) return true;
-  if (tags.length === 0) return false;
-  return filterTags.some((t) => tags.includes(t));
-}
-
 function OrderTagsBadges({ tags }: { tags: string[] }) {
   if (tags.length === 0) {
     return <span className="text-slate-400">—</span>;
@@ -173,7 +167,14 @@ function VendasHelpContent() {
             dos MLB do pedido.
           </li>
           <li>
-            A aba <strong>Resumo 30d</strong> mostra o mesmo critério da coluna Preços: pedidos pagos nos últimos 30 dias por MLB.
+            A aba <strong>Resumo 30d</strong> mostra o mesmo critério da coluna Preços: pedidos{" "}
+            <strong>pagos</strong> nos últimos <strong>30 dias</strong> por MLB.
+          </li>
+          <li>
+            Na aba <strong>Vendas</strong>, sem filtros a lista mostra os{" "}
+            {SALES_RECENT_ORDERS_LIMIT} pedidos mais recentes. Com filtros (busca MLB, período, status,
+            etc.) a consulta vai ao banco inteiro — use <strong>Período</strong> + <strong>Status: Pago</strong>{" "}
+            para conferir o Resumo 30d de um anúncio.
           </li>
           <li>
             Cada pedido traz <strong>tags</strong> do ML (<code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">order.tags</code>
@@ -276,51 +277,24 @@ function CompareValueCell({
   );
 }
 
-function normalizeOrderStatus(status: string): string {
-  return status.toLowerCase();
-}
-
-function matchesOrderStatusFilter(status: string, filter: OrderStatusFilter): boolean {
-  if (!filter) return true;
-  const s = normalizeOrderStatus(status);
-  if (filter === "paid") return s === "paid";
-  if (filter === "cancelled") return s === "cancelled" || s === "canceled";
-  return s !== "paid" && s !== "cancelled" && s !== "canceled";
-}
-
 function formatFilterDateLabel(isoDate: string): string {
   const [y, m, d] = isoDate.split("-").map(Number);
   if (!y || !m || !d) return isoDate;
   return new Date(y, m - 1, d).toLocaleDateString("pt-BR");
 }
 
-function matchesOrderDateRange(dateCreated: string, dateFrom: string, dateTo: string): boolean {
-  if (!dateFrom && !dateTo) return true;
-  const t = new Date(dateCreated).getTime();
-  if (!Number.isFinite(t)) return false;
-
-  if (dateFrom) {
-    const [y, m, d] = dateFrom.split("-").map(Number);
-    const start = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
-    if (t < start) return false;
-  }
-  if (dateTo) {
-    const [y, m, d] = dateTo.split("-").map(Number);
-    const end = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
-    if (t > end) return false;
-  }
-  return true;
+function toDateInputValue(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-function matchesOrderLineSearch(row: OrderLineTableRow, query: string): boolean {
-  const term = query.trim().toLowerCase();
-  if (!term) return true;
-  const orderId = row.ml_order_id.toLowerCase();
-  const withoutHash = term.startsWith("#") ? term.slice(1) : term;
-  if (orderId.includes(withoutHash)) return true;
-  if (row.item_id.toLowerCase().includes(term)) return true;
-  if (row.sku?.toLowerCase().includes(term)) return true;
-  return false;
+function last30DaysDateRangeInputs(): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 30);
+  return { from: toDateInputValue(from), to: toDateInputValue(to) };
 }
 
 function CopyableCell({
@@ -393,6 +367,11 @@ function VendasPageContent() {
   const [profitCalcNote, setProfitCalcNote] = useState<string | null>(null);
   const [aggregate, setAggregate] = useState<AggRow[]>([]);
   const [hasAggregate, setHasAggregate] = useState(false);
+  const [ordersListMode, setOrdersListMode] = useState<"recent" | "filtered">("recent");
+  const [ordersTotalLoaded, setOrdersTotalLoaded] = useState(0);
+  const [linesTotalLoaded, setLinesTotalLoaded] = useState(0);
+  const [recentLimitHit, setRecentLimitHit] = useState(false);
+  const [filteredMaxHit, setFilteredMaxHit] = useState(false);
 
   const [ordersSearch, setOrdersSearch] = useState("");
   const [ordersStatusFilter, setOrdersStatusFilter] = useState<OrderStatusFilter>("");
@@ -425,13 +404,27 @@ function VendasPageContent() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/sales?limit=${SALES_ORDERS_FETCH_LIMIT}`, { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (ordersSearch.trim()) params.set("search", ordersSearch.trim());
+      if (ordersStatusFilter) params.set("status", ordersStatusFilter);
+      if (ordersDateFrom) params.set("date_from", ordersDateFrom);
+      if (ordersDateTo) params.set("date_to", ordersDateTo);
+      if (ordersDispatchDateFrom) params.set("dispatch_from", ordersDispatchDateFrom);
+      if (ordersDispatchDateTo) params.set("dispatch_to", ordersDispatchDateTo);
+      if (ordersTagFilter.length > 0) params.set("tags", ordersTagFilter.join(","));
+
+      const res = await fetch(`/api/sales?${params.toString()}`, { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Falha ao carregar");
         return;
       }
       setSyncState(data.sync_state ?? null);
+      setOrdersListMode(data.orders_list_mode === "filtered" ? "filtered" : "recent");
+      setOrdersTotalLoaded(Number(data.orders_total) || 0);
+      setLinesTotalLoaded(Number(data.lines_total) || 0);
+      setRecentLimitHit(Boolean(data.recent_limit_hit));
+      setFilteredMaxHit(Boolean(data.filtered_max_hit));
       setOrders(
         (data.recent_orders ?? []).map(
           (o: OrderRow & {
@@ -471,7 +464,15 @@ function VendasPageContent() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [
+    ordersSearch,
+    ordersStatusFilter,
+    ordersDateFrom,
+    ordersDateTo,
+    ordersDispatchDateFrom,
+    ordersDispatchDateTo,
+    ordersTagFilter,
+  ]);
 
   useEffect(() => {
     void load();
@@ -728,25 +729,7 @@ function VendasPageContent() {
       });
   }, [orderLinesProfit, items, orderById]);
 
-  const filteredOrderLines = useMemo(() => {
-    return orderLineTableRows.filter(
-      (row) =>
-        matchesOrderLineSearch(row, ordersSearch) &&
-        matchesOrderStatusFilter(row.status, ordersStatusFilter) &&
-        matchesOrderDateRange(row.date_created, ordersDateFrom, ordersDateTo) &&
-        matchesOrderDateRange(row.shipping_sla_expected_at ?? "", ordersDispatchDateFrom, ordersDispatchDateTo) &&
-        matchesOrderTagsFilter(row.tags, ordersTagFilter)
-    );
-  }, [
-    orderLineTableRows,
-    ordersSearch,
-    ordersStatusFilter,
-    ordersDateFrom,
-    ordersDateTo,
-    ordersDispatchDateFrom,
-    ordersDispatchDateTo,
-    ordersTagFilter,
-  ]);
+  const displayOrderLines = orderLineTableRows;
 
   const availableOrderTags = useMemo(() => {
     const set = new Set<string>();
@@ -758,13 +741,47 @@ function VendasPageContent() {
     );
   }, [orders]);
 
-  const ordersTotalPages = computeTotalPages(filteredOrderLines.length, ordersPageSize);
+  const resumoMatchForSearch = useMemo(() => {
+    const term = ordersSearch.trim().toUpperCase();
+    if (!term) return null;
+    return (
+      aggregate.find(
+        (r) => r.item_id.toUpperCase() === term || r.item_id.toUpperCase().includes(term)
+      ) ?? null
+    );
+  }, [ordersSearch, aggregate]);
+
+  const distinctOrdersInList = useMemo(
+    () => new Set(displayOrderLines.map((r) => r.ml_order_id)).size,
+    [displayOrderLines]
+  );
+
+  const showResumo30dHint =
+    resumoMatchForSearch != null &&
+    (!ordersStatusFilter || ordersStatusFilter !== "paid" || !ordersDateFrom) &&
+    distinctOrdersInList < resumoMatchForSearch.order_count;
+
+  const applyResumo30dFilters = useCallback((itemId: string) => {
+    const range = last30DaysDateRangeInputs();
+    setOrdersSearch(itemId);
+    setDraftOrdersSearch(itemId);
+    setOrdersStatusFilter("paid");
+    setDraftOrdersStatusFilter("paid");
+    setOrdersDateFrom(range.from);
+    setOrdersDateTo(range.to);
+    setDraftOrdersDateFrom(range.from);
+    setDraftOrdersDateTo(range.to);
+    setOrdersPage(1);
+    setTab("vendas");
+  }, []);
+
+  const ordersTotalPages = computeTotalPages(displayOrderLines.length, ordersPageSize);
 
   const paginatedOrderLines = useMemo(() => {
-    if (isAllPageSize(ordersPageSize)) return filteredOrderLines;
+    if (isAllPageSize(ordersPageSize)) return displayOrderLines;
     const start = (ordersPage - 1) * ordersPageSize;
-    return filteredOrderLines.slice(start, start + ordersPageSize);
-  }, [filteredOrderLines, ordersPage, ordersPageSize]);
+    return displayOrderLines.slice(start, start + ordersPageSize);
+  }, [displayOrderLines, ordersPage, ordersPageSize]);
 
   const appliedOrdersFilters = useMemo(() => {
     const labels: string[] = [];
@@ -1080,7 +1097,16 @@ function VendasPageContent() {
                     ) : (
                       aggregate.map((row) => (
                         <AppTableBodyRow key={row.item_id}>
-                          <AppTableTd className="font-mono text-xs">{row.item_id}</AppTableTd>
+                          <AppTableTd className="font-mono text-xs">
+                            <button
+                              type="button"
+                              onClick={() => applyResumo30dFilters(row.item_id)}
+                              className="pricing-cell-chip text-left font-mono text-xs"
+                              title="Ver pedidos pagos deste MLB nos últimos 30 dias (aba Vendas)"
+                            >
+                              {row.item_id}
+                            </button>
+                          </AppTableTd>
                           <AppTableTd className="text-right tabular-nums">{row.order_count}</AppTableTd>
                           <AppTableTd className="text-right tabular-nums">{row.quantity}</AppTableTd>
                         </AppTableBodyRow>
@@ -1093,6 +1119,22 @@ function VendasPageContent() {
 
             {tab === "vendas" && (
               <>
+                {showResumo30dHint && resumoMatchForSearch && (
+                  <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-100">
+                    O Resumo 30d indica{" "}
+                    <strong>{resumoMatchForSearch.order_count}</strong> pedido(s) pagos para{" "}
+                    <strong>{resumoMatchForSearch.item_id}</strong> nos últimos 30 dias, mas a lista
+                    atual mostra {distinctOrdersInList}. Para conferir, aplique{" "}
+                    <strong>Status: Pago</strong> e o período dos últimos 30 dias.
+                    <button
+                      type="button"
+                      onClick={() => applyResumo30dFilters(resumoMatchForSearch.item_id)}
+                      className="ml-2 font-semibold text-[#0d6efd] hover:underline"
+                    >
+                      Aplicar critério Resumo 30d
+                    </button>
+                  </div>
+                )}
                 <div className="pricing-filter-bar">
                   <div className="pricing-filter-bar-meta flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px]">
                     <span className="pricing-filter-bar-label">Filtros:</span>
@@ -1133,23 +1175,26 @@ function VendasPageContent() {
                 <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5 dark:border-slate-700">
                   <p className="text-xs text-slate-600 dark:text-slate-300">
                     <span className="font-medium text-slate-800 dark:text-slate-100">
-                      {paginatedOrderLines.length}
+                      {linesTotalLoaded}
                     </span>
-                    {paginatedOrderLines.length === 1 ? " linha nesta página" : " linhas nesta página"}
+                    {linesTotalLoaded === 1 ? " linha carregada" : " linhas carregadas"}
                     <span className="text-slate-500">
                       {" "}
                       ·{" "}
                       <span className="font-medium text-slate-800 dark:text-slate-100">
-                        {filteredOrderLines.length}
+                        {ordersTotalLoaded}
                       </span>
-                      {filteredOrderLines.length === 1 ? " linha filtrada" : " linhas filtradas"}
-                      {" · "}
-                      <span className="font-medium text-slate-800 dark:text-slate-100">{orders.length}</span>
-                      {orders.length === 1 ? " pedido" : " pedidos"} carregados
-                      {orders.length >= SALES_ORDERS_FETCH_LIMIT && (
+                      {ordersTotalLoaded === 1 ? " pedido" : " pedidos"}
+                      {ordersListMode === "recent" && recentLimitHit && (
                         <span className="text-amber-700 dark:text-amber-400">
                           {" "}
-                          (limite de {SALES_ORDERS_FETCH_LIMIT})
+                          (últimos {SALES_RECENT_ORDERS_LIMIT}; use filtros para buscar no banco inteiro)
+                        </span>
+                      )}
+                      {ordersListMode === "filtered" && filteredMaxHit && (
+                        <span className="text-amber-700 dark:text-amber-400">
+                          {" "}
+                          (limite de resultados atingido — refine o período ou a busca)
                         </span>
                       )}
                     </span>
@@ -1245,7 +1290,7 @@ function VendasPageContent() {
                     </AppTableHeadRow>
                   </AppTableHead>
                   <tbody>
-                    {filteredOrderLines.length === 0 && !loading ? (
+                    {displayOrderLines.length === 0 && !loading ? (
                       <tr>
                         <td colSpan={13} className="p-6 text-center text-sm text-slate-500">
                           {orderLineTableRows.length === 0

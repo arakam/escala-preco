@@ -1,6 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { aggregateSales30dFromDb } from "@/lib/mercadolivre/orders-store";
+import {
+  listSalesForAccount,
+  type SalesListFilters,
+  type SalesListStatusFilter,
+} from "@/lib/mercadolivre/sales-list";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import {
   enrichOrderLinesWithProfit,
@@ -8,8 +13,25 @@ import {
 } from "@/lib/pricing/order-sales-profit";
 import { NextRequest, NextResponse } from "next/server";
 
+function parseSalesListFilters(searchParams: URLSearchParams): SalesListFilters {
+  const statusRaw = searchParams.get("status")?.trim() ?? "";
+  const status: SalesListStatusFilter =
+    statusRaw === "paid" || statusRaw === "cancelled" || statusRaw === "other" ? statusRaw : "";
+  const tagsParam = searchParams.get("tags")?.trim() ?? "";
+  return {
+    search: searchParams.get("search")?.trim() || undefined,
+    status,
+    dateFrom: searchParams.get("date_from")?.trim() || undefined,
+    dateTo: searchParams.get("date_to")?.trim() || undefined,
+    dispatchDateFrom: searchParams.get("dispatch_from")?.trim() || undefined,
+    dispatchDateTo: searchParams.get("dispatch_to")?.trim() || undefined,
+    tags: tagsParam ? tagsParam.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
+  };
+}
+
 /**
  * GET /api/sales — vendas persistidas (pedidos, agregado 30d, lucro por linha).
+ * Filtros (search, status, datas, tags) consultam o banco inteiro, não só os últimos 500 pedidos.
  */
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
@@ -29,7 +51,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Conta ML não encontrada" }, { status: 404 });
   }
 
-  const limit = Math.min(500, Math.max(1, parseInt(req.nextUrl.searchParams.get("limit") || "200", 10)));
+  const filters = parseSalesListFilters(req.nextUrl.searchParams);
 
   const { data: syncState } = await supabase
     .from("ml_sales_sync_state")
@@ -37,69 +59,25 @@ export async function GET(req: NextRequest) {
     .eq("account_id", account.id)
     .maybeSingle();
 
-  const { data: recentOrders, error: ordersErr } = await supabase
-    .from("ml_orders")
-    .select(
-      "ml_order_id, status, date_created, synced_at, shipping_id, shipping_logistic_mode, shipping_logistic_type, shipping_carrier, shipping_sla_expected_at, shipping_sla_status, shipping_cost_sender, marketplace_fee, tags"
-    )
-    .eq("account_id", account.id)
-    .order("date_created", { ascending: false })
-    .limit(limit);
-
-  if (ordersErr) {
-    console.error("[sales] orders", ordersErr);
+  let listResult;
+  try {
+    listResult = await listSalesForAccount(supabase, account.id, filters);
+  } catch (e) {
+    console.error("[sales] list", e);
     return NextResponse.json({ error: "Erro ao listar pedidos" }, { status: 500 });
   }
 
-  const orderIds = (recentOrders ?? []).map((o) => String(o.ml_order_id));
-  let items: OrderLineInput[] = [];
-  if (orderIds.length > 0) {
-    const { data: itemRows, error: itemsErr } = await supabase
-      .from("ml_order_items")
-      .select("ml_order_id, item_id, variation_id, quantity, unit_price, line_index, sale_fee")
-      .eq("account_id", account.id)
-      .in("ml_order_id", orderIds)
-      .order("line_index", { ascending: true });
-    if (itemsErr) {
-      console.error("[sales] items", itemsErr);
-    } else {
-      items = (itemRows ?? []).map((row) => ({
-        ml_order_id: String(row.ml_order_id),
-        item_id: String(row.item_id).trim().toUpperCase(),
-        variation_id:
-          row.variation_id != null &&
-          Number.isFinite(Number(row.variation_id)) &&
-          Number(row.variation_id) > 0
-            ? Math.trunc(Number(row.variation_id))
-            : null,
-        quantity: Number(row.quantity) > 0 ? Math.trunc(Number(row.quantity)) : 1,
-        unit_price:
-          row.unit_price != null && Number.isFinite(Number(row.unit_price))
-            ? Number(row.unit_price)
-            : null,
-        line_index: Number(row.line_index) || 0,
-        sale_fee:
-          row.sale_fee != null && Number.isFinite(Number(row.sale_fee))
-            ? Number(row.sale_fee)
-            : null,
-      }));
-    }
-  }
+  const recentOrders = listResult.orders;
+  const items: OrderLineInput[] = listResult.items;
 
   const orderMetaById = new Map<
     string,
     { shipping_cost_sender: number | null; marketplace_fee: number | null }
   >();
-  for (const o of recentOrders ?? []) {
+  for (const o of recentOrders) {
     orderMetaById.set(String(o.ml_order_id), {
-      shipping_cost_sender:
-        o.shipping_cost_sender != null && Number.isFinite(Number(o.shipping_cost_sender))
-          ? Number(o.shipping_cost_sender)
-          : null,
-      marketplace_fee:
-        o.marketplace_fee != null && Number.isFinite(Number(o.marketplace_fee))
-          ? Number(o.marketplace_fee)
-          : null,
+      shipping_cost_sender: o.shipping_cost_sender,
+      marketplace_fee: o.marketplace_fee,
     });
   }
 
@@ -178,11 +156,16 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     sync_state: syncState ?? null,
-    recent_orders: recentOrders ?? [],
+    recent_orders: recentOrders,
     order_items: items,
     order_items_profit,
     profit_calc_note,
     aggregate_30d: topItems,
     has_aggregate_data: agg.hasData,
+    orders_list_mode: listResult.listMode,
+    orders_total: listResult.ordersTotal,
+    lines_total: listResult.linesTotal,
+    recent_limit_hit: listResult.recentLimitHit,
+    filtered_max_hit: listResult.filteredMaxHit,
   });
 }

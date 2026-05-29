@@ -19,6 +19,10 @@ import {
   runWithConcurrency,
 } from "./client";
 import { extractItemDimensions, extractVariationDimensions } from "./item-dimensions";
+import {
+  fetchFulfillmentFieldsForItem,
+  normalizeMlInventoryId,
+} from "./fulfillment-stock";
 import { getLatestValidAccessToken, getValidAccessToken } from "./refresh";
 import { syncHeartbeatMs, syncLog, syncLogVerbose } from "./sync-log";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -142,6 +146,7 @@ function mapItemToRow(accountId: string, item: MLItemDetail) {
         ? item.seller_custom_field.trim()
         : null,
     has_variations: hasVariations,
+    inventory_id: normalizeMlInventoryId(item.inventory_id),
     user_product_id: item.user_product_id ?? null,
     family_id: item.family_id ?? null,
     family_name: item.family_name ?? null,
@@ -170,6 +175,36 @@ function buildWholesaleTiers(
   return tiers;
 }
 
+async function upsertItemVariations(
+  supabase: ReturnType<typeof createServiceClient>,
+  accountId: string,
+  item: MLItemDetail,
+  token: string
+): Promise<MLVariationDetail[]> {
+  const details: MLVariationDetail[] = [];
+  if (!Array.isArray(item.variations) || item.variations.length === 0) return details;
+
+  for (const v of item.variations) {
+    let variationDetail: MLVariationDetail;
+    try {
+      if (variationNeedsExtraDetail(v as MLVariationDetail)) {
+        variationDetail = await fetchVariationDetail(item.id, v.id, token);
+      } else {
+        variationDetail = v as MLVariationDetail;
+      }
+    } catch {
+      variationDetail = v as MLVariationDetail;
+    }
+    details.push(variationDetail);
+    const vRow = mapVariationToRow(accountId, item.id, variationDetail);
+    const { error: vErr } = await (supabase as any).from("ml_variations").upsert(vRow, {
+      onConflict: "account_id,item_id,variation_id",
+    });
+    if (vErr) throw vErr;
+  }
+  return details;
+}
+
 function mapVariationToRow(
   accountId: string,
   itemId: string,
@@ -192,6 +227,7 @@ function mapVariationToRow(
     account_id: accountId,
     item_id: itemId,
     variation_id: v.id,
+    inventory_id: normalizeMlInventoryId(v.inventory_id),
     seller_custom_field: sellerCustomField,
     attributes_json: Array.isArray(v.attribute_combinations) ? v.attribute_combinations : null,
     price: v.price ?? null,
@@ -313,9 +349,16 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       const standardPrice = getStandardPriceAmount(pricesResponse);
       const salePriceResponse = await getItemSalePrice(itemId, token);
       const salePrice = getSalePriceAmount(salePriceResponse);
-      const row = mapItemToRow(accountId, item);
-      row.price = standardPrice ?? row.price;
-      row.sale_price = salePrice;
+      const variationDetails = await upsertItemVariations(supabase, accountId, item, token);
+      const baseRow = mapItemToRow(accountId, item);
+      const fulfillment = await fetchFulfillmentFieldsForItem(item, token, variationDetails);
+      const row = {
+        ...baseRow,
+        price: standardPrice ?? baseRow.price,
+        sale_price: salePrice,
+        ...fulfillment,
+        inventory_id: fulfillment.inventory_id ?? baseRow.inventory_id,
+      };
       const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
         onConflict: "account_id,item_id",
       });
@@ -349,25 +392,6 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
         .eq("account_id", accountId)
         .eq("item_id", itemId);
 
-      if (Array.isArray(item.variations) && item.variations.length > 0) {
-        for (const v of item.variations) {
-          let variationDetail: MLVariationDetail;
-          try {
-            if (variationNeedsExtraDetail(v as MLVariationDetail)) {
-              variationDetail = await fetchVariationDetail(item.id, v.id, token);
-            } else {
-              variationDetail = v as MLVariationDetail;
-            }
-          } catch {
-            variationDetail = v as MLVariationDetail;
-          }
-          const vRow = mapVariationToRow(accountId, item.id, variationDetail);
-          const { error: vErr } = await (supabase as any).from("ml_variations").upsert(vRow, {
-            onConflict: "account_id,item_id,variation_id",
-          });
-          if (vErr) throw vErr;
-        }
-      }
     };
 
     const heartbeatMs = syncHeartbeatMs();
@@ -582,9 +606,16 @@ export async function syncSingleItem(
     const standardPrice = getStandardPriceAmount(pricesResponse);
     const salePriceResponse = await getItemSalePrice(itemIdClean, accessToken);
     const salePrice = getSalePriceAmount(salePriceResponse);
-    const row = mapItemToRow(accountId, item);
-    row.price = standardPrice ?? row.price;
-    row.sale_price = salePrice;
+    const variationDetails = await upsertItemVariations(supabase, accountId, item, accessToken);
+    const baseRow = mapItemToRow(accountId, item);
+    const fulfillment = await fetchFulfillmentFieldsForItem(item, accessToken, variationDetails);
+    const row = {
+      ...baseRow,
+      price: standardPrice ?? baseRow.price,
+      sale_price: salePrice,
+      ...fulfillment,
+      inventory_id: fulfillment.inventory_id ?? baseRow.inventory_id,
+    };
     const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
       onConflict: "account_id,item_id",
     });
@@ -612,26 +643,6 @@ export async function syncSingleItem(
       .eq("account_id", accountId)
       .eq("item_id", itemIdClean);
 
-    if (Array.isArray(item.variations) && item.variations.length > 0) {
-      for (const v of item.variations) {
-        // Buscar detalhes completos da variação (inclui attributes com SELLER_SKU)
-        let variationDetail: MLVariationDetail;
-        try {
-          if (variationNeedsExtraDetail(v as MLVariationDetail)) {
-            variationDetail = await fetchVariationDetail(item.id, v.id, accessToken);
-          } else {
-            variationDetail = v as MLVariationDetail;
-          }
-        } catch {
-          // Se falhar, usar os dados básicos da variação do item
-          variationDetail = v as MLVariationDetail;
-        }
-        const vRow = mapVariationToRow(accountId, item.id, variationDetail);
-        await (supabase as any).from("ml_variations").upsert(vRow, {
-          onConflict: "account_id,item_id,variation_id",
-        });
-      }
-    }
     try {
       const { autoCreateProductsFromMlSync } = await import("@/lib/products/auto-create-from-ml-sync");
       await autoCreateProductsFromMlSync(accountId, [itemIdClean]);
