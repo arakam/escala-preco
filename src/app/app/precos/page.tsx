@@ -1147,7 +1147,6 @@ function PrecosPageContent() {
   const [semPromoMlAtiva, setSemPromoMlAtiva] = useState(false);
   const [draftSemPromoMlAtiva, setDraftSemPromoMlAtiva] = useState(false);
   /** Com filtros no cliente: carregar até 2000 itens de uma vez (em vez de 500) */
-  const [loadAllResults, setLoadAllResults] = useState(false);
   /** Itens selecionados para criar campanha ML (por id de listing) */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [campaignOpen, setCampaignOpen] = useState(false);
@@ -1257,26 +1256,8 @@ function PrecosPageContent() {
     return () => window.removeEventListener(PRICING_FRETE_PREFERENCE_EVENT, syncFretePreference);
   }, [detectedMercadoLider]);
 
-  /** Com filtros/ordenações locais, busca mais itens e aplica paginação no cliente. */
-  const clientSideFiltering = !!(
-    profitOpFilter ||
-    sales30dOpFilter ||
-    costOpFilter ||
-    discountOpFilter ||
-    semPromoMlAtiva ||
-    sortBy === "cost_desc" ||
-    sortBy === "cost_asc" ||
-    sortBy === "profit_desc" ||
-    sortBy === "profit_asc"
-  );
-  const MAX_CLIENT_SIDE_LOAD = 10000;
-  const DEFAULT_CLIENT_SIDE_LOAD = 2000;
-  const limitForRequest = clientSideFiltering
-    ? loadAllResults || isAllPageSize(pageSize)
-      ? MAX_CLIENT_SIDE_LOAD
-      : DEFAULT_CLIENT_SIDE_LOAD
-    : pageSize;
-  const pageForRequest = clientSideFiltering ? 1 : apiListPage(pageSize, page);
+  const pageForRequest = apiListPage(pageSize, page);
+  const limitForRequest = isAllPageSize(pageSize) ? 0 : pageSize;
 
   const loadListings = useCallback(async () => {
     const fetchGen = ++listingsFetchGenRef.current;
@@ -1291,11 +1272,37 @@ function PrecosPageContent() {
     if (statusFilter) params.set("status", statusFilter);
     if (linkFilter === "linked") params.set("linked", "1");
     if (linkFilter === "unlinked") params.set("linked", "0");
-    if (sortBy === "orders_desc" || sortBy === "orders_asc") params.set("order_by", sortBy);
+    if (
+      sortBy === "orders_desc" ||
+      sortBy === "orders_asc" ||
+      sortBy === "cost_desc" ||
+      sortBy === "cost_asc" ||
+      sortBy === "profit_desc" ||
+      sortBy === "profit_asc"
+    ) {
+      params.set("order_by", sortBy);
+    }
     if (skuFilter) params.set("sku", skuFilter);
     if (supplierFilter) params.set("supplier", supplierFilter);
     if (filterTagIds.length > 0) params.set("tags", filterTagIds.join(","));
     if (fullOnly) params.set("full_only", "1");
+    if (sales30dOpFilter && sales30dQtyFilter.trim()) {
+      params.set("orders_30d_op", sales30dOpFilter);
+      params.set("orders_30d_qty", sales30dQtyFilter.trim());
+    }
+    if (costOpFilter && costQtyFilter.trim()) {
+      params.set("cost_op", costOpFilter);
+      params.set("cost_qty", costQtyFilter.trim());
+    }
+    if (discountOpFilter && discountQtyFilter.trim()) {
+      params.set("discount_op", discountOpFilter);
+      params.set("discount_qty", discountQtyFilter.trim());
+    }
+    if (profitOpFilter && profitQtyFilter.trim()) {
+      params.set("profit_op", profitOpFilter);
+      params.set("profit_qty", profitQtyFilter.trim());
+    }
+    if (semPromoMlAtiva) params.set("sem_promo_ml", "1");
 
     try {
       const [listingsRes, plannedRes] = await Promise.all([
@@ -1393,6 +1400,15 @@ function PrecosPageContent() {
     skuFilter,
     supplierFilter,
     filterTagIds,
+    sales30dOpFilter,
+    sales30dQtyFilter,
+    costOpFilter,
+    costQtyFilter,
+    discountOpFilter,
+    discountQtyFilter,
+    profitOpFilter,
+    profitQtyFilter,
+    semPromoMlAtiva,
   ]);
 
   const fetchRefJob = useCallback(
@@ -1479,11 +1495,6 @@ function PrecosPageContent() {
     },
     [loadListings]
   );
-
-  /** Ao mudar filtros do servidor (ou sair do modo cliente), voltar a carregar só 500 quando em modo cliente */
-  useEffect(() => {
-    if (clientSideFiltering) setLoadAllResults(false);
-  }, [clientSideFiltering, search, statusFilter, linkFilter, sortBy, skuFilter, supplierFilter]);
 
   useEffect(() => {
     loadReputation();
@@ -2536,7 +2547,7 @@ function PrecosPageContent() {
     }
     if (semPromoMlAtiva) labels.push("Sem Promo ML ativa");
     if (profitOpFilter) {
-      const qty = parseInt(profitQtyFilter.trim(), 10);
+      const qty = Number(profitQtyFilter.trim().replace(",", "."));
       if (Number.isFinite(qty) && qty >= 0) {
         labels.push(`Lucratividade ${stockCompareLabel(profitOpFilter)} ${qty}%`);
       }
@@ -2674,141 +2685,10 @@ function PrecosPageContent() {
     return (grossProfit / listing.new_price) * 100;
   }, []);
 
-  const filteredListings = useMemo(() => {
-    let base = listings;
+  /** Filtros e ordenação (vendas, custo, desconto, margem, promo ML) aplicados no servidor via pricing_cache. */
+  const filteredListings = listings;
 
-    if (profitOpFilter) {
-      const qty = parseInt(profitQtyFilter.trim(), 10);
-      if (!(Number.isFinite(qty) && qty >= 0)) {
-        base = [];
-      } else {
-      base = base.filter((listing) => {
-        const pct = getProfitPercent(listing);
-        if (pct == null) return false;
-        switch (profitOpFilter) {
-          case "gt":
-            return pct > qty;
-          case "gte":
-            return pct >= qty;
-          case "lt":
-            return pct < qty;
-          case "lte":
-            return pct <= qty;
-          case "eq":
-            return pct === qty;
-          default:
-            return true;
-        }
-      });
-    }
-    }
-
-    const skuTerm = skuFilter.trim().toLowerCase();
-    if (skuTerm) {
-      base = base.filter((listing) => (listing.sku ?? "").toLowerCase().includes(skuTerm));
-    }
-
-    if (sales30dOpFilter) {
-      const qty = parseInt(sales30dQtyFilter.trim(), 10);
-      if (!(Number.isFinite(qty) && qty >= 0)) {
-        base = [];
-      } else {
-        base = base.filter((listing) => {
-          const sales30d = ordersData[listing.item_id] ?? 0;
-          switch (sales30dOpFilter) {
-            case "gt":
-              return sales30d > qty;
-            case "gte":
-              return sales30d >= qty;
-            case "lt":
-              return sales30d < qty;
-            case "lte":
-              return sales30d <= qty;
-            case "eq":
-              return sales30d === qty;
-            default:
-              return true;
-          }
-        });
-      }
-    }
-    if (costOpFilter) {
-      const qty = Number(costQtyFilter.trim().replace(",", "."));
-      if (!(Number.isFinite(qty) && qty >= 0)) {
-        base = [];
-      } else {
-        base = base.filter((listing) => {
-          const cost = listing.cost_price;
-          if (cost == null) return false;
-          switch (costOpFilter) {
-            case "gt":
-              return cost > qty;
-            case "gte":
-              return cost >= qty;
-            case "lt":
-              return cost < qty;
-            case "lte":
-              return cost <= qty;
-            case "eq":
-              return cost === qty;
-            default:
-              return true;
-          }
-        });
-      }
-    }
-
-    if (discountOpFilter) {
-      const qty = Number(discountQtyFilter.trim().replace(",", "."));
-      if (!(Number.isFinite(qty) && qty >= 0)) {
-        base = [];
-      } else {
-        base = base.filter((listing) => {
-          const discount = getPromotionDiscountPercent(listing);
-          if (discount == null) return false;
-          switch (discountOpFilter) {
-            case "gt":
-              return discount > qty;
-            case "gte":
-              return discount >= qty;
-            case "lt":
-              return discount < qty;
-            case "lte":
-              return discount <= qty;
-            case "eq":
-              return discount === qty;
-            default:
-              return true;
-          }
-        });
-      }
-    }
-
-    if (semPromoMlAtiva) {
-      base = base.filter((listing) => splitMlActivePromotionsCell(listing.ml_active_promotions).length === 0);
-    }
-
-    return base;
-  }, [
-    listings,
-    profitOpFilter,
-    profitQtyFilter,
-    skuFilter,
-    getProfitPercent,
-    sales30dOpFilter,
-    sales30dQtyFilter,
-    costOpFilter,
-    costQtyFilter,
-    ordersData,
-    discountOpFilter,
-    discountQtyFilter,
-    semPromoMlAtiva,
-  ]);
-
-  /** Com filtros que dependem do cliente (lucro ou vendas 30d), paginação no cliente; senão usa total do servidor */
-  const totalPages = clientSideFiltering
-    ? computeTotalPages(filteredListings.length, pageSize)
-    : computeTotalPages(total, pageSize);
+  const totalPages = computeTotalPages(total, pageSize);
 
   useEffect(() => {
     if (page > totalPages) setPage(Math.max(1, totalPages));
@@ -2945,36 +2825,7 @@ function PrecosPageContent() {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [globalActionsOpen]);
 
-  /** Com filtros/ordenações locais, mostra só a fatia da página atual; senão mostra todos da página. */
-  const sortedListings = useMemo(() => {
-    const sorted = [...filteredListings];
-    if (sortBy === "cost_desc" || sortBy === "cost_asc") {
-      const dir = sortBy === "cost_desc" ? -1 : 1;
-      sorted.sort((a, b) => {
-        const av = a.cost_price;
-        const bv = b.cost_price;
-        if (av == null && bv == null) return 0;
-        if (av == null) return 1;
-        if (bv == null) return -1;
-        return (av - bv) * dir;
-      });
-    } else if (sortBy === "profit_desc" || sortBy === "profit_asc") {
-      const dir = sortBy === "profit_desc" ? -1 : 1;
-      sorted.sort((a, b) => {
-        const av = a.calculated && a.cost_price != null ? a.calculated.net_amount - a.cost_price : null;
-        const bv = b.calculated && b.cost_price != null ? b.calculated.net_amount - b.cost_price : null;
-        if (av == null && bv == null) return 0;
-        if (av == null) return 1;
-        if (bv == null) return -1;
-        return (av - bv) * dir;
-      });
-    }
-
-    if (!clientSideFiltering) return sorted;
-    if (isAllPageSize(pageSize)) return sorted;
-    const start = (page - 1) * pageSize;
-    return sorted.slice(start, start + pageSize);
-  }, [filteredListings, sortBy, clientSideFiltering, page, pageSize]);
+  const sortedListings = filteredListings;
 
   const filteredSelectionKeys = useMemo(
     () => new Set(filteredListings.map((l) => listingSelectionKey(l))),
@@ -4499,28 +4350,11 @@ function PrecosPageContent() {
           <div className="mb-1 flex min-h-8 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5 dark:border-slate-700">
             <p className="text-xs text-slate-600 dark:text-slate-300">
               <span className="font-medium text-slate-800 dark:text-slate-100">{sortedListings.length}</span>
-              {" anúncio(s) na página"}
-              {clientSideFiltering ? (
-                <>
-                  {" · "}
-                  <span className="font-medium text-slate-800 dark:text-slate-100">{filteredListings.length}</span>
-                  {" filtrados"}
-                </>
-              ) : null}
-              {" · total "}
+              {" anúncio(s) nesta página · total "}
               <span className="font-medium text-slate-800 dark:text-slate-100">{total}</span>
+              {total > sortedListings.length ? " (filtros aplicados no catálogo)" : ""}
             </p>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {clientSideFiltering && total > listings.length && listings.length < MAX_CLIENT_SIDE_LOAD && (
-                <button
-                  type="button"
-                  onClick={() => setLoadAllResults(true)}
-                  className="rounded border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
-                  title="Carregar até 10.000 itens para aplicar os filtros em todo o resultado"
-                >
-                  Carregar todos (até 10.000)
-                </button>
-              )}
               <TablePageSizeSelect
                 value={pageSize}
                 options={PRECO_PAGE_SIZE_OPTIONS}

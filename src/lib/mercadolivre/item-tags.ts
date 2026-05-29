@@ -87,6 +87,28 @@ export function stockCompareLabel(op: StockCompareOp): string {
   return STOCK_COMPARE_LABELS[op];
 }
 
+/** Valida op + quantidade inteira ≥ 0 (filtros de estoque, vendas 30d, etc.). */
+export function parseStockCompareFilter(
+  opRaw: string,
+  qtyRaw: string
+): { op: StockCompareOp; qty: number } | null {
+  const op = opRaw.trim() as StockCompareOp;
+  const qty = parseInt(qtyRaw.trim(), 10);
+  if (!STOCK_COMPARE_OPS.includes(op) || !(Number.isFinite(qty) && qty >= 0)) return null;
+  return { op, qty };
+}
+
+/** Igual a parseStockCompareFilter, com quantidade decimal (custo R$, desconto %, margem %). */
+export function parseStockCompareFilterDecimal(
+  opRaw: string,
+  qtyRaw: string
+): { op: StockCompareOp; qty: number } | null {
+  const op = opRaw.trim() as StockCompareOp;
+  const qty = Number(qtyRaw.trim().replace(",", "."));
+  if (!STOCK_COMPARE_OPS.includes(op) || !(Number.isFinite(qty) && qty >= 0)) return null;
+  return { op, qty };
+}
+
 /** Chips de alerta ML — fundos sólidos no escuro (evita bg-*-100 “branco” com texto claro). */
 export function mlItemTagBadgeClass(tag: string): string {
   const base =

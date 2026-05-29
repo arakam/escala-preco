@@ -11,6 +11,11 @@ import {
   isAllPageSize,
   SUPABASE_RANGE_BATCH,
 } from "@/lib/table-pagination";
+import {
+  parseStockCompareFilter,
+  parseStockCompareFilterDecimal,
+} from "@/lib/mercadolivre/item-tags";
+import { applyNumericCompareFilter } from "@/lib/pricing/listings-query-filters";
 import { NextRequest, NextResponse } from "next/server";
 
 export interface PricingListingRow {
@@ -71,6 +76,23 @@ export async function GET(req: NextRequest) {
   const skuFilter = url.searchParams.get("sku")?.trim() || "";
   const supplierFilter = url.searchParams.get("supplier")?.trim() || "";
   const onlyWithSales30d = url.searchParams.get("only_with_sales") === "1";
+  const orders30dFilter = parseStockCompareFilter(
+    url.searchParams.get("orders_30d_op") ?? "",
+    url.searchParams.get("orders_30d_qty") ?? ""
+  );
+  const costFilter = parseStockCompareFilterDecimal(
+    url.searchParams.get("cost_op") ?? "",
+    url.searchParams.get("cost_qty") ?? ""
+  );
+  const discountFilter = parseStockCompareFilterDecimal(
+    url.searchParams.get("discount_op") ?? "",
+    url.searchParams.get("discount_qty") ?? ""
+  );
+  const profitFilter = parseStockCompareFilterDecimal(
+    url.searchParams.get("profit_op") ?? "",
+    url.searchParams.get("profit_qty") ?? ""
+  );
+  const semPromoMlAtiva = url.searchParams.get("sem_promo_ml") === "1";
   const fullOnly =
     url.searchParams.get("full_only") === "1" || url.searchParams.get("full_only") === "true";
   const tagIdsParam = url.searchParams.get("tags")?.trim() || "";
@@ -140,6 +162,24 @@ export async function GET(req: NextRequest) {
       if (search) q = q.or(`title.ilike.%${search}%,item_id.ilike.%${search}%`);
       if (skuFilter) q = q.ilike("sku", `%${skuFilter}%`);
       if (onlyWithSales30d) q = q.gt("orders_30d", 0);
+      if (orders30dFilter) {
+        q = applyNumericCompareFilter(q, "orders_30d", orders30dFilter.op, orders30dFilter.qty);
+      }
+      if (costFilter) {
+        q = q.not("cost_price", "is", null);
+        q = applyNumericCompareFilter(q, "cost_price", costFilter.op, costFilter.qty);
+      }
+      if (discountFilter) {
+        q = q.not("discount_percent", "is", null);
+        q = applyNumericCompareFilter(q, "discount_percent", discountFilter.op, discountFilter.qty);
+      }
+      if (profitFilter) {
+        q = q.not("profit_margin_percent", "is", null);
+        q = applyNumericCompareFilter(q, "profit_margin_percent", profitFilter.op, profitFilter.qty);
+      }
+      if (semPromoMlAtiva) {
+        q = q.or("ml_active_promotions.is.null,ml_active_promotions.eq.");
+      }
       if (allowedItemIds) q = q.in("item_id", allowedItemIds);
       return q;
     };
@@ -148,7 +188,15 @@ export async function GET(req: NextRequest) {
       let q = buildCacheQuery(serviceSupabase.from("pricing_cache"));
       if (orderBy === "orders_desc") q = q.order("orders_30d", { ascending: false });
       else if (orderBy === "orders_asc") q = q.order("orders_30d", { ascending: true });
-      else q = q.order("sort_title", { ascending: true });
+      else if (orderBy === "cost_desc") {
+        q = q.order("cost_price", { ascending: false, nullsFirst: true });
+      } else if (orderBy === "cost_asc") {
+        q = q.order("cost_price", { ascending: true, nullsFirst: true });
+      } else if (orderBy === "profit_desc") {
+        q = q.order("profit_margin_percent", { ascending: false, nullsFirst: true });
+      } else if (orderBy === "profit_asc") {
+        q = q.order("profit_margin_percent", { ascending: true, nullsFirst: true });
+      } else q = q.order("sort_title", { ascending: true });
       return q;
     };
 

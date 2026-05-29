@@ -169,8 +169,9 @@ export function PrecosHelpContent() {
             <HelpFieldRow kind="optional" name="Tags do produto vinculado (qualquer uma)">
               Exibe anúncios cujo produto tenha ao menos uma tag marcada.
             </HelpFieldRow>
-            <HelpFieldRow kind="optional" name="Só com vendas (30d)">
-              Apenas anúncios com pedido nos últimos 30 dias.
+            <HelpFieldRow kind="optional" name="Vendas 30d">
+              Pedidos pagos nos últimos 30 dias (coluna de vendas); condição aplicada no servidor em todo o catálogo,
+              independente de quantas linhas por página você escolher.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Desconto (%)">
               Compara o desconto entre <strong>Preço</strong> ML e <strong>Promoção</strong> (ex.: igual a 0% = sem
@@ -180,7 +181,10 @@ export function PrecosHelpContent() {
               Coluna <strong>Promo ML</strong> sem campanhas ativas no cache.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Lucratividade">
-              Filtra por faixa de lucro % calculado (até ~2.000 itens carregados com filtros no cliente).
+              Margem líquida % (com cálculo recente no cache) ou margem bruta; filtro no servidor em todo o catálogo.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Custo">
+              Custo do produto vinculado (R$); condição aplicada no servidor.
             </HelpFieldRow>
             <HelpFieldRow kind="required" name="Aplicar">
               Confirma filtros do modal e recarrega a tabela; alterações só valem após este clique.
