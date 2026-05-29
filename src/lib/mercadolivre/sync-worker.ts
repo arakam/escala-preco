@@ -23,7 +23,6 @@ import {
   collectFulfillmentInventoryIds,
   fetchFulfillmentStockFields,
   FulfillmentStockCache,
-  getFulfillmentStockTtlMs,
   itemHasFulfillmentStockSource,
   normalizeMlInventoryId,
   persistVariationFulfillmentStocks,
@@ -36,6 +35,8 @@ import { getLatestValidAccessToken, getValidAccessToken } from "./refresh";
 import { syncHeartbeatMs, syncLog, syncLogVerbose } from "./sync-log";
 import { createServiceClient } from "@/lib/supabase/service";
 import { upsertCategoryFeeReferenceFromSample } from "@/lib/pricing/ml-category-fee-reference";
+import { runSyncInBackground } from "@/lib/server/after-response";
+import { runPostSyncBackgroundTasks } from "@/lib/mercadolivre/post-sync-tasks";
 import { isMlPlaceholderSku } from "@/lib/products/ml-sku";
 import {
   getJobStatus,
@@ -293,6 +294,7 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     }
     let accessToken: string = initialToken;
     syncLog(jobId, "token ML obtido; iniciando listagem de IDs", { mlUserId: account.ml_user_id });
+    await updateJob(supabase, jobId, { phase: "listing", started_at: now });
 
     const mlUserId = String(account.ml_user_id);
     let itemIds: string[];
@@ -325,7 +327,7 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       heartbeatMs: syncHeartbeatMs(),
     });
     const progressHeartbeat = () => new Date().toISOString();
-    await updateJob(supabase, jobId, { total, started_at: progressHeartbeat() });
+    await updateJob(supabase, jobId, { total, started_at: progressHeartbeat(), phase: "items" });
 
     let processed = 0;
     let ok = 0;
@@ -347,13 +349,7 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     let lastProactiveTokenCheck = Date.now();
     const siteIdFallback = (account.site_id ?? "MLB").trim() || "MLB";
     const categoryFeeKeysSynced = new Set<string>();
-    const fulfillmentStockCache = new FulfillmentStockCache();
-    type FulfillmentRefreshEntry = {
-      itemId: string;
-      item: MLItemDetail;
-      variationDetails: MLVariationDetail[];
-    };
-    const fulfillmentRefreshQueue: FulfillmentRefreshEntry[] = [];
+    const fulfillmentItemIds: string[] = [];
 
     const syncOneItem = async (itemId: string, token: string): Promise<void> => {
       if (syncLogVerbose()) {
@@ -389,7 +385,7 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
           existing: existingFulfillment,
         });
         if (needsRefresh && itemHasFulfillmentStockSource(item, inventoryIds)) {
-          fulfillmentRefreshQueue.push({ itemId, item, variationDetails });
+          fulfillmentItemIds.push(itemId);
           if (
             existingFulfillment?.fulfillment_stock != null &&
             Number.isFinite(Number(existingFulfillment.fulfillment_stock))
@@ -545,74 +541,12 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       if (heartbeat) clearInterval(heartbeat);
     }
 
-    if (fulfillmentRefreshQueue.length > 0 && (await assertJobStillActive())) {
-      syncLog(jobId, "fase B: estoque Full", {
-        pendentes: fulfillmentRefreshQueue.length,
-        cacheInventoryIds: fulfillmentStockCache.size,
-        ttlMs: getFulfillmentStockTtlMs(),
-      });
-      let fulfillmentOk = 0;
-      let fulfillmentErrors = 0;
-      const nowIso = () => new Date().toISOString();
+    const finalStatus: JobStatus = errors === 0 ? "success" : total === errors ? "failed" : "partial";
 
-      for (const entry of fulfillmentRefreshQueue) {
-        if (!(await assertJobStillActive())) break;
-
-        try {
-          if (Date.now() - lastProactiveTokenCheck > 8 * 60 * 1000) {
-            lastProactiveTokenCheck = Date.now();
-            const t = await getLatestValidAccessToken(accountId, supabase);
-            if (t) accessToken = t;
-          }
-
-          const stockFields = await fetchFulfillmentStockFields(
-            entry.item,
-            accessToken,
-            entry.variationDetails,
-            fulfillmentStockCache
-          );
-          const itemPatch: Record<string, unknown> = {
-            is_fulfillment: stockFields.is_fulfillment,
-            inventory_id: stockFields.inventory_id,
-            fulfillment_stock: stockFields.fulfillment_stock,
-            fulfillment_synced_at: nowIso(),
-          };
-          if (stockFields.total_listing_stock != null) {
-            itemPatch.available_quantity = stockFields.total_listing_stock;
-          }
-          const { error: updErr } = await (supabase as any)
-            .from("ml_items")
-            .update(itemPatch)
-            .eq("account_id", accountId)
-            .eq("item_id", entry.itemId);
-          if (updErr) throw updErr;
-          await persistVariationFulfillmentStocks(
-            supabase,
-            accountId,
-            entry.itemId,
-            stockFields.byInventory
-          );
-          fulfillmentOk++;
-        } catch (e) {
-          fulfillmentErrors++;
-          syncLog(jobId, "fase B: falha estoque Full", {
-            itemId: entry.itemId,
-            err: e instanceof Error ? e.message : String(e),
-          });
-        }
-      }
-
-      syncLog(jobId, "fase B concluída", {
-        ok: fulfillmentOk,
-        errors: fulfillmentErrors,
-        cacheInventoryIds: fulfillmentStockCache.size,
-      });
-    }
-
-    const currentStatus = await getJobStatus(supabase, jobId);
-    if (!currentStatus || !isActiveJobStatus(currentStatus)) {
+    const statusBeforeFinalize = await getJobStatus(supabase, jobId);
+    if (!statusBeforeFinalize || !isActiveJobStatus(statusBeforeFinalize)) {
       syncLog(jobId, "encerrado sem sobrescrever status (cancelado ou expirado)", {
-        currentStatus,
+        currentStatus: statusBeforeFinalize,
         ok,
         errors,
         processed,
@@ -621,49 +555,26 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       return;
     }
 
-    const finalStatus: JobStatus = errors === 0 ? "success" : total === errors ? "failed" : "partial";
     await updateJob(supabase, jobId, {
       status: finalStatus,
+      phase: null,
       ended_at: new Date().toISOString(),
     });
-    syncLog(jobId, "job finalizado", { finalStatus, ok, errors, total });
+    syncLog(jobId, "job finalizado (fase A — anúncios)", { finalStatus, ok, errors, total });
 
     if (finalStatus !== "failed") {
-      try {
-        const { autoCreateProductsFromMlSync } = await import("@/lib/products/auto-create-from-ml-sync");
-        const autoProd = await autoCreateProductsFromMlSync(accountId);
-        if (autoProd.ok && !autoProd.skipped_disabled) {
-          syncLog(jobId, "produtos auto (SKU + medidas)", {
-            created: autoProd.products_created,
-            updated: autoProd.products_updated,
-            linked: autoProd.items_linked + autoProd.variations_linked,
-          });
-        }
-      } catch (err) {
-        console.error(`[sync:${jobId}] auto-create products`, err);
-      }
-      syncLog(jobId, "disparando refreshPricingCache em background");
-      const { refreshPricingCache } = await import("@/lib/pricing-cache");
-      refreshPricingCache(accountId).catch((err) =>
-        console.error(`[sync:${jobId}] pricing cache refresh`, err)
-      );
+      runSyncInBackground(() => runPostSyncBackgroundTasks(accountId, jobId));
+    }
 
+    if (fulfillmentItemIds.length > 0) {
       try {
-        const { maybeKickSalesBackfillAfterItemsSync } = await import(
-          "@/lib/mercadolivre/schedule-sales-backfill"
-        );
-        const backfill = await maybeKickSalesBackfillAfterItemsSync(accountId, {
+        const { maybeKickFulfillmentStockSync } = await import("./schedule-fulfillment-sync");
+        const kick = await maybeKickFulfillmentStockSync(accountId, fulfillmentItemIds, {
           triggerSyncJobId: jobId,
         });
-        if (backfill.started) {
-          syncLog(jobId, "carga inicial vendas 30d (envio + SLA) em background", {
-            salesBackfillJobId: backfill.jobId,
-          });
-        } else {
-          syncLog(jobId, "carga inicial vendas 30d não disparada", { reason: backfill.reason });
-        }
+        syncLog(jobId, "job estoque Full disparado", kick);
       } catch (err) {
-        console.error(`[sync:${jobId}] auto sales backfill`, err);
+        console.error(`[sync:${jobId}] kick fulfillment`, err);
       }
     }
   } catch (e) {

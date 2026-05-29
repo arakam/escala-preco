@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppTable } from "@/components/AppTable";
 import { SyncImportProgress } from "@/components/SyncImportProgress";
@@ -20,6 +20,7 @@ interface JobState {
   processed: number;
   ok: number;
   errors: number;
+  phase?: string | null;
   started_at: string | null;
   ended_at: string | null;
 }
@@ -50,6 +51,7 @@ function MercadoLivreContent() {
   const [familyItems, setFamilyItems] = useState<ItemRow[]>([]);
   const [familyItemsLoading, setFamilyItemsLoading] = useState(false);
   const [copiedItemId, setCopiedItemId] = useState<string | null>(null);
+  const syncFinishHandledRef = useRef<Record<string, string>>({});
   const searchParams = useSearchParams();
 
   const copyItemId = useCallback((id: string) => {
@@ -108,8 +110,10 @@ function MercadoLivreContent() {
     }
   }, [searchParams]);
 
-  const loadItems = useCallback(async (accountId: string) => {
-    setItemsLoading((prev) => ({ ...prev, [accountId]: true }));
+  const loadItems = useCallback(async (accountId: string, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) {
+      setItemsLoading((prev) => ({ ...prev, [accountId]: true }));
+    }
     const params = new URLSearchParams({ page: "1" });
     if (mlbuOnly) params.set("mlbu", "1");
     if (mlbuCodeInput.trim()) params.set("mlbu_code", mlbuCodeInput.trim());
@@ -121,6 +125,16 @@ function MercadoLivreContent() {
     setItemsLoading((prev) => ({ ...prev, [accountId]: false }));
   }, [mlbuOnly, mlbuCodeInput]);
 
+  const finishSync = useCallback(
+    (jobId: string, accountId: string) => {
+      if (syncFinishHandledRef.current[accountId] === jobId) return;
+      syncFinishHandledRef.current[accountId] = jobId;
+      setSyncing((prev) => (prev === accountId ? null : prev));
+      void loadItems(accountId, { silent: true });
+    },
+    [loadItems]
+  );
+
   const pollJob = useCallback(async (jobId: string, accountId: string) => {
     const res = await fetch(`/api/jobs/${jobId}`);
     if (!res.ok) return null;
@@ -129,15 +143,13 @@ function MercadoLivreContent() {
     if (job) {
       setJobByAccount((prev) => ({ ...prev, [accountId]: job }));
       const isTerminal = job.status === "success" || job.status === "failed" || job.status === "partial";
-      const allProcessed = job.total > 0 && job.processed >= job.total;
-      if (isTerminal || (job.status === "running" && allProcessed)) {
-        setSyncing((prev) => (prev === accountId ? null : prev));
-        if (isTerminal || allProcessed) loadItems(accountId);
+      if (isTerminal) {
+        finishSync(jobId, accountId);
         return "done";
       }
     }
     return null;
-  }, [loadItems]);
+  }, [finishSync]);
 
   useEffect(() => {
     if (!syncing) return;
@@ -146,18 +158,29 @@ function MercadoLivreContent() {
     if (!job?.id || job.status === "success" || job.status === "failed" || job.status === "partial") return;
     const t = setInterval(() => {
       pollJob(job.id, accountId).then((done) => {
-        if (done === "done") {
-          clearInterval(t);
-          loadItems(accountId);
-        }
+        if (done === "done") clearInterval(t);
       });
     }, 2000);
     return () => clearInterval(t);
-  }, [syncing, jobByAccount, pollJob, loadItems]);
+  }, [syncing, jobByAccount, pollJob]);
 
   async function handleSync(accountId: string) {
+    syncFinishHandledRef.current[accountId] = "";
     setSyncing(accountId);
-    setJobByAccount((prev) => ({ ...prev, [accountId]: { id: "", status: "queued", total: 0, processed: 0, ok: 0, errors: 0, started_at: null, ended_at: null } }));
+    setJobByAccount((prev) => ({
+      ...prev,
+      [accountId]: {
+        id: "",
+        status: "queued",
+        total: 0,
+        processed: 0,
+        ok: 0,
+        errors: 0,
+        phase: "listing",
+        started_at: null,
+        ended_at: null,
+      },
+    }));
     try {
       const res = await fetch(`/api/mercadolivre/${accountId}/sync`, { method: "POST" });
       const data = await res.json().catch(() => ({}));

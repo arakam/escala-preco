@@ -43,12 +43,20 @@ export async function GET(
     return NextResponse.json({ error: "Conta não encontrada" }, { status: 404 });
   }
 
-  const active = await getActiveJob(supabase, accountId);
+  const active = await getActiveJob(supabase, accountId, "sync_items");
   if (active && needsSyncWorkerRestart(active)) {
     restartSyncJobIfStuck(active.id, accountId);
   }
 
-  return NextResponse.json({ job: active });
+  const fulfillmentJob = await getActiveJob(supabase, accountId, "sync_fulfillment_stock");
+  if (fulfillmentJob && needsSyncWorkerRestart(fulfillmentJob)) {
+    const { restartFulfillmentSyncIfStuck } = await import(
+      "@/lib/mercadolivre/schedule-fulfillment-sync"
+    );
+    restartFulfillmentSyncIfStuck(fulfillmentJob.id, accountId);
+  }
+
+  return NextResponse.json({ job: active, fulfillment_job: fulfillmentJob });
 }
 
 /**

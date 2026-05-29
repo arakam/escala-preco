@@ -34,6 +34,7 @@ import { isIncompleteJob, shouldTrackSyncJob, type JobStatus } from "@/lib/jobs"
 
 const STORAGE_KEY = "escalapreco_dashboard_account_id";
 const SYNC_JOB_STORAGE_KEY = "escalapreco_anuncios_sync_job_id";
+const FULFILLMENT_JOB_STORAGE_KEY = "escalapreco_anuncios_fulfillment_job_id";
 const FROZEN_COLUMNS_STORAGE_KEY = "escalapreco_anuncios_frozen_columns";
 const PAGE_SIZE_STORAGE_KEY = "escalapreco_anuncios_page_size";
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 250, 500, 750, 1000] as const;
@@ -178,6 +179,7 @@ interface JobState {
   processed: number;
   ok: number;
   errors: number;
+  phase?: string | null;
 }
 
 type SortField =
@@ -498,6 +500,8 @@ function AnunciosPageContent() {
   const [anunciosTab, setAnunciosTab] = useState<"lista" | "como-funciona">("lista");
   const [syncing, setSyncing] = useState(false);
   const [job, setJob] = useState<JobState | null>(null);
+  const [fulfillmentTracking, setFulfillmentTracking] = useState(false);
+  const [fulfillmentJob, setFulfillmentJob] = useState<JobState | null>(null);
   const [singleMlb, setSingleMlb] = useState("");
   const [singleSyncing, setSingleSyncing] = useState(false);
   const [singleError, setSingleError] = useState<string | null>(null);
@@ -512,6 +516,10 @@ function AnunciosPageContent() {
   const syncRestoreGenerationRef = useRef(0);
   const syncStallPollsRef = useRef(0);
   const syncLastProcessedRef = useRef<number | null>(null);
+  const syncFinishHandledRef = useRef<string | null>(null);
+  const fulfillmentFinishHandledRef = useRef<string | null>(null);
+  const fulfillmentStallPollsRef = useRef(0);
+  const fulfillmentLastProcessedRef = useRef<number | null>(null);
 
   const account = accounts.find((a) => a.id === accountId) ?? accounts[0] ?? null;
 
@@ -529,6 +537,37 @@ function AnunciosPageContent() {
     }
   }, []);
 
+  const forgetFulfillmentJob = useCallback(() => {
+    fulfillmentStallPollsRef.current = 0;
+    fulfillmentLastProcessedRef.current = null;
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem(FULFILLMENT_JOB_STORAGE_KEY);
+    }
+  }, []);
+
+  const rememberFulfillmentJob = useCallback((jobId: string) => {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(FULFILLMENT_JOB_STORAGE_KEY, jobId);
+    }
+  }, []);
+
+  const applyTrackedFulfillmentJob = useCallback(
+    (j: JobState) => {
+      setFulfillmentTracking(true);
+      setFulfillmentJob({
+        id: j.id,
+        status: j.status,
+        total: j.total ?? 0,
+        processed: j.processed ?? 0,
+        ok: j.ok ?? 0,
+        errors: j.errors ?? 0,
+        phase: j.phase ?? "fulfillment",
+      });
+      rememberFulfillmentJob(j.id);
+    },
+    [rememberFulfillmentJob]
+  );
+
   const applyTrackedJob = useCallback((j: JobState) => {
     setSyncing(true);
     setJob({
@@ -538,6 +577,7 @@ function AnunciosPageContent() {
       processed: j.processed ?? 0,
       ok: j.ok ?? 0,
       errors: j.errors ?? 0,
+      phase: j.phase ?? null,
     });
     rememberSyncJob(j.id);
   }, [rememberSyncJob]);
@@ -614,9 +654,9 @@ function AnunciosPageContent() {
     if (fromUrl && fromUrl !== accountId) setAccountId(fromUrl);
   }, [searchParams]);
 
-  const loadItems = useCallback(async () => {
+  const loadItems = useCallback(async (opts?: { silent?: boolean }) => {
     if (!account) return;
-    setItemsLoading(true);
+    if (!opts?.silent) setItemsLoading(true);
     const params = new URLSearchParams({
       page: String(apiListPage(pageSize, page)),
       limit: String(pageSize),
@@ -701,11 +741,26 @@ function AnunciosPageContent() {
       setSyncing(false);
       setJob(null);
       forgetSyncJob();
+      setFulfillmentTracking(false);
+      setFulfillmentJob(null);
+      forgetFulfillmentJob();
       return;
     }
 
     const generation = ++syncRestoreGenerationRef.current;
     let cancelled = false;
+
+    const restoreJobFromStorage = async (
+      storageKey: string
+    ): Promise<JobState | null | undefined> => {
+      const storedId =
+        typeof window !== "undefined" ? sessionStorage.getItem(storageKey) : null;
+      if (!storedId) return undefined;
+      const jr = await fetch(`/api/jobs/${storedId}`);
+      if (!jr.ok) return undefined;
+      const jd = await jr.json();
+      return jd.job as JobState | null | undefined;
+    };
 
     (async () => {
       try {
@@ -716,18 +771,14 @@ function AnunciosPageContent() {
 
         let j = data.job as JobState | null | undefined;
         if (!j || !shouldTrackSyncJob(j)) {
-          const storedId =
-            typeof window !== "undefined" ? sessionStorage.getItem(SYNC_JOB_STORAGE_KEY) : null;
-          if (storedId) {
-            const jr = await fetch(`/api/jobs/${storedId}`);
-            if (!cancelled && generation === syncRestoreGenerationRef.current && jr.ok) {
-              const jd = await jr.json();
-              const stored = jd.job as JobState | null | undefined;
-              if (stored && shouldTrackSyncJob(stored)) {
-                j = stored;
-              }
-            }
-          }
+          const stored = await restoreJobFromStorage(SYNC_JOB_STORAGE_KEY);
+          if (stored && shouldTrackSyncJob(stored)) j = stored;
+        }
+
+        let fj = data.fulfillment_job as JobState | null | undefined;
+        if (!fj || !shouldTrackSyncJob(fj)) {
+          const storedF = await restoreJobFromStorage(FULFILLMENT_JOB_STORAGE_KEY);
+          if (storedF && shouldTrackSyncJob(storedF)) fj = storedF;
         }
 
         if (cancelled || generation !== syncRestoreGenerationRef.current) return;
@@ -739,11 +790,22 @@ function AnunciosPageContent() {
           setJob(null);
           forgetSyncJob();
         }
+
+        if (fj && shouldTrackSyncJob(fj)) {
+          applyTrackedFulfillmentJob(fj);
+        } else {
+          setFulfillmentTracking(false);
+          setFulfillmentJob(null);
+          forgetFulfillmentJob();
+        }
       } catch {
         if (!cancelled && generation === syncRestoreGenerationRef.current) {
           setSyncing(false);
           setJob(null);
           forgetSyncJob();
+          setFulfillmentTracking(false);
+          setFulfillmentJob(null);
+          forgetFulfillmentJob();
         }
       }
     })();
@@ -751,7 +813,44 @@ function AnunciosPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [account?.id, applyTrackedJob, forgetSyncJob]);
+  }, [account?.id, applyTrackedJob, applyTrackedFulfillmentJob, forgetSyncJob, forgetFulfillmentJob]);
+
+  const finishFulfillmentSync = useCallback(
+    (jobId: string) => {
+      if (fulfillmentFinishHandledRef.current === jobId) return;
+      fulfillmentFinishHandledRef.current = jobId;
+      setFulfillmentTracking(false);
+      forgetFulfillmentJob();
+      void loadItems({ silent: true });
+    },
+    [forgetFulfillmentJob, loadItems]
+  );
+
+  const finishSync = useCallback(
+    async (jobId: string) => {
+      if (syncFinishHandledRef.current === jobId) return;
+      syncFinishHandledRef.current = jobId;
+      setSyncing(false);
+      forgetSyncJob();
+      void loadItems({ silent: true });
+      void reloadOnboarding();
+
+      if (!account) return;
+      try {
+        const res = await fetch(`/api/mercadolivre/${account.id}/sync`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const fj = data.fulfillment_job as JobState | null | undefined;
+        if (fj && shouldTrackSyncJob(fj)) {
+          fulfillmentFinishHandledRef.current = null;
+          applyTrackedFulfillmentJob(fj);
+        }
+      } catch {
+        // ignore
+      }
+    },
+    [account, applyTrackedFulfillmentJob, forgetSyncJob, loadItems, reloadOnboarding]
+  );
 
   const pollJob = useCallback(async () => {
     if (!account || !job?.id) return;
@@ -764,19 +863,7 @@ function AnunciosPageContent() {
     setJob(j);
 
     if (!shouldTrackSyncJob(j)) {
-      setSyncing(false);
-      forgetSyncJob();
-      loadItems();
-      reloadOnboarding();
-      return true;
-    }
-
-    const allProcessed = j.total > 0 && j.processed >= j.total;
-    if (j.status === "running" && allProcessed) {
-      setSyncing(false);
-      forgetSyncJob();
-      loadItems();
-      reloadOnboarding();
+      finishSync(j.id);
       return true;
     }
 
@@ -788,10 +875,7 @@ function AnunciosPageContent() {
         syncLastProcessedRef.current = j.processed;
       }
       if (syncStallPollsRef.current >= 3) {
-        setSyncing(false);
-        forgetSyncJob();
-        loadItems();
-        reloadOnboarding();
+        finishSync(j.id);
         return true;
       }
     } else {
@@ -800,7 +884,48 @@ function AnunciosPageContent() {
     }
 
     return false;
-  }, [account, job?.id, forgetSyncJob, loadItems, reloadOnboarding]);
+  }, [account, job?.id, finishSync]);
+
+  const pollFulfillmentJob = useCallback(async () => {
+    if (!account || !fulfillmentJob?.id) return;
+    const res = await fetch(`/api/jobs/${fulfillmentJob.id}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const j = data.job as JobState;
+    if (!j) return false;
+
+    setFulfillmentJob(j);
+
+    if (!shouldTrackSyncJob(j)) {
+      finishFulfillmentSync(j.id);
+      return true;
+    }
+
+    if ((j.status === "failed" || j.status === "partial") && isIncompleteJob(j)) {
+      if (fulfillmentLastProcessedRef.current === j.processed) {
+        fulfillmentStallPollsRef.current += 1;
+      } else {
+        fulfillmentStallPollsRef.current = 0;
+        fulfillmentLastProcessedRef.current = j.processed;
+      }
+      if (fulfillmentStallPollsRef.current >= 3) {
+        finishFulfillmentSync(j.id);
+        return true;
+      }
+    } else {
+      fulfillmentStallPollsRef.current = 0;
+      fulfillmentLastProcessedRef.current = j.processed;
+    }
+
+    return false;
+  }, [account, fulfillmentJob?.id, finishFulfillmentSync]);
+
+  useEffect(() => {
+    if (!fulfillmentTracking || !fulfillmentJob) return;
+    if (!shouldTrackSyncJob(fulfillmentJob)) return;
+    const t = setInterval(() => pollFulfillmentJob(), 2000);
+    return () => clearInterval(t);
+  }, [fulfillmentTracking, fulfillmentJob, pollFulfillmentJob]);
 
   useEffect(() => {
     if (!syncing || !job) return;
@@ -818,6 +943,7 @@ function AnunciosPageContent() {
       const res = await fetch(`/api/mercadolivre/${account.id}/sync`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.job_id) {
+        syncFinishHandledRef.current = null;
         syncStallPollsRef.current = 0;
         syncLastProcessedRef.current = null;
         applyTrackedJob({
@@ -827,6 +953,7 @@ function AnunciosPageContent() {
           processed: 0,
           ok: 0,
           errors: 0,
+          phase: "listing",
         });
       } else {
         setSyncing(false);
@@ -1312,7 +1439,10 @@ function AnunciosPageContent() {
           </div>
         </div>
 
-        {(singleError || singleSyncing || (syncing && job)) && (
+        {(singleError ||
+          singleSyncing ||
+          (syncing && job) ||
+          (fulfillmentTracking && fulfillmentJob)) && (
           <div className="px-3 pb-3 pt-2">
             {singleError && <p className="mt-2 text-xs text-rose-600">{singleError}</p>}
             {singleSyncing && <SingleAnuncioImportBar />}
@@ -1341,6 +1471,39 @@ function AnunciosPageContent() {
                     ) : undefined
                   }
                 />
+              </div>
+            )}
+            {fulfillmentTracking && fulfillmentJob && (
+              <div className={syncing && job ? "mt-2" : "mt-3"}>
+                <SyncImportProgress
+                  job={fulfillmentJob}
+                  title="Estoque Full"
+                  itemNoun="anúncios Full"
+                  tone="app"
+                  actions={
+                    fulfillmentJob.status === "running" ||
+                    (fulfillmentJob.status === "failed" && isIncompleteJob(fulfillmentJob)) ? (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await fetch(`/api/jobs/${fulfillmentJob.id}`, { method: "PATCH" });
+                          } finally {
+                            setFulfillmentTracking(false);
+                            forgetFulfillmentJob();
+                          }
+                        }}
+                        className="btn btn-secondary btn-mini"
+                      >
+                        Encerrar atualização Full
+                      </button>
+                    ) : undefined
+                  }
+                />
+                <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  Você já pode usar a tabela abaixo; esta etapa atualiza o estoque do depósito Mercado Livre em
+                  segundo plano.
+                </p>
               </div>
             )}
           </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { isSyncJobPostProcessing, syncJobPhaseMessagePt } from "@/lib/jobs";
 
 /** Estados de `ml_jobs.status` → rótulos em português */
 export function mlJobStatusLabelPt(status: string): string {
@@ -26,11 +27,16 @@ export interface SyncImportProgressJob {
   processed: number;
   ok: number;
   errors: number;
+  phase?: string | null;
 }
 
 interface SyncImportProgressProps {
   job: SyncImportProgressJob;
   actions?: ReactNode;
+  /** Título do cartão (padrão: Importação). */
+  title?: string;
+  /** Substantivo no contador (padrão: anúncios). */
+  itemNoun?: string;
   /** `app`: tema Anúncios (primary). `plain`: cartão cinza (página Mercado Livre). */
   tone?: "app" | "plain";
 }
@@ -40,21 +46,35 @@ function n(v: unknown, fallback = 0): number {
   return Number.isFinite(x) ? x : fallback;
 }
 
-export function SyncImportProgress({ job, actions, tone = "app" }: SyncImportProgressProps) {
+export function SyncImportProgress({
+  job,
+  actions,
+  title = "Importação",
+  itemNoun = "anúncios",
+  tone = "app",
+}: SyncImportProgressProps) {
   const status = job.status ?? "";
   const total = n(job.total);
   const processed = n(job.processed);
   const ok = n(job.ok);
   const errors = n(job.errors);
-  const label = mlJobStatusLabelPt(status);
+  const phase = job.phase ?? null;
+  const postProcessing = isSyncJobPostProcessing({ status, total, processed });
+  const phaseMessage = syncJobPhaseMessagePt(phase, { status, total, processed });
+  const label = postProcessing ? "Finalizando" : mlJobStatusLabelPt(status);
   const showCounts = total > 0;
-  const pct = showCounts ? Math.min(100, Math.round((processed / Math.max(1, total)) * 100)) : 0;
-  const preparing =
-    (status === "queued" || status === "running") && total === 0;
+  const itemsComplete = showCounts && processed >= total;
+  const pct = showCounts
+    ? itemsComplete
+      ? 100
+      : Math.min(100, Math.round((processed / Math.max(1, total)) * 100))
+    : 0;
+  const preparing = (status === "queued" || status === "running") && total === 0;
   const preparingMessage =
-    status === "queued"
+    phaseMessage ??
+    (status === "queued"
       ? "Aguardando início da importação…"
-      : "Buscando lista de anúncios no Mercado Livre…";
+      : "Buscando lista de anúncios no Mercado Livre…");
 
   const shell =
     tone === "app"
@@ -69,11 +89,11 @@ export function SyncImportProgress({ job, actions, tone = "app" }: SyncImportPro
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
-            <span className={`font-semibold ${strong}`}>Importação</span>
+            <span className={`font-semibold ${strong}`}>{title}</span>
             <span className={tone === "app" ? "text-slate-600 dark:text-slate-300" : "text-fg"}>· {label}</span>
             {showCounts && (
               <span className={tone === "app" ? "text-slate-600 dark:text-slate-300" : "text-fg"}>
-                · {processed.toLocaleString("pt-BR")} de {total.toLocaleString("pt-BR")} anúncios
+                · {processed.toLocaleString("pt-BR")} de {total.toLocaleString("pt-BR")} {itemNoun}
               </span>
             )}
             {showCounts && ok > 0 && (
@@ -87,18 +107,18 @@ export function SyncImportProgress({ job, actions, tone = "app" }: SyncImportPro
               </span>
             )}
           </div>
-          {preparing ? (
-            <p className={`text-xs ${muted}`}>{preparingMessage}</p>
+          {preparing || postProcessing ? (
+            <p className={`text-xs ${muted}`}>{preparing ? preparingMessage : phaseMessage}</p>
           ) : null}
           <div
             className={`h-2 w-full overflow-hidden rounded-full ${tone === "app" ? "bg-slate-200/90 dark:bg-slate-600/80" : "bg-slate-200 dark:bg-slate-600/80"}`}
             role="progressbar"
-            aria-valuenow={preparing ? undefined : pct}
+            aria-valuenow={preparing || postProcessing ? undefined : pct}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-label="Progresso da importação de anúncios"
           >
-            {preparing ? (
+            {preparing || postProcessing ? (
               <div className={`h-full w-full rounded-full ${fill} opacity-80 animate-pulse`} />
             ) : (
               <div
@@ -108,7 +128,11 @@ export function SyncImportProgress({ job, actions, tone = "app" }: SyncImportPro
             )}
           </div>
           {!preparing && showCounts ? (
-            <p className={`text-[11px] ${muted}`}>{pct}% concluído</p>
+            <p className={`text-[11px] ${muted}`}>
+              {postProcessing
+                ? `Os ${itemNoun} já foram processados; aguarde as etapas finais.`
+                : `${pct}% concluído`}
+            </p>
           ) : null}
         </div>
         {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}

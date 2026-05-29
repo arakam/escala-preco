@@ -57,10 +57,17 @@ export async function GET(
 
   const accountId = job.account_id;
   await expireStaleJobsForAccount(supabase, accountId, "sync_items");
+  await expireStaleJobsForAccount(supabase, accountId, "sync_fulfillment_stock");
 
   const { job: fullJob, logs } = await getJobWithLogs(supabase, jobId);
   if (fullJob && fullJob.type === "sync_items" && needsSyncWorkerRestart(fullJob)) {
     restartSyncJobIfStuck(jobId, accountId);
+  }
+  if (fullJob && fullJob.type === "sync_fulfillment_stock" && needsSyncWorkerRestart(fullJob)) {
+    const { restartFulfillmentSyncIfStuck } = await import(
+      "@/lib/mercadolivre/schedule-fulfillment-sync"
+    );
+    restartFulfillmentSyncIfStuck(jobId, accountId);
   }
   return NextResponse.json({
     job: fullJob,

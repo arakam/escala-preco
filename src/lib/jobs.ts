@@ -5,8 +5,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type JobStatus = "queued" | "running" | "success" | "failed" | "partial";
+/** Fases reportadas pelo worker de sync_items enquanto status ainda é queued/running. */
+export type SyncJobPhase = "listing" | "items" | "fulfillment" | "products" | "finishing";
 export type JobType =
   | "sync_items"
+  | "sync_fulfillment_stock"
   | "sales_backfill_30d"
   | "apply_wholesale_prices"
   | "refresh_price_references"
@@ -21,9 +24,47 @@ export interface JobRow {
   processed: number;
   ok: number;
   errors: number;
+  phase: string | null;
+  meta_json?: unknown;
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
+}
+
+/** Mensagem amigável da fase pós-contagem ou preparação da sync. */
+export function syncJobPhaseMessagePt(
+  phase: string | null | undefined,
+  job: { status: string; total: number; processed: number }
+): string | null {
+  switch (phase) {
+    case "listing":
+      return "Buscando lista de anúncios no Mercado Livre…";
+    case "fulfillment":
+      return "Atualizando estoque Full (depósito Mercado Livre)…";
+    case "products":
+      return "Criando e vinculando produtos (SKU e medidas)…";
+    case "finishing":
+      return "Atualizando cache de preços e preparando vendas…";
+    default:
+      break;
+  }
+  if (
+    isActiveJobStatus(job.status) &&
+    job.total > 0 &&
+    job.processed >= job.total
+  ) {
+    return "Anúncios importados — finalizando etapas complementares…";
+  }
+  return null;
+}
+
+/** Contador principal terminou, mas o job ainda está ativo (estoque Full, produtos, cache). */
+export function isSyncJobPostProcessing(job: {
+  status: string;
+  total: number;
+  processed: number;
+}): boolean {
+  return isActiveJobStatus(job.status) && job.total > 0 && job.processed >= job.total;
 }
 
 /** Jobs presos após crash do processo, timeout de proxy ou deploy (VPS/serverless). */
@@ -31,6 +72,8 @@ const STALE_RUNNING_MS = 8 * 60 * 1000;
 const STALE_RUNNING_MS_BY_TYPE: Partial<Record<JobType, number>> = {
   /** Sync grande pode levar horas; inatividade real é medida via `started_at` atualizado a cada item. */
   sync_items: 30 * 60 * 1000,
+  /** Estoque Full para milhares de anúncios pode levar horas. */
+  sync_fulfillment_stock: 2 * 60 * 60 * 1000,
   /** Com enriquecimento de envio (4 chamadas/pedido) pode levar horas em contas grandes. */
   sales_backfill_30d: 3 * 60 * 60 * 1000,
 };
@@ -179,6 +222,8 @@ export async function updateJob(
     processed: number;
     ok: number;
     errors: number;
+    phase: string | null;
+    meta_json?: unknown;
     started_at: string;
     ended_at: string;
   }>

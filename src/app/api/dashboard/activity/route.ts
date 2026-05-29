@@ -113,7 +113,11 @@ export async function GET(request: NextRequest) {
           : "ok";
     const at = job.ended_at ?? job.created_at;
     const label =
-      job.type === "sync_items" ? "Sincronização" : "Aplicação atacado";
+      job.type === "sync_items"
+        ? "Sincronização"
+        : job.type === "sync_fulfillment_stock"
+          ? "Estoque Full"
+          : "Aplicação atacado";
     items.push({
       at,
       type,
