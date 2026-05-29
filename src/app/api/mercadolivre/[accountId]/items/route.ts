@@ -203,8 +203,43 @@ export async function GET(
     return NextResponse.json({ error: "Erro ao listar itens" }, { status: 500 });
   }
 
+  const rows = items ?? [];
+  const variationItemIds = rows.filter((i) => i.has_variations).map((i) => i.item_id as string);
+  let variationsByItem = new Map<
+    string,
+    Array<{
+      variation_id: number;
+      inventory_id: string | null;
+      available_quantity: number | null;
+      fulfillment_stock: number | null;
+    }>
+  >();
+  if (variationItemIds.length > 0) {
+    const { data: variationRows } = await supabase
+      .from("ml_variations")
+      .select("item_id, variation_id, inventory_id, available_quantity, fulfillment_stock")
+      .eq("account_id", accountId)
+      .in("item_id", variationItemIds);
+    for (const v of variationRows ?? []) {
+      const list = variationsByItem.get(v.item_id as string) ?? [];
+      list.push({
+        variation_id: v.variation_id as number,
+        inventory_id: (v.inventory_id as string | null) ?? null,
+        available_quantity: v.available_quantity as number | null,
+        fulfillment_stock: v.fulfillment_stock as number | null,
+      });
+      variationsByItem.set(v.item_id as string, list);
+    }
+  }
+
+  const enrichedItems = rows.map((item) => {
+    const vars = variationsByItem.get(item.item_id as string);
+    if (!vars?.length) return item;
+    return { ...item, variation_fulfillment: vars };
+  });
+
   return NextResponse.json({
-    items: items ?? [],
+    items: enrichedItems,
     total: count ?? 0,
     page: familyId ? 1 : page,
     page_size: pageSize,

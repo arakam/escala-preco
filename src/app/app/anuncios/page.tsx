@@ -67,6 +67,33 @@ function isFullListing(item: ItemRow): boolean {
   return getItemFulfillment(item).is_fulfillment;
 }
 
+function formatFulfillmentStockTitle(item: ItemRow): string | undefined {
+  const vars = item.variation_fulfillment?.filter((v) => v.fulfillment_stock != null);
+  if (vars?.length) {
+    const parts = vars.map(
+      (v) => `${v.fulfillment_stock} (${v.inventory_id ?? "inv." + v.variation_id})`
+    );
+    return `Somente depósito Full por variação: ${parts.join(" + ")} = ${getItemFulfillment(item).fulfillment_stock ?? "?"}`;
+  }
+  const full = getItemFulfillment(item).fulfillment_stock;
+  const total = item.available_quantity;
+  if (full != null && total != null && total > full) {
+    return `Depósito Full: ${full} (não inclui próprio/Flex: ${total - full})`;
+  }
+  if (full != null) return `Somente depósito Full (ML): ${full}`;
+  return undefined;
+}
+
+function formatListingStockTitle(item: ItemRow): string | undefined {
+  const total = item.available_quantity;
+  const full = getItemFulfillment(item).fulfillment_stock;
+  if (total == null) return undefined;
+  if (full != null && total > full) {
+    return `Total à venda: ${total} (Full ${full} + próprio/Flex ${total - full})`;
+  }
+  return `Total disponível para venda na publicação: ${total}`;
+}
+
 const COLUMN_ORDER: ColumnKey[] = [
   "image",
   "item_id",
@@ -129,6 +156,12 @@ interface ItemRow {
   inventory_id?: string | null;
   is_fulfillment?: boolean | null;
   fulfillment_stock?: number | null;
+  variation_fulfillment?: Array<{
+    variation_id: number;
+    inventory_id: string | null;
+    available_quantity: number | null;
+    fulfillment_stock: number | null;
+  }>;
   user_product_id?: string | null;
   has_variations: boolean;
   thumbnail: string | null;
@@ -396,13 +429,22 @@ function AnunciosHelpContent() {
               <strong>Sim</strong> quando o ML informa <code className="text-xs">inventory_id</code> no anúncio (ou
               variação), há saldo no depósito Full, ou tag/frete de fulfillment na última sync.
             </HelpFieldRow>
-            <HelpFieldRow kind="optional" name="Estoque Full">
-              Soma do <code className="text-xs">available_quantity</code> em{" "}
+            <HelpFieldRow kind="optional" name="Estoque">
+              Quantidade total disponível para venda na publicação: estoque Full + estoque próprio/Flex.
+              Em anúncios MLBU, soma todas as localizações do{" "}
               <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">
-                GET /inventories/&#123;inventory_id&#125;/stock/fulfillment
+                GET /user-products/&#123;id&#125;/stock
               </code>
-              . O <code className="text-xs">inventory_id</code> vem do GET /items (ex.: LCQI05831), não do MLB/MLBU.
-              Diferente da coluna <strong>Estoque</strong> (quantidade da publicação).
+              ; nos demais, vem do <code className="text-xs">available_quantity</code> do GET /items.
+            </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Estoque Full">
+              Somente saldo no depósito Full do ML (
+              <code className="text-xs">meli_facility</code> ou{" "}
+              <code className="text-xs">available_quantity</code> em{" "}
+              <code className="rounded bg-slate-100 px-1 text-xs dark:bg-slate-900">
+                GET /inventories/&#123;id&#125;/stock/fulfillment
+              </code>
+              ). Não inclui estoque próprio/Flex.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Estoque / Vendidos">
               Quantidade disponível e unidades vendidas conforme retorno da API na sync.
@@ -1485,9 +1527,10 @@ function AnunciosPageContent() {
                       className={frozenCellClass("full_stock", "p-2 text-right text-xs tabular-nums text-slate-700 dark:text-slate-200")}
                       style={frozenCellStyle("full_stock")}
                       title={
-                        isFullListing(item) && getItemFulfillment(item).fulfillment_stock == null
+                        formatFulfillmentStockTitle(item) ??
+                        (isFullListing(item) && getItemFulfillment(item).fulfillment_stock == null
                           ? "Full confirmado por tag/frete; resincronize para obter o saldo no depósito ML"
-                          : undefined
+                          : undefined)
                       }
                     >
                       {(() => {
@@ -1554,7 +1597,7 @@ function AnunciosPageContent() {
                         }`
                       )}
                       style={frozenCellStyle("stock")}
-                      title="Quantidade disponível no ML"
+                      title={formatListingStockTitle(item) ?? "Quantidade total disponível para venda (Full + próprio/Flex)"}
                     >
                       {item.available_quantity != null ? item.available_quantity : "—"}
                     </td>

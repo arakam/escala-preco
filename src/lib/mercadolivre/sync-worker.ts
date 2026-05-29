@@ -20,8 +20,17 @@ import {
 } from "./client";
 import { extractItemDimensions, extractVariationDimensions } from "./item-dimensions";
 import {
-  fetchFulfillmentFieldsForItem,
+  collectFulfillmentInventoryIds,
+  fetchFulfillmentStockFields,
+  FulfillmentStockCache,
+  getFulfillmentStockTtlMs,
+  itemHasFulfillmentStockSource,
   normalizeMlInventoryId,
+  persistVariationFulfillmentStocks,
+  resolveFulfillmentFieldsFast,
+  resolveListingAvailableQuantity,
+  shouldRefreshFulfillmentStock,
+  type StoredFulfillmentRow,
 } from "./fulfillment-stock";
 import { getLatestValidAccessToken, getValidAccessToken } from "./refresh";
 import { syncHeartbeatMs, syncLog, syncLogVerbose } from "./sync-log";
@@ -338,6 +347,13 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     let lastProactiveTokenCheck = Date.now();
     const siteIdFallback = (account.site_id ?? "MLB").trim() || "MLB";
     const categoryFeeKeysSynced = new Set<string>();
+    const fulfillmentStockCache = new FulfillmentStockCache();
+    type FulfillmentRefreshEntry = {
+      itemId: string;
+      item: MLItemDetail;
+      variationDetails: MLVariationDetail[];
+    };
+    const fulfillmentRefreshQueue: FulfillmentRefreshEntry[] = [];
 
     const syncOneItem = async (itemId: string, token: string): Promise<void> => {
       if (syncLogVerbose()) {
@@ -351,13 +367,53 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       const salePrice = getSalePriceAmount(salePriceResponse);
       const variationDetails = await upsertItemVariations(supabase, accountId, item, token);
       const baseRow = mapItemToRow(accountId, item);
-      const fulfillment = await fetchFulfillmentFieldsForItem(item, token, variationDetails);
+      const fastFulfillment = resolveFulfillmentFieldsFast(item, variationDetails);
+      const inventoryIds = collectFulfillmentInventoryIds(item, variationDetails);
+
+      const { data: existingFulfillmentRow } = await supabase
+        .from("ml_items")
+        .select("fulfillment_stock, fulfillment_synced_at, inventory_id, user_product_id")
+        .eq("account_id", accountId)
+        .eq("item_id", itemId)
+        .maybeSingle();
+      const existingFulfillment = existingFulfillmentRow as StoredFulfillmentRow | null;
+
+      let fulfillmentStock: number | null = null;
+      let fulfillmentSyncedAt: string | null = null;
+
+      if (fastFulfillment.is_fulfillment) {
+        const needsRefresh = shouldRefreshFulfillmentStock({
+          inventoryIds,
+          userProductId: item.user_product_id,
+          primaryInventoryId: fastFulfillment.inventory_id,
+          existing: existingFulfillment,
+        });
+        if (needsRefresh && itemHasFulfillmentStockSource(item, inventoryIds)) {
+          fulfillmentRefreshQueue.push({ itemId, item, variationDetails });
+          if (
+            existingFulfillment?.fulfillment_stock != null &&
+            Number.isFinite(Number(existingFulfillment.fulfillment_stock))
+          ) {
+            fulfillmentStock = Math.floor(Number(existingFulfillment.fulfillment_stock));
+            fulfillmentSyncedAt = existingFulfillment.fulfillment_synced_at ?? null;
+          }
+        } else if (
+          existingFulfillment?.fulfillment_stock != null &&
+          Number.isFinite(Number(existingFulfillment.fulfillment_stock))
+        ) {
+          fulfillmentStock = Math.floor(Number(existingFulfillment.fulfillment_stock));
+          fulfillmentSyncedAt = existingFulfillment.fulfillment_synced_at ?? null;
+        }
+      }
+
       const row = {
         ...baseRow,
         price: standardPrice ?? baseRow.price,
         sale_price: salePrice,
-        ...fulfillment,
-        inventory_id: fulfillment.inventory_id ?? baseRow.inventory_id,
+        is_fulfillment: fastFulfillment.is_fulfillment,
+        inventory_id: fastFulfillment.inventory_id ?? baseRow.inventory_id,
+        fulfillment_stock: fulfillmentStock,
+        fulfillment_synced_at: fulfillmentSyncedAt,
       };
       const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
         onConflict: "account_id,item_id",
@@ -489,6 +545,70 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       if (heartbeat) clearInterval(heartbeat);
     }
 
+    if (fulfillmentRefreshQueue.length > 0 && (await assertJobStillActive())) {
+      syncLog(jobId, "fase B: estoque Full", {
+        pendentes: fulfillmentRefreshQueue.length,
+        cacheInventoryIds: fulfillmentStockCache.size,
+        ttlMs: getFulfillmentStockTtlMs(),
+      });
+      let fulfillmentOk = 0;
+      let fulfillmentErrors = 0;
+      const nowIso = () => new Date().toISOString();
+
+      for (const entry of fulfillmentRefreshQueue) {
+        if (!(await assertJobStillActive())) break;
+
+        try {
+          if (Date.now() - lastProactiveTokenCheck > 8 * 60 * 1000) {
+            lastProactiveTokenCheck = Date.now();
+            const t = await getLatestValidAccessToken(accountId, supabase);
+            if (t) accessToken = t;
+          }
+
+          const stockFields = await fetchFulfillmentStockFields(
+            entry.item,
+            accessToken,
+            entry.variationDetails,
+            fulfillmentStockCache
+          );
+          const itemPatch: Record<string, unknown> = {
+            is_fulfillment: stockFields.is_fulfillment,
+            inventory_id: stockFields.inventory_id,
+            fulfillment_stock: stockFields.fulfillment_stock,
+            fulfillment_synced_at: nowIso(),
+          };
+          if (stockFields.total_listing_stock != null) {
+            itemPatch.available_quantity = stockFields.total_listing_stock;
+          }
+          const { error: updErr } = await (supabase as any)
+            .from("ml_items")
+            .update(itemPatch)
+            .eq("account_id", accountId)
+            .eq("item_id", entry.itemId);
+          if (updErr) throw updErr;
+          await persistVariationFulfillmentStocks(
+            supabase,
+            accountId,
+            entry.itemId,
+            stockFields.byInventory
+          );
+          fulfillmentOk++;
+        } catch (e) {
+          fulfillmentErrors++;
+          syncLog(jobId, "fase B: falha estoque Full", {
+            itemId: entry.itemId,
+            err: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+
+      syncLog(jobId, "fase B concluída", {
+        ok: fulfillmentOk,
+        errors: fulfillmentErrors,
+        cacheInventoryIds: fulfillmentStockCache.size,
+      });
+    }
+
     const currentStatus = await getJobStatus(supabase, jobId);
     if (!currentStatus || !isActiveJobStatus(currentStatus)) {
       syncLog(jobId, "encerrado sem sobrescrever status (cancelado ou expirado)", {
@@ -608,13 +728,48 @@ export async function syncSingleItem(
     const salePrice = getSalePriceAmount(salePriceResponse);
     const variationDetails = await upsertItemVariations(supabase, accountId, item, accessToken);
     const baseRow = mapItemToRow(accountId, item);
-    const fulfillment = await fetchFulfillmentFieldsForItem(item, accessToken, variationDetails);
+    const fastFulfillment = resolveFulfillmentFieldsFast(item, variationDetails);
+    const inventoryIds = collectFulfillmentInventoryIds(item, variationDetails);
+    const fulfillmentCache = new FulfillmentStockCache();
+
+    let fulfillmentStock: number | null = null;
+    let fulfillmentSyncedAt: string | null = null;
+    let listingAvailableQuantity: number | null =
+      baseRow.available_quantity != null ? Math.floor(Number(baseRow.available_quantity)) : null;
+
+    if (
+      fastFulfillment.is_fulfillment &&
+      shouldRefreshFulfillmentStock({
+        inventoryIds,
+        userProductId: item.user_product_id,
+        primaryInventoryId: fastFulfillment.inventory_id,
+        force: true,
+      })
+    ) {
+      const stockFields = await fetchFulfillmentStockFields(
+        item,
+        accessToken,
+        variationDetails,
+        fulfillmentCache
+      );
+      fulfillmentStock = stockFields.fulfillment_stock;
+      fulfillmentSyncedAt = new Date().toISOString();
+      listingAvailableQuantity = resolveListingAvailableQuantity(
+        baseRow.available_quantity,
+        stockFields
+      );
+      await persistVariationFulfillmentStocks(supabase, accountId, itemIdClean, stockFields.byInventory);
+    }
+
     const row = {
       ...baseRow,
       price: standardPrice ?? baseRow.price,
       sale_price: salePrice,
-      ...fulfillment,
-      inventory_id: fulfillment.inventory_id ?? baseRow.inventory_id,
+      available_quantity: listingAvailableQuantity,
+      is_fulfillment: fastFulfillment.is_fulfillment,
+      inventory_id: fastFulfillment.inventory_id ?? baseRow.inventory_id,
+      fulfillment_stock: fulfillmentStock,
+      fulfillment_synced_at: fulfillmentSyncedAt,
     };
     const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
       onConflict: "account_id,item_id",
