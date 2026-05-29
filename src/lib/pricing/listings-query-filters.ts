@@ -1,24 +1,10 @@
 import type { StockCompareOp } from "@/lib/mercadolivre/item-tags";
 
-/** Query Supabase encadeável (select/update) com comparadores numéricos. */
-export type NumericCompareQuery = {
-  gt(column: string, value: number): NumericCompareQuery;
-  gte(column: string, value: number): NumericCompareQuery;
-  lt(column: string, value: number): NumericCompareQuery;
-  lte(column: string, value: number): NumericCompareQuery;
-  eq(column: string, value: number): NumericCompareQuery;
-  not(column: string, operator: string, value: unknown): NumericCompareQuery;
-  or(filters: string): NumericCompareQuery;
-  is(column: string, value: null): NumericCompareQuery;
-  eq(column: string, value: string): NumericCompareQuery;
-};
-
-export function applyNumericCompareFilter<T extends NumericCompareQuery>(
-  q: T,
-  column: string,
-  op: StockCompareOp,
-  qty: number
-): T {
+/**
+ * Aplica gt/gte/lt/lte/eq em query Supabase sem generic (evita "excessively deep" no PostgrestBuilder).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function applyNumericCompareFilter(q: any, column: string, op: StockCompareOp, qty: number): any {
   switch (op) {
     case "gt":
       return q.gt(column, qty);
