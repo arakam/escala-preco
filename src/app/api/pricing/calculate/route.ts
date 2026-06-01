@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { createServiceClient } from "@/lib/supabase/service";
 import { computeItemsFees } from "@/lib/pricing/compute-items-fees";
-import { PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST } from "@/lib/pricing/calculate-limits";
+import { PRICING_CALCULATE_CLIENT_BATCH_SIZE } from "@/lib/pricing/calculate-limits";
 import { loadPricingRulesSnapshot } from "@/lib/pricing/pricing-rules-cache";
 import { persistCalculatedPricingBatch } from "@/lib/pricing/persist-calculated-batch";
 
@@ -42,6 +42,9 @@ interface CalculatedItem {
   net_amount: number;
 }
 
+/** Evita 504 em lotes grandes enviados pela tela (várias páginas ou seleção ampla). */
+export const maxDuration = 300;
+
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const {
@@ -57,21 +60,6 @@ export async function POST(req: NextRequest) {
   if (!body.items || !Array.isArray(body.items) || body.items.length === 0) {
     console.warn("[pricing/calculate] 400: lista de items vazia ou inválida");
     return NextResponse.json({ error: "Nenhum item para calcular" }, { status: 400 });
-  }
-
-  if (body.items.length > PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST) {
-    console.warn(
-      "[pricing/calculate] 400: excesso de items",
-      body.items.length,
-      ">",
-      PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST
-    );
-    return NextResponse.json(
-      {
-        error: `Máximo de ${PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST} itens por requisição. Use várias chamadas ou o lote automático da tela de Preços.`,
-      },
-      { status: 400 }
-    );
   }
 
   const { data: account, error: accountError } = await supabase
@@ -125,14 +113,23 @@ export async function POST(req: NextRequest) {
     loadFeeReferences: linearFees,
   });
 
-  const { results: feeResults, errors } = await computeItemsFees(body.items, {
-    siteId,
-    accessToken,
-    isMercadoLider,
-    supabaseAdmin: adminSupabase,
-    useLinearFees: linearFees,
-    rules,
-  });
+  const batchSize = PRICING_CALCULATE_CLIENT_BATCH_SIZE;
+  const feeResults: Awaited<ReturnType<typeof computeItemsFees>>["results"] = [];
+  const errors: Awaited<ReturnType<typeof computeItemsFees>>["errors"] = [];
+
+  for (let i = 0; i < body.items.length; i += batchSize) {
+    const chunk = body.items.slice(i, i + batchSize);
+    const batch = await computeItemsFees(chunk, {
+      siteId,
+      accessToken,
+      isMercadoLider,
+      supabaseAdmin: adminSupabase,
+      useLinearFees: linearFees,
+      rules,
+    });
+    feeResults.push(...batch.results);
+    errors.push(...batch.errors);
+  }
 
   const results: CalculatedItem[] = feeResults.map((r) => {
     const netAmount = Math.round((r.price - r.fee - r.shipping_cost) * 100) / 100;

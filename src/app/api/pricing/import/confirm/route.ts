@@ -2,7 +2,6 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST } from "@/lib/pricing/calculate-limits";
 import { computeItemsFees, type PricingFeeInputItem } from "@/lib/pricing/compute-items-fees";
 import { loadPricingRulesSnapshot } from "@/lib/pricing/pricing-rules-cache";
 import { persistCalculatedPricingBatch } from "@/lib/pricing/persist-calculated-batch";
@@ -14,7 +13,12 @@ import {
   type SolveMarginFastInput,
 } from "@/lib/pricing/solve-margin-fast";
 
+/** Evita 504 em importações grandes (sem limite artificial de linhas). */
+export const maxDuration = 300;
+
 const VARIATION_ID_ITEM = -1;
+const CACHE_LOOKUP_ITEM_ID_CHUNK = 100;
+const PLANNED_PRICES_UPSERT_BATCH = 500;
 
 type CacheRow = {
   item_id: string;
@@ -93,12 +97,6 @@ export async function POST(req: NextRequest) {
   if (items.length === 0) {
     return NextResponse.json({ error: "Envie pelo menos um item em items" }, { status: 400 });
   }
-  if (items.length > PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST) {
-    return NextResponse.json(
-      { error: `Máximo de ${PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST} linhas por importação.` },
-      { status: 400 }
-    );
-  }
 
   const { data: account, error: accountError } = await supabase
     .from("ml_accounts")
@@ -123,22 +121,25 @@ export async function POST(req: NextRequest) {
   const { shippingRanges, feePercentByCatType } = await loadPricingRulesSnapshot(adminSupabase, siteId);
 
   const itemIds = Array.from(new Set(items.map((i) => i.item_id.trim().toUpperCase())));
-  const { data: cacheRows, error: cacheError } = await supabase
-    .from("pricing_cache")
-    .select(
-      "item_id, variation_id, sku, listing_type_id, category_id, weight_kg, height_cm, width_cm, length_cm, cost_price, tax_percent, extra_fee_percent, fixed_expenses, reference_fee_percent, current_price, planned_price"
-    )
-    .eq("account_id", account.id)
-    .in("item_id", itemIds);
-
-  if (cacheError) {
-    console.error("[pricing/import/confirm] cache lookup", cacheError);
-    return NextResponse.json({ error: "Erro ao buscar anúncios no cache" }, { status: 500 });
-  }
-
   const cacheByKey = new Map<string, CacheRow>();
-  for (const row of (cacheRows ?? []) as CacheRow[]) {
-    cacheByKey.set(cacheLookupKey(row.item_id, row.variation_id), row);
+  for (let i = 0; i < itemIds.length; i += CACHE_LOOKUP_ITEM_ID_CHUNK) {
+    const idChunk = itemIds.slice(i, i + CACHE_LOOKUP_ITEM_ID_CHUNK);
+    const { data: cacheRows, error: cacheError } = await supabase
+      .from("pricing_cache")
+      .select(
+        "item_id, variation_id, sku, listing_type_id, category_id, weight_kg, height_cm, width_cm, length_cm, cost_price, tax_percent, extra_fee_percent, fixed_expenses, reference_fee_percent, current_price, planned_price"
+      )
+      .eq("account_id", account.id)
+      .in("item_id", idChunk);
+
+    if (cacheError) {
+      console.error("[pricing/import/confirm] cache lookup", cacheError);
+      return NextResponse.json({ error: "Erro ao buscar anúncios no cache" }, { status: 500 });
+    }
+
+    for (const row of (cacheRows ?? []) as CacheRow[]) {
+      cacheByKey.set(cacheLookupKey(row.item_id, row.variation_id), row);
+    }
   }
 
   const applyErrors: Array<{ item_id: string; variation_id: number | null; error: string }> = [];
@@ -278,14 +279,16 @@ export async function POST(req: NextRequest) {
     updated_at: now,
   }));
 
-  const { error: upsertError } = await supabase.from("planned_prices").upsert(toUpsert, {
-    onConflict: "account_id,item_id,variation_id",
-    ignoreDuplicates: false,
-  });
-
-  if (upsertError) {
-    console.error("[pricing/import/confirm] upsert", upsertError);
-    return NextResponse.json({ error: "Erro ao salvar preços planejados" }, { status: 500 });
+  for (let i = 0; i < toUpsert.length; i += PLANNED_PRICES_UPSERT_BATCH) {
+    const batch = toUpsert.slice(i, i + PLANNED_PRICES_UPSERT_BATCH);
+    const { error: upsertError } = await supabase.from("planned_prices").upsert(batch, {
+      onConflict: "account_id,item_id,variation_id",
+      ignoreDuplicates: false,
+    });
+    if (upsertError) {
+      console.error("[pricing/import/confirm] upsert", upsertError);
+      return NextResponse.json({ error: "Erro ao salvar preços planejados" }, { status: 500 });
+    }
   }
 
   try {

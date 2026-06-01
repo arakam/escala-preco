@@ -11,7 +11,10 @@ import {
   PRECO_PAGE_SIZE_OPTIONS,
 } from "@/lib/table-pagination";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
-import { PRICING_CALCULATE_CLIENT_BATCH_SIZE } from "@/lib/pricing/calculate-limits";
+import {
+  PRICING_CALCULATE_CLIENT_BATCH_SIZE,
+  PRICING_IMPORT_CONFIRM_CLIENT_BATCH_SIZE,
+} from "@/lib/pricing/calculate-limits";
 import { calculateFullPricing as computeFullPricingBreakdown, type FullPricingBreakdown } from "@/lib/pricing/full-net";
 import {
   effectiveCalcularFreteMl,
@@ -877,7 +880,7 @@ function listingSelectionKey(l: Pick<PricingListing, "id" | "item_id" | "variati
   return `${l.item_id}:${l.variation_id ?? "n"}`;
 }
 
-/** Uma requisição processa todos os itens no servidor (sem N chamadas HTTP). */
+/** Margem em massa: lotes de até PRICING_CALCULATE_CLIENT_BATCH_SIZE por requisição (sem teto total). */
 async function solveMarginBulkViaApi(
   items: ListingWithPricing[],
   targetPct: number,
@@ -915,43 +918,55 @@ async function solveMarginBulkViaApi(
     return { results: [], errors: [] };
   }
 
-  const res = await fetch("/api/pricing/solve-margin-bulk", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      target_margin_percent: targetPct,
-      is_mercado_lider: isMercadoLider,
-      items: payload,
-    }),
-  });
+  const results: Array<{
+    item_id: string;
+    variation_id: number | null;
+    price: number;
+    calculated: CalculatedPricing;
+  }> = [];
+  const errors: Array<{ item_id: string; variation_id: number | null; error: string }> = [];
+  const step = PRICING_CALCULATE_CLIENT_BATCH_SIZE;
 
-  const data = (await res.json().catch(() => null)) as {
-    results?: Array<{
-      item_id: string;
-      variation_id: number | null;
-      price: number;
-      calculated: CalculatedPricing;
-    }>;
-    errors?: Array<{ item_id: string; variation_id: number | null; error: string }>;
-    error?: string;
-  } | null;
+  for (let i = 0; i < payload.length; i += step) {
+    const chunk = payload.slice(i, i + step);
+    const res = await fetch("/api/pricing/solve-margin-bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_margin_percent: targetPct,
+        is_mercado_lider: isMercadoLider,
+        items: chunk,
+      }),
+    });
 
-  if (!res.ok) {
-    const msg = data?.error ?? `HTTP ${res.status}`;
-    return {
-      results: [],
-      errors: payload.map((p) => ({
-        item_id: p.item_id,
-        variation_id: p.variation_id ?? null,
-        error: msg,
-      })),
-    };
+    const data = (await res.json().catch(() => null)) as {
+      results?: Array<{
+        item_id: string;
+        variation_id: number | null;
+        price: number;
+        calculated: CalculatedPricing;
+      }>;
+      errors?: Array<{ item_id: string; variation_id: number | null; error: string }>;
+      error?: string;
+    } | null;
+
+    if (!res.ok) {
+      const msg = data?.error ?? `HTTP ${res.status}`;
+      for (const p of chunk) {
+        errors.push({
+          item_id: p.item_id,
+          variation_id: p.variation_id ?? null,
+          error: msg,
+        });
+      }
+      continue;
+    }
+
+    if (data?.results?.length) results.push(...data.results);
+    if (data?.errors?.length) errors.push(...data.errors);
   }
 
-  return {
-    results: data?.results ?? [],
-    errors: data?.errors ?? [],
-  };
+  return { results, errors };
 }
 
 async function runConcurrentPool<T>(
@@ -999,7 +1014,7 @@ function bulkBatchLoaderDeterminatePercent(p: BulkBatchLoaderProgress): number {
 }
 
 /**
- * Envia o cálculo em lotes de até 100 itens (limite da API), em sequência, e concatena resultados.
+ * Envia o cálculo em lotes (PRICING_CALCULATE_CLIENT_BATCH_SIZE), em sequência, e concatena resultados.
  */
 async function fetchPricingCalculateBatches(
   items: PricingCalculatePayloadItem[],
@@ -1210,6 +1225,12 @@ function PrecosPageContent() {
   const [precosImportCsvModalOpen, setPrecosImportCsvModalOpen] = useState(false);
   const [precosImportLoading, setPrecosImportLoading] = useState(false);
   const [precosImportConfirming, setPrecosImportConfirming] = useState(false);
+  /** Overlay: leitura do CSV (parse) ou gravação em lotes (confirm). */
+  const [precosImportLoaderProgress, setPrecosImportLoaderProgress] = useState<{
+    done: number;
+    total: number;
+    stage: "parse" | "confirm";
+  } | null>(null);
   const [precosImportResult, setPrecosImportResult] = useState<{
     ok?: boolean;
     total_rows: number;
@@ -1631,9 +1652,117 @@ function PrecosPageContent() {
     [isMercadoLider]
   );
 
-  const handleCalculateAll = useCallback(() => {
-    calculatePrices(listings);
-  }, [calculatePrices, listings]);
+  const buildListingsFilterParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (statusFilter) params.set("status", statusFilter);
+    if (linkFilter === "linked") params.set("linked", "1");
+    if (linkFilter === "unlinked") params.set("linked", "0");
+    if (
+      sortBy === "orders_desc" ||
+      sortBy === "orders_asc" ||
+      sortBy === "cost_desc" ||
+      sortBy === "cost_asc" ||
+      sortBy === "profit_desc" ||
+      sortBy === "profit_asc"
+    ) {
+      params.set("order_by", sortBy);
+    }
+    if (skuFilter) params.set("sku", skuFilter);
+    if (supplierFilter) params.set("supplier", supplierFilter);
+    if (filterTagIds.length > 0) params.set("tags", filterTagIds.join(","));
+    if (fullOnly) params.set("full_only", "1");
+    if (sales30dOpFilter && sales30dQtyFilter.trim()) {
+      params.set("orders_30d_op", sales30dOpFilter);
+      params.set("orders_30d_qty", sales30dQtyFilter.trim());
+    }
+    if (costOpFilter && costQtyFilter.trim()) {
+      params.set("cost_op", costOpFilter);
+      params.set("cost_qty", costQtyFilter.trim());
+    }
+    if (discountOpFilter && discountQtyFilter.trim()) {
+      params.set("discount_op", discountOpFilter);
+      params.set("discount_qty", discountQtyFilter.trim());
+    }
+    if (profitOpFilter && profitQtyFilter.trim()) {
+      params.set("profit_op", profitOpFilter);
+      params.set("profit_qty", profitQtyFilter.trim());
+    }
+    if (semPromoMlAtiva) params.set("sem_promo_ml", "1");
+    return params;
+  }, [
+    search,
+    statusFilter,
+    linkFilter,
+    sortBy,
+    skuFilter,
+    supplierFilter,
+    filterTagIds,
+    fullOnly,
+    sales30dOpFilter,
+    sales30dQtyFilter,
+    costOpFilter,
+    costQtyFilter,
+    discountOpFilter,
+    discountQtyFilter,
+    profitOpFilter,
+    profitQtyFilter,
+    semPromoMlAtiva,
+  ]);
+
+  const handleCalculateAll = useCallback(async () => {
+    const catalogWide = total > listings.length;
+    setCalculating(true);
+    setSaveMessage(null);
+    try {
+      if (catalogWide) {
+        const params = buildListingsFilterParams();
+        const res = await fetch(`/api/pricing/recalculate-fees?${params}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_mercado_lider: isMercadoLider }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          processed?: number;
+          eligible?: number;
+          total_in_cache?: number;
+          errors_count?: number;
+          skipped?: number;
+        };
+        if (!res.ok) {
+          setSaveMessage({
+            type: "error",
+            text: data.error ?? "Erro ao recalcular taxa e frete no catálogo filtrado.",
+          });
+          setTimeout(() => setSaveMessage(null), 8000);
+          return;
+        }
+        const processed = data.processed ?? 0;
+        const eligible = data.eligible ?? data.total_in_cache ?? total;
+        let msg = `Taxa e frete recalculados para ${processed} de ${eligible} anúncio(s) do filtro atual.`;
+        if ((data.errors_count ?? 0) > 0) msg += ` ${data.errors_count} aviso(s).`;
+        if ((data.skipped ?? 0) > 0) msg += ` ${data.skipped} ignorado(s) (sem preço ou dados ML).`;
+        setSaveMessage({ type: processed > 0 ? "ok" : "error", text: msg });
+        setTimeout(() => setSaveMessage(null), 10000);
+        await loadListings();
+      } else {
+        await calculatePrices(listings);
+      }
+    } catch {
+      setSaveMessage({ type: "error", text: "Erro de conexão ao recalcular taxa e frete." });
+      setTimeout(() => setSaveMessage(null), 6000);
+    } finally {
+      setCalculating(false);
+    }
+  }, [
+    total,
+    listings,
+    buildListingsFilterParams,
+    isMercadoLider,
+    calculatePrices,
+    loadListings,
+  ]);
 
   const persistPlannedPrices = useCallback(
     async (
@@ -3189,6 +3318,7 @@ function PrecosPageContent() {
     setPrecosImportCsvModalOpen(false);
     setPrecosImportLoading(true);
     setPrecosImportResult(null);
+    setPrecosImportLoaderProgress({ done: 0, total: 0, stage: "parse" });
     try {
       const form = new FormData();
       form.append("file", file);
@@ -3212,6 +3342,7 @@ function PrecosPageContent() {
       setTimeout(() => setSaveMessage(null), 6000);
     } finally {
       setPrecosImportLoading(false);
+      setPrecosImportLoaderProgress(null);
     }
   }, []);
 
@@ -3228,29 +3359,55 @@ function PrecosPageContent() {
     }
     setPrecosImportConfirming(true);
     setSaveMessage(null);
+    setPrecosImportLoaderProgress({ done: 0, total: items.length, stage: "confirm" });
+    const batchSize = PRICING_IMPORT_CONFIRM_CLIENT_BATCH_SIZE;
+    let totalSaved = 0;
+    const allErrors: Array<{ item_id: string; variation_id: number | null; error: string }> = [];
     try {
-      const res = await fetch("/api/pricing/import/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items, is_mercado_lider: isMercadoLider }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        ok?: boolean;
-        saved?: number;
-        errors?: Array<{ item_id: string; variation_id: number | null; error: string }>;
-        error?: string;
-        message?: string;
-      };
-      if (!res.ok) {
-        setSaveMessage({ type: "error", text: data.error ?? "Erro ao confirmar importação." });
-        setTimeout(() => setSaveMessage(null), 7000);
-        return;
+      for (let offset = 0; offset < items.length; offset += batchSize) {
+        const chunk = items.slice(offset, offset + batchSize);
+        setPrecosImportLoaderProgress({
+          done: offset,
+          total: items.length,
+          stage: "confirm",
+        });
+        const res = await fetch("/api/pricing/import/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: chunk, is_mercado_lider: isMercadoLider }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          saved?: number;
+          errors?: Array<{ item_id: string; variation_id: number | null; error: string }>;
+          error?: string;
+          message?: string;
+        };
+        if (!res.ok) {
+          setSaveMessage({
+            type: "error",
+            text:
+              data.error ??
+              `Erro ao confirmar importação (lote ${Math.floor(offset / batchSize) + 1}).`,
+          });
+          setTimeout(() => setSaveMessage(null), 7000);
+          return;
+        }
+        totalSaved += data.saved ?? 0;
+        if (data.errors?.length) allErrors.push(...data.errors);
+        setPrecosImportLoaderProgress({
+          done: Math.min(offset + chunk.length, items.length),
+          total: items.length,
+          stage: "confirm",
+        });
       }
-      const saved = data.saved ?? 0;
-      const errCount = data.errors?.length ?? 0;
-      let msg = `Importação concluída: ${saved} preço(s) atualizado(s) por MLB.`;
+      const errCount = allErrors.length;
+      let msg = `Importação concluída: ${totalSaved} preço(s) atualizado(s) por MLB.`;
       if (errCount > 0) msg += ` ${errCount} linha(s) com aviso ou erro.`;
-      setSaveMessage({ type: saved > 0 && errCount === 0 ? "ok" : saved > 0 ? "ok" : "error", text: msg });
+      setSaveMessage({
+        type: totalSaved > 0 ? "ok" : "error",
+        text: msg,
+      });
       setTimeout(() => setSaveMessage(null), 9000);
       setPrecosImportResult(null);
       await loadListings();
@@ -3259,6 +3416,7 @@ function PrecosPageContent() {
       setTimeout(() => setSaveMessage(null), 6000);
     } finally {
       setPrecosImportConfirming(false);
+      setPrecosImportLoaderProgress(null);
     }
   }, [precosImportResult, isMercadoLider, loadListings]);
 
@@ -3451,7 +3609,11 @@ function PrecosPageContent() {
   const refRefreshing =
     !!refJobId && (refJob?.status === "queued" || refJob?.status === "running");
 
-  const loaderOpen = cacheRefreshing || calculating || refRefreshing;
+  const precosImportLoaderActive =
+    precosImportLoaderProgress != null && (precosImportLoading || precosImportConfirming);
+
+  const loaderOpen =
+    cacheRefreshing || calculating || refRefreshing || precosImportLoaderActive;
 
   const bulkMarginLoaderActive = bulkMarginLoaderProgress != null && calculating;
   const bulkDiscountLoaderActive = bulkDiscountLoaderProgress != null && calculating;
@@ -3459,7 +3621,15 @@ function PrecosPageContent() {
   const bulkProgressLoaderActive =
     bulkMarginLoaderActive || bulkDiscountLoaderActive || bulkRestoreLoaderActive;
 
-  const loaderMessages = bulkMarginLoaderActive
+  const loaderMessages =
+    precosImportLoaderActive && precosImportLoaderProgress
+      ? precosImportLoaderProgress.stage === "parse"
+        ? ["Lendo arquivo CSV…", "Validando colunas MLB, Promoção e Margem %…"]
+        : [
+            `Salvando preços: ${precosImportLoaderProgress.done} de ${precosImportLoaderProgress.total} linha(s)…`,
+            "Gravando preços planejados e atualizando cache…",
+          ]
+    : bulkMarginLoaderActive
     ? [`Processando ${bulkMarginLoaderProgress.done} de ${bulkMarginLoaderProgress.total} anúncios`]
     : bulkDiscountLoaderActive
       ? [bulkBatchLoaderMessage(bulkDiscountLoaderProgress)]
@@ -3472,8 +3642,24 @@ function PrecosPageContent() {
               "Gravando indicadores na tabela…",
             ]
           : undefined;
-  const loaderPhase = cacheRefreshing ? "refresh-cache" : calculating ? "calculate" : "default";
+  const loaderPhase = precosImportLoaderActive
+    ? precosImportLoaderProgress?.stage === "confirm"
+      ? "calculate"
+      : "default"
+    : cacheRefreshing
+      ? "refresh-cache"
+      : calculating
+        ? "calculate"
+        : "default";
   const loaderDeterminatePercent = (() => {
+    if (
+      precosImportLoaderActive &&
+      precosImportLoaderProgress?.stage === "confirm" &&
+      precosImportLoaderProgress.total > 0
+    ) {
+      const p = precosImportLoaderProgress;
+      return (p.done / p.total) * 100;
+    }
     if (bulkDiscountLoaderActive && bulkDiscountLoaderProgress != null) {
       const p = bulkDiscountLoaderProgress;
       if (!calculating || p.total <= 0) return null;
@@ -3488,7 +3674,13 @@ function PrecosPageContent() {
     if (p == null || !calculating || p.total <= 0) return null;
     return (p.done / p.total) * 100;
   })();
-  const loaderFooter = bulkProgressLoaderActive ? "" : undefined;
+  const loaderFooter = bulkProgressLoaderActive
+    ? ""
+    : precosImportLoaderActive
+      ? precosImportLoaderProgress?.stage === "confirm"
+        ? "Não feche esta aba até concluir a importação."
+        : "Validando o arquivo antes de exibir o preview…"
+      : undefined;
 
   return (
     <div className="adminty-precos-page space-y-5">
@@ -3829,7 +4021,11 @@ function PrecosPageContent() {
                     handleCalculateAll();
                   }}
                   className="btn-dropdown-item"
-                  title="Consulta taxa e frete no ML para todas as linhas visíveis (preço da promoção atual)"
+                  title={
+                    total > listings.length
+                      ? `Recalcula taxa e frete para todos os ${total} anúncios do filtro atual (não só esta página)`
+                      : "Recalcula taxa e frete para todas as linhas carregadas (preço da promoção atual)"
+                  }
                 >
                   {calculating ? "Recalculando taxa e frete…" : "Recalcular taxa e frete"}
                 </button>
@@ -4250,7 +4446,11 @@ function PrecosPageContent() {
               disabled={precosImportConfirming || precosImportResult.valid_rows === 0}
               className="rounded bg-brand-blue px-4 py-2 text-sm font-medium text-white hover:bg-brand-blue-dark disabled:opacity-50"
             >
-              {precosImportConfirming ? "Importando…" : "Confirmar importação"}
+              {precosImportConfirming
+                ? precosImportLoaderProgress
+                  ? `Importando… ${precosImportLoaderProgress.done}/${precosImportLoaderProgress.total}`
+                  : "Importando…"
+                : "Confirmar importação"}
             </button>
             <button
               type="button"

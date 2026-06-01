@@ -2,7 +2,6 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST } from "@/lib/pricing/calculate-limits";
 import { loadPricingRulesSnapshot } from "@/lib/pricing/pricing-rules-cache";
 import { persistCalculatedPricingBatch } from "@/lib/pricing/persist-calculated-batch";
 import type { FullPricingBreakdown } from "@/lib/pricing/full-net";
@@ -36,6 +35,8 @@ interface SolveMarginBulkBody {
   items: BulkMarginItemBody[];
 }
 
+export const maxDuration = 300;
+
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const {
@@ -53,15 +54,6 @@ export async function POST(req: NextRequest) {
 
   if (!body.items?.length) {
     return NextResponse.json({ error: "Nenhum item informado" }, { status: 400 });
-  }
-
-  if (body.items.length > PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST) {
-    return NextResponse.json(
-      {
-        error: `Máximo de ${PRICING_CALCULATE_MAX_ITEMS_PER_REQUEST} itens por requisição.`,
-      },
-      { status: 400 }
-    );
   }
 
   const { data: account, error: accountError } = await supabase
