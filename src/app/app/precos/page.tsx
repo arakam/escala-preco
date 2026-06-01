@@ -3351,23 +3351,42 @@ function PrecosPageContent() {
         const res = await fetch("/api/pricing/import/confirm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
           body: JSON.stringify({ items: chunk, is_mercado_lider: isMercadoLider }),
         });
-        const data = (await res.json().catch(() => ({}))) as {
+        const raw = await res.text();
+        let data = {} as {
           ok?: boolean;
           saved?: number;
           errors?: Array<{ item_id: string; variation_id: number | null; error: string }>;
           error?: string;
           message?: string;
         };
-        if (!res.ok) {
+        try {
+          data = raw ? (JSON.parse(raw) as typeof data) : {};
+        } catch {
           setSaveMessage({
             type: "error",
             text:
-              data.error ??
-              `Erro ao confirmar importação (lote ${Math.floor(offset / batchSize) + 1}).`,
+              res.status === 413
+                ? "Lote muito grande para o servidor. Tente importar em partes menores."
+                : `Erro do servidor (${res.status}) no lote ${Math.floor(offset / batchSize) + 1}.`,
           });
           setTimeout(() => setSaveMessage(null), 7000);
+          return;
+        }
+        if (!res.ok) {
+          const batchNum = Math.floor(offset / batchSize) + 1;
+          setSaveMessage({
+            type: "error",
+            text:
+              res.status === 401
+                ? (data.error ??
+                  "Sessão expirada. Atualize a página (F5) e confirme a importação novamente.")
+                : (data.error ??
+                  `Erro ao confirmar importação (lote ${batchNum}).`),
+          });
+          setTimeout(() => setSaveMessage(null), 9000);
           return;
         }
         totalSaved += data.saved ?? 0;

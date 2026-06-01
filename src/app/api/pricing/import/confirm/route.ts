@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getRouteAuth } from "@/lib/supabase/route-auth";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -78,13 +78,14 @@ function toSolveInput(row: CacheRow): SolveMarginFastInput {
  * Aplica promoção ou margem alvo por MLB e grava planned_prices + cache.
  */
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+  const auth = await getRouteAuth();
+  if (!auth) {
+    return NextResponse.json(
+      { error: "Sessão expirada. Atualize a página e faça login novamente." },
+      { status: 401 }
+    );
   }
+  const { supabase, user } = auth;
 
   let body: ConfirmBody;
   try {

@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getRouteAuth } from "@/lib/supabase/route-auth";
 import { parsePrecosImportCsv } from "@/lib/precos-import-csv";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -10,12 +10,12 @@ export const maxDuration = 300;
  * Parseia com delimitador ";", identifica colunas pelo cabeçalho (MLB, Promocao, Margem %). NÃO salva.
  */
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+  const auth = await getRouteAuth();
+  if (!auth) {
+    return NextResponse.json(
+      { error: "Sessão expirada. Atualize a página e faça login novamente." },
+      { status: 401 }
+    );
   }
 
   let formData: FormData;
