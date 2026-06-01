@@ -6,7 +6,6 @@ import {
   useState,
   useMemo,
   useRef,
-  startTransition,
   type CSSProperties,
   type ReactNode,
 } from "react";
@@ -50,7 +49,8 @@ import {
   type PrecosImportRowValid,
 } from "@/lib/precos-import-csv";
 import { PrecosHelpContent } from "./precos-help-content";
-import { PrecosFiltersModal, type PrecosFiltersValues } from "./precos-filters-modal";
+import type { PrecosFiltersValues } from "./precos-filters-modal";
+import { PrecosToolbarIcons } from "./precos-toolbar-icons";
 import {
   consumePricingListingsStaleFlag,
   subscribePricingListingsRefresh,
@@ -303,6 +303,17 @@ function buildCampaignIssuesCsv(rows: SellerCampaignItemResult[]): string {
   return `\uFEFF${lines.join("\r\n")}`;
 }
 
+function updatePriceRowKey(item_id: string, variation_id: number | null): string {
+  return `${item_id}:${variation_id ?? "n"}`;
+}
+
+type UpdatePriceModalResult = {
+  globalError?: string;
+  summary: { applied: number; skipped: number; errors: number };
+  items: UpdatePriceItemResult[];
+  labelsByKey: Record<string, string>;
+};
+
 function buildUpdatePriceIssuesCsv(rows: UpdatePriceItemResult[]): string {
   const sep = ";";
   const header = ["item_id", "variation_id", "situacao", "mensagem"];
@@ -423,46 +434,6 @@ function MLIcon({ className }: { className?: string }) {
       height={20}
       className={className}
     />
-  );
-}
-
-function FilterIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-      <path
-        d="M4 6h16M7 12h10M10 18h4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.7" />
-      <path
-        d="M12 8v5l3 2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function KebabMenuIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-      <circle cx="12" cy="5" r="1.7" fill="currentColor" />
-      <circle cx="12" cy="12" r="1.7" fill="currentColor" />
-      <circle cx="12" cy="19" r="1.7" fill="currentColor" />
-    </svg>
   );
 }
 
@@ -1176,16 +1147,7 @@ function PrecosPageContent() {
   const [updatePriceOpen, setUpdatePriceOpen] = useState(false);
   const [updatePriceLoading, setUpdatePriceLoading] = useState(false);
   const [updatePriceMessage, setUpdatePriceMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
-  const [updatePriceIssuesForDownload, setUpdatePriceIssuesForDownload] = useState<UpdatePriceItemResult[] | null>(
-    null
-  );
-  const updatePriceMessageDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Modal de filtros (padrão Adminty) */
-  const [filtersModalOpen, setFiltersModalOpen] = useState(false);
-  const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
-  const optionsMenuRef = useRef<HTMLDivElement>(null);
-  const [lastUpdatedInfoOpen, setLastUpdatedInfoOpen] = useState(false);
-  const lastUpdatedInfoRef = useRef<HTMLDivElement>(null);
+  const [updatePriceResult, setUpdatePriceResult] = useState<UpdatePriceModalResult | null>(null);
   /** Índices das colunas congeladas (0-based). Ordem dos congelados = ordem na tabela. Persistido em localStorage após hidratação. */
   const [stickyColumns, setStickyColumns] = useState<Set<number>>(() => new Set());
   const [stickyHydrated, setStickyHydrated] = useState(false);
@@ -2586,7 +2548,6 @@ function PrecosPageContent() {
     setProfitOpFilter(values.profitOpFilter);
     setProfitQtyFilter(values.profitQtyFilter);
     setPage(1);
-    setFiltersModalOpen(false);
   }, []);
 
   const appliedPrecosFilterLabels = useMemo(() => {
@@ -2688,29 +2649,7 @@ function PrecosPageContent() {
     setProfitQtyFilter("");
     setSortBy("");
     setPage(1);
-    setFiltersModalOpen(false);
   }, []);
-
-  useEffect(() => {
-    if (!optionsMenuOpen) return;
-    const close = (e: MouseEvent) => {
-      if (optionsMenuRef.current && !optionsMenuRef.current.contains(e.target as Node)) {
-        setOptionsMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [optionsMenuOpen]);
-
-  useEffect(() => {
-    if (!lastUpdatedInfoOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const el = lastUpdatedInfoRef.current;
-      if (el && !el.contains(e.target as Node)) setLastUpdatedInfoOpen(false);
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [lastUpdatedInfoOpen]);
 
   const lastUpdatedFormatted = useMemo(() => {
     if (!lastUpdatedAt) return "";
@@ -3033,8 +2972,15 @@ function PrecosPageContent() {
       return;
     }
     setUpdatePriceMessage(null);
+    setUpdatePriceResult(null);
     setUpdatePriceOpen(true);
   }, [selectedIds, listings]);
+
+  const closeUpdatePriceModal = useCallback(() => {
+    setUpdatePriceOpen(false);
+    setUpdatePriceResult(null);
+    setUpdatePriceLoading(false);
+  }, []);
 
   const handleConfirmUpdatePrice = useCallback(async () => {
     const selectedListings = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
@@ -3049,13 +2995,14 @@ function PrecosPageContent() {
       promotion_price: l.new_price,
     }));
 
-    setUpdatePriceLoading(true);
-    setUpdatePriceMessage(null);
-    setUpdatePriceIssuesForDownload(null);
-    if (updatePriceMessageDismissRef.current) {
-      clearTimeout(updatePriceMessageDismissRef.current);
-      updatePriceMessageDismissRef.current = null;
+    const labelsByKey: Record<string, string> = {};
+    for (const l of selectedListings) {
+      labelsByKey[updatePriceRowKey(l.item_id, l.variation_id)] =
+        l.title?.trim() || l.item_id;
     }
+
+    setUpdatePriceLoading(true);
+    setUpdatePriceResult(null);
 
     try {
       const res = await fetch("/api/mercadolivre/update-item-prices", {
@@ -3064,48 +3011,49 @@ function PrecosPageContent() {
         body: JSON.stringify({ items }),
       });
       const data = await res.json().catch(() => ({}));
+      const itemsRaw = (data as { items?: UpdatePriceItemResult[] }).items ?? [];
+      const summaryRaw = (data as {
+        summary?: { applied?: number; skipped_invalid_price?: number; errors?: number };
+      }).summary;
+
+      const summaryFromItems = {
+        applied: itemsRaw.filter((i) => i.status === "ok").length,
+        skipped: itemsRaw.filter((i) => i.status === "skipped_invalid_price").length,
+        errors: itemsRaw.filter((i) => i.status === "error").length,
+      };
+      const summary = {
+        applied: summaryRaw?.applied ?? summaryFromItems.applied,
+        skipped: summaryRaw?.skipped_invalid_price ?? summaryFromItems.skipped,
+        errors: summaryRaw?.errors ?? summaryFromItems.errors,
+      };
+
       if (!res.ok) {
-        setUpdatePriceIssuesForDownload(null);
-        setUpdatePriceMessage({
-          type: "error",
-          text: (data as { error?: string }).error ?? "Erro ao atualizar preços no Mercado Livre.",
+        setUpdatePriceResult({
+          globalError:
+            (data as { error?: string }).error ?? "Erro ao atualizar preços no Mercado Livre.",
+          summary,
+          items: itemsRaw,
+          labelsByKey,
         });
         return;
       }
 
-      const itemsRaw = (data as { items?: UpdatePriceItemResult[] }).items ?? [];
-      const issues = itemsRaw.filter((i) => i.status !== "ok");
-      setUpdatePriceIssuesForDownload(issues.length > 0 ? issues : null);
-
-      const summary = (data as { summary?: { applied?: number; skipped_invalid_price?: number; errors?: number } })
-        .summary || {};
-      const applied = summary.applied ?? 0;
-      const skipped = summary.skipped_invalid_price ?? 0;
-      const errors = summary.errors ?? 0;
-      const csvHint =
-        issues.length > 0
-          ? ` Baixe o CSV abaixo para ver ${issues.length} linha(s) com erro ou promoção inválida.`
-          : "";
-
-      setUpdatePriceMessage({
-        type: applied > 0 && errors === 0 ? "ok" : applied > 0 ? "ok" : "error",
-        text: `Preço atualizado no ML: ${applied} anúncio(s), ${skipped} com promoção inválida, ${errors} com erro.${csvHint}`,
+      setUpdatePriceResult({
+        summary,
+        items: itemsRaw,
+        labelsByKey,
       });
-      setSelectedIds(new Set());
-      setUpdatePriceOpen(false);
-      await loadListings();
 
-      const dismissMs = issues.length > 0 ? 45000 : 8000;
-      updatePriceMessageDismissRef.current = setTimeout(() => {
-        updatePriceMessageDismissRef.current = null;
-        setUpdatePriceMessage(null);
-        setUpdatePriceIssuesForDownload(null);
-      }, dismissMs);
+      if (summary.applied > 0) {
+        setSelectedIds(new Set());
+        await loadListings();
+      }
     } catch {
-      setUpdatePriceIssuesForDownload(null);
-      setUpdatePriceMessage({
-        type: "error",
-        text: "Erro de rede ao atualizar preços no Mercado Livre.",
+      setUpdatePriceResult({
+        globalError: "Erro de rede ao atualizar preços no Mercado Livre.",
+        summary: { applied: 0, skipped: 0, errors: 0 },
+        items: [],
+        labelsByKey,
       });
     } finally {
       setUpdatePriceLoading(false);
@@ -3113,8 +3061,9 @@ function PrecosPageContent() {
   }, [selectedIds, listings, loadListings]);
 
   const handleDownloadUpdatePriceIssuesCsv = useCallback(() => {
-    if (!updatePriceIssuesForDownload?.length) return;
-    const csv = buildUpdatePriceIssuesCsv(updatePriceIssuesForDownload);
+    const issues = updatePriceResult?.items.filter((i) => i.status !== "ok") ?? [];
+    if (issues.length === 0) return;
+    const csv = buildUpdatePriceIssuesCsv(issues);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -3123,7 +3072,7 @@ function PrecosPageContent() {
     a.download = `precos-ml-nao-atualizados-${stamp}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [updatePriceIssuesForDownload]);
+  }, [updatePriceResult]);
 
   const handleCreateCampaign = useCallback(async () => {
     if (!campaignName.trim()) {
@@ -3599,7 +3548,11 @@ function PrecosPageContent() {
     precosImportLoaderProgress != null && (precosImportLoading || precosImportConfirming);
 
   const loaderOpen =
-    cacheRefreshing || calculating || refRefreshing || precosImportLoaderActive;
+    cacheRefreshing ||
+    calculating ||
+    refRefreshing ||
+    precosImportLoaderActive ||
+    listingsRefetching;
 
   const bulkMarginLoaderActive = bulkMarginLoaderProgress != null && calculating;
   const bulkDiscountLoaderActive = bulkDiscountLoaderProgress != null && calculating;
@@ -3621,13 +3574,25 @@ function PrecosPageContent() {
       ? [bulkBatchLoaderMessage(bulkDiscountLoaderProgress)]
       : bulkRestoreLoaderActive
         ? [bulkBatchLoaderMessage(bulkRestoreLoaderProgress)]
-        : refRefreshing
-          ? [
-              "Atualizando competitividade…",
-              "Consultando sugestões no Mercado Livre…",
-              "Gravando indicadores na tabela…",
-            ]
-          : undefined;
+        : listingsRefetching
+          ? isAllPageSize(pageSize)
+            ? [
+                "Carregando todos os anúncios…",
+                "Com muitos anúncios isso pode levar alguns instantes…",
+                "Aguarde — a tela está atualizando…",
+              ]
+            : [
+                "Atualizando lista de anúncios…",
+                "Aplicando filtros e quantidade de linhas…",
+                "Aguarde — a tela está atualizando…",
+              ]
+          : refRefreshing
+            ? [
+                "Atualizando competitividade…",
+                "Consultando sugestões no Mercado Livre…",
+                "Gravando indicadores na tabela…",
+              ]
+            : undefined;
   const loaderPhase = precosImportLoaderActive
     ? precosImportLoaderProgress?.stage === "confirm"
       ? "calculate"
@@ -3666,7 +3631,11 @@ function PrecosPageContent() {
       ? precosImportLoaderProgress?.stage === "confirm"
         ? "Não feche esta aba até concluir a importação."
         : "Validando o arquivo antes de exibir o preview…"
-      : undefined;
+      : listingsRefetching
+        ? isAllPageSize(pageSize)
+          ? "Carregando todos os anúncios — não feche esta aba até concluir."
+          : "Atualizando a lista — não feche esta aba até concluir."
+        : undefined;
 
   return (
     <div className="adminty-precos-page space-y-5">
@@ -3747,59 +3716,227 @@ function PrecosPageContent() {
       )}
 
       {updatePriceOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="update-price-modal-title"
+        >
           <div
             className="absolute inset-0 bg-black/50"
-            onClick={() => !updatePriceLoading && setUpdatePriceOpen(false)}
+            onClick={() => !updatePriceLoading && closeUpdatePriceModal()}
           />
-          <div className="relative w-full max-w-lg rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
-            <h2 className="mb-4 text-lg font-semibold">Atualizar preço no Mercado Livre</h2>
-            <div className="space-y-3 text-sm text-fg">
-              <p>
-                Serão atualizados <strong>{selectedCount}</strong> anúncio(s) selecionado(s). O valor enviado é o da
-                coluna <strong>Promoção</strong> de cada linha.
-              </p>
-              <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-                <p className="mb-2 font-medium">Impactos no Mercado Livre</p>
-                <ul className="list-inside list-disc space-y-1">
-                  <li>
-                    Se houver promoção ativa e o novo preço ficar <strong>abaixo</strong> dela, a promoção pode ser
-                    removida.
-                  </li>
-                  <li>
-                    Promoções programadas (DEALS) não mudam até a data de início; o preço standard é alterado agora.
-                  </li>
-                  <li>
-                    Anúncios com <strong>automatização de preços</strong> ativa podem rejeitar a alteração ou ignorar o
-                    valor — verifique no ML.
-                  </li>
-                  <li>
-                    Em categorias com desconto de frete automático (MLB), alterar o preço pode remover o benefício se
-                    ficar abaixo do mínimo.
-                  </li>
-                </ul>
-              </div>
-              <p className="text-xs text-fg-muted">
-                Após sucesso, o anúncio é sincronizado e a coluna Preço ML é atualizada na tabela.
-              </p>
+          <div className="relative flex max-h-[min(92vh,40rem)] w-full max-w-lg flex-col overflow-hidden rounded-lg bg-card shadow-xl dark:border dark:border-slate-600">
+            <div className="shrink-0 border-b border-slate-200 px-6 py-4 dark:border-slate-600">
+              <h2 id="update-price-modal-title" className="text-lg font-semibold">
+                {updatePriceResult ? "Resultado da atualização no ML" : "Atualizar preço no Mercado Livre"}
+              </h2>
             </div>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setUpdatePriceOpen(false)}
-                className="btn btn-secondary px-4 py-2 text-sm"
-                disabled={updatePriceLoading}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleConfirmUpdatePrice()}
-                disabled={updatePriceLoading}
-                className="btn btn-primary text-sm disabled:opacity-50"
-              >
-                {updatePriceLoading ? "Atualizando…" : "Atualizar preço no ML"}
-              </button>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 text-sm text-fg">
+              {updatePriceLoading ? (
+                <div className="flex flex-col items-center gap-3 py-8 text-center">
+                  <span className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-primary" />
+                  <p className="font-medium">Enviando preços ao Mercado Livre…</p>
+                  <p className="text-xs text-fg-muted">
+                    Aguarde — pode levar alguns segundos por anúncio.
+                  </p>
+                </div>
+              ) : updatePriceResult ? (
+                (() => {
+                  const { summary, items, labelsByKey, globalError } = updatePriceResult;
+                  const okItems = items.filter((i) => i.status === "ok");
+                  const issueItems = items.filter((i) => i.status !== "ok");
+                  const allFailed =
+                    !globalError && summary.applied === 0 && items.length > 0;
+                  return (
+                    <div className="space-y-4">
+                      {globalError ? (
+                        <div className="rounded border border-red-200 bg-red-50 p-3 text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+                          <p className="font-medium">{globalError}</p>
+                          {items.length === 0 ? (
+                            <p className="mt-1 text-xs">
+                              Nenhum anúncio foi processado. Verifique sua conexão com o ML e tente novamente.
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {items.length > 0 ? (
+                        <div
+                          className={`rounded border p-3 text-sm ${
+                            summary.applied > 0 && summary.errors === 0
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100"
+                              : summary.applied > 0
+                                ? "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100"
+                                : "border-red-200 bg-red-50 text-red-900 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-100"
+                          }`}
+                        >
+                          <p className="font-semibold">
+                            {summary.applied > 0 && summary.errors === 0
+                              ? "Todos os anúncios selecionados foram atualizados."
+                              : summary.applied > 0
+                                ? "Atualização concluída com avisos."
+                                : allFailed
+                                  ? "Nenhum anúncio foi atualizado."
+                                  : "Nada a atualizar."}
+                          </p>
+                          <ul className="mt-2 space-y-0.5 text-xs">
+                            <li>
+                              <strong>{summary.applied}</strong> atualizado(s) com sucesso no ML
+                            </li>
+                            {summary.skipped > 0 ? (
+                              <li>
+                                <strong>{summary.skipped}</strong> ignorado(s) (promoção inválida ou zero)
+                              </li>
+                            ) : null}
+                            {summary.errors > 0 ? (
+                              <li>
+                                <strong>{summary.errors}</strong> com erro da API do Mercado Livre
+                              </li>
+                            ) : null}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {issueItems.length > 0 ? (
+                        <div>
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            Não atualizados ({issueItems.length})
+                          </p>
+                          <ul className="max-h-48 space-y-2 overflow-y-auto rounded border border-slate-200 bg-slate-50/80 p-2 dark:border-slate-600 dark:bg-slate-900/40">
+                            {issueItems.map((row) => {
+                              const key = updatePriceRowKey(row.item_id, row.variation_id);
+                              const label = labelsByKey[key] || row.item_id;
+                              const detail =
+                                row.status === "error"
+                                  ? row.error
+                                  : "Promoção inválida ou zero na linha selecionada";
+                              return (
+                                <li
+                                  key={key}
+                                  className="rounded border border-red-100 bg-card px-2 py-1.5 text-xs dark:border-red-900/40"
+                                >
+                                  <span className="font-medium text-slate-800 dark:text-slate-100">
+                                    {label}
+                                  </span>
+                                  <span className="ml-1 text-slate-500 dark:text-slate-400">
+                                    ({row.item_id}
+                                    {row.variation_id != null ? ` · var ${row.variation_id}` : ""})
+                                  </span>
+                                  <p className="mt-0.5 text-red-700 dark:text-red-300">{detail}</p>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {okItems.length > 0 ? (
+                        <details className="rounded border border-slate-200 dark:border-slate-600">
+                          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                            Atualizados com sucesso ({okItems.length})
+                          </summary>
+                          <ul className="max-h-36 space-y-1 overflow-y-auto border-t border-slate-200 px-3 py-2 dark:border-slate-600">
+                            {okItems.map((row) => {
+                              const key = updatePriceRowKey(row.item_id, row.variation_id);
+                              const label = labelsByKey[key] || row.item_id;
+                              return (
+                                <li key={key} className="text-xs text-slate-600 dark:text-slate-300">
+                                  <span className="font-medium text-slate-800 dark:text-slate-100">
+                                    {label}
+                                  </span>{" "}
+                                  — R${" "}
+                                  {row.price.toLocaleString("pt-BR", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                  {row.warnings?.length ? (
+                                    <span className="block text-amber-700 dark:text-amber-300">
+                                      {row.warnings.join(" · ")}
+                                    </span>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="space-y-3">
+                  <p>
+                    Serão atualizados <strong>{selectedCount}</strong> anúncio(s) selecionado(s). O valor enviado é o da
+                    coluna <strong>Promoção</strong> de cada linha.
+                  </p>
+                  <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+                    <p className="mb-2 font-medium">Impactos no Mercado Livre</p>
+                    <ul className="list-inside list-disc space-y-1">
+                      <li>
+                        Se houver promoção ativa e o novo preço ficar <strong>abaixo</strong> dela, a promoção pode ser
+                        removida.
+                      </li>
+                      <li>
+                        Promoções programadas (DEALS) não mudam até a data de início; o preço standard é alterado agora.
+                      </li>
+                      <li>
+                        Anúncios com <strong>automatização de preços</strong> ativa podem rejeitar a alteração ou
+                        ignorar o valor — verifique no ML.
+                      </li>
+                      <li>
+                        Em categorias com desconto de frete automático (MLB), alterar o preço pode remover o benefício
+                        se ficar abaixo do mínimo.
+                      </li>
+                    </ul>
+                  </div>
+                  <p className="text-xs text-fg-muted">
+                    Após sucesso, o anúncio é sincronizado e a coluna Preço ML é atualizada na tabela.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-200 px-6 py-4 dark:border-slate-600">
+              {updatePriceResult &&
+              updatePriceResult.items.some((i) => i.status !== "ok") ? (
+                <button
+                  type="button"
+                  onClick={handleDownloadUpdatePriceIssuesCsv}
+                  className="btn btn-secondary px-4 py-2 text-sm"
+                >
+                  Baixar CSV dos erros
+                </button>
+              ) : null}
+              {updatePriceResult ? (
+                <button
+                  type="button"
+                  onClick={closeUpdatePriceModal}
+                  className="btn btn-primary px-4 py-2 text-sm"
+                >
+                  Fechar
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={closeUpdatePriceModal}
+                    className="btn btn-secondary px-4 py-2 text-sm"
+                    disabled={updatePriceLoading}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleConfirmUpdatePrice()}
+                    disabled={updatePriceLoading}
+                    className="btn btn-primary text-sm disabled:opacity-50"
+                  >
+                    Atualizar preço no ML
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -4106,7 +4243,17 @@ function PrecosPageContent() {
           <div className="pricing-filter-bar-meta flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px]">
             <span className="pricing-filter-bar-label">Filtros:</span>
             {listingsRefetching && (
-              <span className="text-[11px] font-medium text-[#0d6efd]">Atualizando lista…</span>
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#0d6efd]/35 bg-[#0d6efd]/10 px-2.5 py-1 text-[11px] font-semibold text-[#0d6efd] shadow-sm dark:border-[#6ea8fe]/40 dark:bg-[#0d6efd]/20 dark:text-[#9ec5fe]"
+                role="status"
+                aria-live="polite"
+              >
+                <span
+                  className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[#0d6efd]/30 border-t-[#0d6efd] dark:border-t-[#9ec5fe]"
+                  aria-hidden
+                />
+                Atualizando lista…
+              </span>
             )}
             {appliedPrecosFilterLabels.length > 0 ? (
               appliedPrecosFilterLabels.map((label, idx) => (
@@ -4130,101 +4277,19 @@ function PrecosPageContent() {
               </button>
             )}
           </div>
-          <div className="btn-dropdown relative flex items-center gap-1" ref={optionsMenuRef}>
-            <div className="relative" ref={lastUpdatedInfoRef}>
-              <button
-                type="button"
-                onClick={() => {
-                  setOptionsMenuOpen(false);
-                  setLastUpdatedInfoOpen((o) => !o);
-                }}
-                title={
-                  lastUpdatedAt
-                    ? `Última atualização: ${lastUpdatedFormatted} (horário de São Paulo).`
-                    : "Ainda não há registro da última atualização do cache nesta conta."
-                }
-                aria-label="Última atualização do cache"
-                aria-expanded={lastUpdatedInfoOpen}
-                className="btn btn-icon btn-sm btn-outline-secondary"
-              >
-                <ClockIcon />
-              </button>
-              {lastUpdatedInfoOpen && (
-                <div className="absolute right-0 top-9 z-30 w-72 rounded border border-slate-200 bg-card px-3 py-2 text-left text-[11px] leading-snug text-slate-700 shadow-lg dark:border-slate-600 dark:text-slate-200">
-                  {lastUpdatedAt ? (
-                    <>
-                      <span className="font-semibold text-slate-800 dark:text-slate-100">Última atualização</span>
-                      {": "}
-                      {lastUpdatedFormatted}
-                      <span className="text-slate-500"> (horário de São Paulo).</span>
-                    </>
-                  ) : (
-                    <>Ainda não há registro da última atualização do cache nesta conta.</>
-                  )}
-                </div>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setLastUpdatedInfoOpen(false);
-                startTransition(() => setFiltersModalOpen(true));
-              }}
-              className="btn btn-icon btn-sm btn-outline-secondary"
-              title="Abrir filtros"
-              aria-label="Abrir filtros"
-            >
-              <FilterIcon />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLastUpdatedInfoOpen(false);
-                setOptionsMenuOpen((o) => !o);
-              }}
-              className="btn btn-icon btn-sm btn-outline-secondary"
-              title="Opções"
-              aria-label="Opções"
-              aria-expanded={optionsMenuOpen}
-            >
-              <KebabMenuIcon />
-            </button>
-            {optionsMenuOpen && (
-              <div className="btn-dropdown-menu right-0 top-full w-52">
-                <button
-                  type="button"
-                  onClick={openPrecosImportCsv}
-                  disabled={precosImportLoading}
-                  className="btn-dropdown-item disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {precosImportLoading ? "Processando CSV…" : "Importar CSV"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleExportPrecosCsv}
-                  disabled={sortedListings.length === 0}
-                  className="btn-dropdown-item disabled:cursor-not-allowed disabled:opacity-50"
-                  title={
-                    sortedListings.length === 0
-                      ? "Não há linhas na tabela para exportar"
-                      : "Exporta as linhas visíveis na tabela (página e filtros atuais)"
-                  }
-                >
-                  Exportar CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void loadListings();
-                    setOptionsMenuOpen(false);
-                  }}
-                  className="btn-dropdown-item"
-                >
-                  Atualizar tabela
-                </button>
-              </div>
-            )}
-          </div>
+          <PrecosToolbarIcons
+            applied={appliedPrecosFilters}
+            allTags={allTags}
+            onApply={applyPrecosFilters}
+            onClearAll={clearPrecosFilters}
+            lastUpdatedAt={lastUpdatedAt}
+            lastUpdatedFormatted={lastUpdatedFormatted}
+            exportDisabled={sortedListings.length === 0}
+            precosImportLoading={precosImportLoading}
+            onOpenImport={openPrecosImportCsv}
+            onExport={handleExportPrecosCsv}
+            onRefreshTable={() => void loadListings()}
+          />
         </div>
 
       {saveMessage && (
@@ -4275,15 +4340,6 @@ function PrecosPageContent() {
           }`}
         >
           <p>{updatePriceMessage.text}</p>
-          {updatePriceIssuesForDownload && updatePriceIssuesForDownload.length > 0 && (
-            <button
-              type="button"
-              onClick={handleDownloadUpdatePriceIssuesCsv}
-              className="mt-3 rounded border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 dark:border-emerald-700 dark:bg-slate-900 dark:text-emerald-200 dark:hover:bg-slate-800"
-            >
-              Baixar CSV — {updatePriceIssuesForDownload.length} não atualizado(s)
-            </button>
-          )}
         </div>
       )}
 
@@ -5135,15 +5191,6 @@ function PrecosPageContent() {
         </div>
         )}
       </div>
-
-      <PrecosFiltersModal
-        open={filtersModalOpen}
-        onClose={() => setFiltersModalOpen(false)}
-        applied={appliedPrecosFilters}
-        allTags={allTags}
-        onApply={applyPrecosFilters}
-        onClearAll={clearPrecosFilters}
-      />
 
     </div>
   );

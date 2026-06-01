@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   STOCK_COMPARE_OPS,
@@ -91,6 +91,8 @@ export function PrecosFiltersModal({
 }: PrecosFiltersModalProps) {
   const [draft, setDraft] = useState<PrecosFiltersDraft>(EMPTY_DRAFT);
   const [mounted, setMounted] = useState(false);
+  const appliedRef = useRef(applied);
+  appliedRef.current = applied;
 
   useEffect(() => {
     setMounted(true);
@@ -98,8 +100,8 @@ export function PrecosFiltersModal({
 
   useEffect(() => {
     if (!open) return;
-    setDraft(draftFromApplied(applied));
-  }, [open, applied]);
+    setDraft(draftFromApplied(appliedRef.current));
+  }, [open]);
 
   const toggleDraftFilterTag = useCallback((tagId: string) => {
     setDraft((prev) => ({

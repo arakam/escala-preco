@@ -281,6 +281,11 @@ body {
 .table-body-row {
   @apply border-b border-slate-100 bg-slate-50/80 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-800/40 dark:hover:bg-primary/10;
 }
+/* Preços com muitas linhas (ex.: Linhas → Todos): pinta só o que está visível no scroll */
+.adminty-precos-page .pricing-table-with-sticky tbody .table-body-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
+}
 .table-mini-control {
   @apply rounded border border-slate-200 bg-card px-2 py-1 text-[11px] text-slate-700 dark:border-slate-600 dark:text-slate-200;
 }
