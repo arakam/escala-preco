@@ -19,7 +19,7 @@ import type {
   RecebimentoRow,
 } from "@/lib/recebimento/types";
 
-type RecebimentoTab = "hoje" | "lista" | "como-funciona";
+type ViewMode = "release-day" | "all" | "help";
 type ReleaseFilter = "" | RecebimentoReleaseStatus;
 
 function formatBRL(value: number | null | undefined): string {
@@ -42,6 +42,19 @@ function formatDateTime(iso: string): string {
 function todayIsoDate(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function formatReleaseDateLabel(iso: string): string {
+  const d = new Date(`${iso}T12:00:00`);
+  if (!Number.isFinite(d.getTime())) return iso;
+  const today = todayIsoDate();
+  const base = d.toLocaleDateString("pt-BR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  return iso === today ? `hoje (${base})` : base;
 }
 
 function releaseStatusBadge(status: RecebimentoReleaseStatus): { label: string; className: string } {
@@ -79,27 +92,6 @@ function matchesReleaseDay(row: RecebimentoRow, isoDate: string): boolean {
   return t >= start && t <= end;
 }
 
-/** Dia anterior ao `anchor` (YYYY-MM-DD), calendário local. */
-function yesterdayIsoFrom(anchor: string): string {
-  const [y, m, d] = anchor.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() - 1);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
-}
-
-function localCalendarDayFromIso(iso: string): string {
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return "";
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Liberação na data âncora OU pagamento aprovado no dia anterior (útil para “hoje / ontem”). */
-function matchesRecebimentoPrioridade(row: RecebimentoRow, anchor: string): boolean {
-  if (matchesReleaseDay(row, anchor)) return true;
-  const yest = yesterdayIsoFrom(anchor);
-  return localCalendarDayFromIso(row.date_approved) === yest;
-}
-
 function SummaryCard({
   label,
   value,
@@ -127,6 +119,48 @@ function SummaryCard({
       </p>
       <p className="mt-1 text-2xl font-semibold tabular-nums text-fg-strong">R$ {value}</p>
       <p className="mt-1 text-xs text-secondary">{hint}</p>
+    </div>
+  );
+}
+
+function ReceberNoDiaHero({
+  summary,
+  releaseDate,
+  isToday,
+}: {
+  summary: RecebimentoDaySummary;
+  releaseDate: string;
+  isToday: boolean;
+}) {
+  return (
+    <div className="rounded-xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm dark:border-emerald-800 dark:from-emerald-950/50 dark:to-slate-900">
+      <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">
+        {isToday ? "O que você tem para receber hoje" : "Total na data de liberação"}
+      </p>
+      <p className="mt-0.5 text-xs text-emerald-800/80 dark:text-emerald-200/70">
+        Crédito previsto no Mercado Pago em{" "}
+        <strong className="font-medium">{formatReleaseDateLabel(releaseDate)}</strong>
+        {" "}
+        — filtro pela coluna <em>Liberação</em>
+      </p>
+      <p className="mt-3 text-4xl font-bold tabular-nums tracking-tight text-fg-strong">
+        R$ {formatBRL(summary.total_net)}
+      </p>
+      <p className="mt-2 text-sm text-secondary">
+        {summary.row_count} pedido(s) com liberação neste dia
+        {summary.scheduled_total > 0 ? (
+          <>
+            {" "}
+            · <span className="text-sky-700 dark:text-sky-300">R$ {formatBRL(summary.scheduled_total)} ainda previsto</span>
+          </>
+        ) : null}
+        {summary.released_total > 0 ? (
+          <>
+            {" "}
+            · <span className="text-emerald-700 dark:text-emerald-300">R$ {formatBRL(summary.released_total)} já liberado</span>
+          </>
+        ) : null}
+      </p>
     </div>
   );
 }
@@ -179,6 +213,23 @@ function RecebimentoHelpContent() {
         </ul>
       </section>
       <section>
+        <h3 className="mb-2 font-medium text-fg-strong">Como filtrar</h3>
+        <ul className="list-inside list-disc space-y-1">
+          <li>
+            Use <strong>Receber hoje</strong> para ver só pedidos cuja <strong>data de liberação</strong> é o dia
+            atual (campo do billing / Mercado Pago).
+          </li>
+          <li>
+            Em <strong>Outra data</strong>, escolha o dia no calendário — o total e a tabela mostram só o que libera
+            naquele dia.
+          </li>
+          <li>
+            O filtro <strong>Status</strong> separa o que ainda vai entrar (<em>Previsto</em>) do que já caiu no saldo (
+            <em>Liberado</em>).
+          </li>
+        </ul>
+      </section>
+      <section>
         <h3 className="mb-2 font-medium text-fg-strong">Colunas da tabela</h3>
         <ul className="list-inside list-disc space-y-1">
           <li>
@@ -203,8 +254,8 @@ function RecebimentoHelpContent() {
 }
 
 export function RecebimentoDevPage() {
-  const [tab, setTab] = useState<RecebimentoTab>("hoje");
-  const [filterDate, setFilterDate] = useState(todayIsoDate);
+  const [viewMode, setViewMode] = useState<ViewMode>("release-day");
+  const [releaseDate, setReleaseDate] = useState(todayIsoDate);
   const [releaseFilter, setReleaseFilter] = useState<ReleaseFilter>("");
   const [search, setSearch] = useState("");
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
@@ -220,7 +271,7 @@ export function RecebimentoDevPage() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ date: filterDate, limit: "120" });
+      const params = new URLSearchParams({ date: releaseDate, limit: "120" });
       const res = await fetch(`/api/dev/recebimento?${params.toString()}`);
       const data = (await res.json()) as {
         error?: string;
@@ -242,7 +293,10 @@ export function RecebimentoDevPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterDate]);
+  }, [releaseDate]);
+
+  const today = todayIsoDate();
+  const viewingToday = releaseDate === today;
 
   const syncMissingFromMl = useCallback(async () => {
     setSyncLoading(true);
@@ -283,15 +337,20 @@ export function RecebimentoDevPage() {
     void loadData();
   }, [loadData]);
 
+  const rowsForReleaseDay = useMemo(
+    () => allRows.filter((row) => matchesReleaseDay(row, releaseDate)),
+    [allRows, releaseDate]
+  );
+
   const summary: RecebimentoDaySummary = useMemo(
-    () => summarizeRecebimentoRows(allRows, filterDate),
-    [allRows, filterDate]
+    () => summarizeRecebimentoRows(rowsForReleaseDay, releaseDate),
+    [rowsForReleaseDay, releaseDate]
   );
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return allRows.filter((row) => {
-      if (tab === "hoje" && !matchesRecebimentoPrioridade(row, filterDate)) return false;
+    const base = viewMode === "release-day" ? rowsForReleaseDay : allRows;
+    return base.filter((row) => {
       if (releaseFilter && row.money_release_status !== releaseFilter) return false;
       if (!term) return true;
       return (
@@ -300,24 +359,27 @@ export function RecebimentoDevPage() {
         row.item_title.toLowerCase().includes(term)
       );
     });
-  }, [allRows, filterDate, releaseFilter, search, tab]);
+  }, [allRows, releaseFilter, rowsForReleaseDay, search, viewMode]);
 
-  const tabBtn = (id: RecebimentoTab, label: string) => {
-    const active = tab === id;
-    return (
-      <button
-        type="button"
-        onClick={() => setTab(id)}
-        className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-          active
-            ? "border-[var(--adminty-accent,#01a9ac)] bg-[var(--adminty-accent,#01a9ac)] text-white"
-            : "border-slate-200 bg-card text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
-        }`}
-      >
-        {label}
-      </button>
-    );
+  const goToToday = () => {
+    setViewMode("release-day");
+    setReleaseDate(today);
+    setReleaseFilter("");
   };
+
+  const viewBtn = (active: boolean, label: string, onClick: () => void) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+        active
+          ? "border-[var(--adminty-accent,#01a9ac)] bg-[var(--adminty-accent,#01a9ac)] text-white"
+          : "border-slate-200 bg-card text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+      }`}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <OnboardingGate required="ml">
@@ -362,23 +424,25 @@ export function RecebimentoDevPage() {
           <div>
             <h1 className="text-xl font-semibold text-fg-strong">Recebimento</h1>
             <p className="mt-1 text-sm text-secondary">
-              Liberação na data e pagamentos aprovados no dia anterior — referência{" "}
-              {new Date(`${filterDate}T12:00:00`).toLocaleDateString("pt-BR")}
+              Veja quanto entra no Mercado Pago pela <strong>data de liberação</strong> de cada pedido.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {tabBtn("hoje", "Hoje + ontem")}
-            {tabBtn("lista", "Todos")}
-            {tabBtn("como-funciona", "Como funciona")}
-            <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-              <span className="sr-only">Data de liberação</span>
-              <input
-                type="date"
-                value={filterDate}
-                onChange={(e) => setFilterDate(e.target.value)}
-                className="rounded border border-slate-200 bg-card px-2 py-1.5 text-sm dark:border-slate-600"
-              />
-            </label>
+            {viewBtn(viewMode === "release-day" && viewingToday, "Receber hoje", goToToday)}
+            {viewBtn(viewMode === "release-day" && !viewingToday, "Outra data", () => {
+              setViewMode("release-day");
+            })}
+            {viewBtn(viewMode === "all", "Todos os pedidos", () => setViewMode("all"))}
+            {viewBtn(viewMode === "help", "Como funciona", () => setViewMode("help"))}
+            {viewMode === "release-day" && !viewingToday ? (
+              <button
+                type="button"
+                onClick={goToToday}
+                className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-100"
+              >
+                Voltar para hoje
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void syncMissingFromMl()}
@@ -399,69 +463,116 @@ export function RecebimentoDevPage() {
           </div>
         </div>
 
-        {tab !== "como-funciona" && (
+        {viewMode !== "help" && (
           <>
-            {tab === "hoje" ? (
-              <p className="text-xs text-secondary">
-                Os três primeiros cards somam por <strong>data de liberação</strong> na referência. A tabela inclui
-                também linhas com <strong>aprovação no dia anterior</strong> (pagamento “de ontem”).
+            {viewMode === "release-day" ? (
+              <>
+                <div className="flex flex-wrap items-end gap-3 rounded-lg border border-stroke bg-card px-4 py-3 dark:border-slate-700">
+                  <div>
+                    <label
+                      htmlFor="recebimento-release-date"
+                      className="block text-xs font-medium text-slate-600 dark:text-slate-400"
+                    >
+                      Data de liberação
+                    </label>
+                    <input
+                      id="recebimento-release-date"
+                      type="date"
+                      value={releaseDate}
+                      onChange={(e) => setReleaseDate(e.target.value)}
+                      className="mt-1 rounded border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900"
+                    />
+                  </div>
+                  <p className="max-w-md text-xs text-secondary">
+                    Mostramos pedidos cuja coluna <strong>Liberação</strong> cai neste dia. Para saber o que recebe{" "}
+                      <strong>hoje</strong>, deixe a data de hoje e use o filtro “Ainda vai entrar” se quiser só o
+                      que ainda não caiu no saldo.
+                  </p>
+                </div>
+                <ReceberNoDiaHero summary={summary} releaseDate={releaseDate} isToday={viewingToday} />
+              </>
+            ) : (
+              <p className="rounded-lg border border-stroke bg-card px-4 py-3 text-sm text-secondary dark:border-slate-700">
+                Últimos {meta?.orders_loaded ?? "—"} pedidos pagos (35 dias). Use “Receber hoje” para filtrar por data
+                de liberação.
               </p>
-            ) : null}
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            )}
+
+            {viewMode === "release-day" ? (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <SummaryCard
+                  label="Ainda vai entrar"
+                  value={formatBRL(summary.scheduled_total)}
+                  hint="Status Previsto — agendado para este dia"
+                  accent="sky"
+                />
+                <SummaryCard
+                  label="Já liberado no dia"
+                  value={formatBRL(summary.released_total)}
+                  hint="Status Liberado — já creditado nesta data"
+                  accent="emerald"
+                />
+                <SummaryCard
+                  label="Pendente neste dia"
+                  value={formatBRL(summary.pending_total)}
+                  hint="Liberação nesta data, mas status ainda pendente"
+                  accent="amber"
+                />
+              </div>
+            ) : (
               <SummaryCard
-                label="Liberado no dia"
-                value={formatBRL(summary.released_total)}
-                hint={`${summary.row_count} movimentação(ões) com liberação nesta data`}
-                accent="emerald"
-              />
-              <SummaryCard
-                label="Previsto para o dia"
-                value={formatBRL(summary.scheduled_total)}
-                hint="Agendado para cair no saldo (billing)"
-                accent="sky"
-              />
-              <SummaryCard
-                label="Pendente"
-                value={formatBRL(summary.pending_total)}
-                hint="Pagamento ainda não liberado"
-                accent="amber"
-              />
-              <SummaryCard
-                label="Total líquido (filtro)"
-                value={formatBRL(
-                  filteredRows.reduce((s, r) => s + r.net_to_receive, 0)
-                )}
-                hint={`${filteredRows.length} linha(s) na tabela`}
+                label="Total líquido (tabela)"
+                value={formatBRL(filteredRows.reduce((s, r) => s + r.net_to_receive, 0))}
+                hint={`${filteredRows.length} linha(s) — sem filtro por data`}
                 accent="slate"
               />
-            </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-stroke bg-card px-3 py-2 dark:border-slate-700">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Status:</span>
+              {(
+                [
+                  ["", "Todos"],
+                  ["scheduled", "Ainda vai entrar"],
+                  ["released", "Já liberado"],
+                  ["pending", "Pendente"],
+                ] as const
+              ).map(([value, label]) => {
+                const active = releaseFilter === value;
+                return (
+                  <button
+                    key={value || "all"}
+                    type="button"
+                    onClick={() => setReleaseFilter(value)}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                      active
+                        ? "border-[var(--adminty-accent,#01a9ac)] bg-[var(--adminty-accent,#01a9ac)] text-white"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+              <div className="mx-1 hidden h-6 w-px bg-slate-200 sm:block dark:bg-slate-600" />
               <input
                 type="search"
-                placeholder="Pedido, pagamento ou título…"
+                placeholder="Buscar pedido, pagamento ou título…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="min-w-[12rem] flex-1 rounded border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900"
               />
-              <select
-                value={releaseFilter}
-                onChange={(e) => setReleaseFilter(e.target.value as ReleaseFilter)}
-                className="rounded border border-slate-200 bg-white px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900"
-                aria-label="Status de liberação"
-              >
-                <option value="">Todas liberações</option>
-                <option value="released">Liberado</option>
-                <option value="scheduled">Previsto</option>
-                <option value="pending">Pendente</option>
-              </select>
             </div>
 
             <AppTable
               summary={
-                meta
-                  ? `${filteredRows.length} pedido(s) — ${meta.orders_loaded} carregados, ${meta.orders_from_api} via GET /orders`
-                  : `${filteredRows.length} pedido(s)`
+                viewMode === "release-day"
+                  ? `${filteredRows.length} de ${summary.row_count} pedido(s) com liberação em ${new Date(`${releaseDate}T12:00:00`).toLocaleDateString("pt-BR")}${
+                      meta ? ` · ${meta.orders_loaded} pedidos carregados (35 dias)` : ""
+                    }`
+                  : meta
+                    ? `${filteredRows.length} pedido(s) — ${meta.orders_loaded} carregados, ${meta.orders_from_api} via GET /orders`
+                    : `${filteredRows.length} pedido(s)`
               }
               maxHeight="65vh"
             >
@@ -485,7 +596,15 @@ export function RecebimentoDevPage() {
                 {filteredRows.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">
-                      Nenhum registro para os filtros selecionados.
+                      {viewMode === "release-day" ? (
+                        <>
+                          Nenhum pedido com liberação em{" "}
+                          {new Date(`${releaseDate}T12:00:00`).toLocaleDateString("pt-BR")}.
+                          {viewingToday ? " Tente “Todos os pedidos” ou sincronize faltantes no ML." : null}
+                        </>
+                      ) : (
+                        "Nenhum registro para os filtros selecionados."
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -617,7 +736,7 @@ export function RecebimentoDevPage() {
           </>
         )}
 
-        {tab === "como-funciona" && (
+        {viewMode === "help" && (
           <div className="rounded-lg border border-stroke bg-card p-6 shadow-sm dark:border-slate-700">
             <RecebimentoHelpContent />
           </div>

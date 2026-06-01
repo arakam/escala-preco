@@ -27,11 +27,16 @@ export function summarizeRecebimentoRows(
     }
   }
 
+  const released = Math.round(released_total * 100) / 100;
+  const scheduled = Math.round(scheduled_total * 100) / 100;
+  const pending = Math.round(pending_total * 100) / 100;
+
   return {
     date: referenceDate,
-    released_total: Math.round(released_total * 100) / 100,
-    scheduled_total: Math.round(scheduled_total * 100) / 100,
-    pending_total: Math.round(pending_total * 100) / 100,
+    released_total: released,
+    scheduled_total: scheduled,
+    pending_total: pending,
+    total_net: Math.round((released + scheduled + pending) * 100) / 100,
     row_count,
   };
 }

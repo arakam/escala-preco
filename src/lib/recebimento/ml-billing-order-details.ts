@@ -3,6 +3,38 @@ const BILLING_ORDER_DETAILS_URL =
 
 const BATCH_SIZE = 30;
 
+/** ML Billing: 5 requisições por minuto no endpoint order/details */
+const BILLING_MAX_REQUESTS_PER_MINUTE = 5;
+const BILLING_MIN_GAP_MS = Math.ceil(60_000 / BILLING_MAX_REQUESTS_PER_MINUTE);
+const MAX_429_RETRIES = 6;
+
+let billingLastRequestAt = 0;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function waitBillingRateLimit(): Promise<void> {
+  const elapsed = Date.now() - billingLastRequestAt;
+  if (elapsed < BILLING_MIN_GAP_MS) {
+    await sleep(BILLING_MIN_GAP_MS - elapsed);
+  }
+}
+
+function markBillingRequest(): void {
+  billingLastRequestAt = Date.now();
+}
+
+function parseRetryAfterMs(res: Response): number | null {
+  const raw = res.headers.get("retry-after");
+  if (!raw) return null;
+  const sec = Number(raw);
+  if (Number.isFinite(sec) && sec > 0) return Math.ceil(sec * 1000);
+  const date = Date.parse(raw);
+  if (Number.isFinite(date)) return Math.max(0, date - Date.now());
+  return null;
+}
+
 export type MlBillingPaymentInfo = {
   payment_id: number;
   date_approved: string | null;
@@ -122,30 +154,53 @@ async function fetchBillingBatch(
   const url = new URL(BILLING_ORDER_DETAILS_URL);
   url.searchParams.set("order_ids", orderIds.join(","));
 
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  const body = await res.text();
-  if (!res.ok) {
-    return { ok: false, status: res.status, details: [], body: body.slice(0, 300) };
-  }
+  for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
+    await waitBillingRateLimit();
+    markBillingRequest();
 
-  let json: unknown;
-  try {
-    json = JSON.parse(body);
-  } catch {
-    return { ok: false, status: res.status, details: [], body: "JSON inválido" };
-  }
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const body = await res.text();
 
-  const details: MlBillingOrderDetail[] = [];
-  const results = (json as { results?: unknown }).results;
-  if (Array.isArray(results)) {
-    for (const row of results) {
-      const parsed = parseBillingOrderResult(row);
-      if (parsed) details.push(parsed);
+    if (res.status === 429 && attempt < MAX_429_RETRIES) {
+      const retryAfter = parseRetryAfterMs(res) ?? 0;
+      const wait = Math.max(retryAfter, 60_000);
+      console.warn(
+        `[ML billing] 429 em order/details (${orderIds.length} pedidos) — aguardando ${Math.round(wait)}ms (${attempt + 1}/${MAX_429_RETRIES})`
+      );
+      await sleep(wait);
+      continue;
     }
+
+    if (!res.ok) {
+      return { ok: false, status: res.status, details: [], body: body.slice(0, 300) };
+    }
+
+    let json: unknown;
+    try {
+      json = JSON.parse(body);
+    } catch {
+      return { ok: false, status: res.status, details: [], body: "JSON inválido" };
+    }
+
+    const details: MlBillingOrderDetail[] = [];
+    const results = (json as { results?: unknown }).results;
+    if (Array.isArray(results)) {
+      for (const row of results) {
+        const parsed = parseBillingOrderResult(row);
+        if (parsed) details.push(parsed);
+      }
+    }
+    return { ok: true, status: res.status, details, body: "" };
   }
-  return { ok: true, status: res.status, details, body: "" };
+
+  return {
+    ok: false,
+    status: 429,
+    details: [],
+    body: "Rate limit exceeded após várias tentativas",
+  };
 }
 
 /** Busca faturamento por pedido (ML Billing). Falha parcial não interrompe demais lotes. */
@@ -181,7 +236,7 @@ export async function fetchMlBillingOrderDetails(
 
   return {
     byOrderId,
-    error: batches_ok === 0 && batches_failed > 0 ? lastError : null,
+    error: batches_failed > 0 ? lastError : null,
     forbidden,
     batches_ok,
     batches_failed,

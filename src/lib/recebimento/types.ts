@@ -40,5 +40,7 @@ export type RecebimentoDaySummary = {
   released_total: number;
   scheduled_total: number;
   pending_total: number;
+  /** Soma líquida de tudo com liberação na data de referência */
+  total_net: number;
   row_count: number;
 };
