@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { parsePrecosImportCsv } from "@/lib/precos-import-csv";
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 300;
+
 /**
  * POST /api/pricing/import
  * multipart/form-data: file (CSV)
@@ -47,6 +49,7 @@ export async function POST(request: NextRequest) {
     total_rows: result.total_rows,
     valid_rows: result.valid_rows,
     error_rows: result.error_rows,
+    errors_truncated: result.errors_truncated,
     errors: result.errors,
     preview: result.preview,
     valid_items: result.valid_items,

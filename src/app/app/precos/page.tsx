@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useMemo,
+  useRef,
+  startTransition,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { AppTable } from "@/components/AppTable";
 import { TablePageSizeSelect } from "@/components/TablePageSizeSelect";
 import { OnboardingGate } from "@/components/OnboardingGate";
@@ -36,10 +45,12 @@ import { splitMlActivePromotionsCell } from "@/lib/mercadolivre/seller-promotion
 import type { ProductTag } from "@/lib/db/types";
 import {
   PRECOS_IMPORT_CSV_TEMPLATE_HEADER,
+  parsePrecosImportCsv,
   type PrecosImportPreviewRow,
   type PrecosImportRowValid,
 } from "@/lib/precos-import-csv";
 import { PrecosHelpContent } from "./precos-help-content";
+import { PrecosFiltersModal, type PrecosFiltersValues } from "./precos-filters-modal";
 import {
   consumePricingListingsStaleFlag,
   subscribePricingListingsRefresh,
@@ -1100,22 +1111,15 @@ function PrecosPageContent() {
   /** Recarrega lista com filtros novos sem bloquear a tela com o overlay (já há linhas na tela). */
   const [listingsRefetching, setListingsRefetching] = useState(false);
   const [search, setSearch] = useState("");
-  const [searchInput, setSearchInput] = useState("");
   const [skuFilter, setSkuFilter] = useState("");
-  const [draftSkuFilter, setDraftSkuFilter] = useState("");
   const [supplierFilter, setSupplierFilter] = useState("");
-  const [draftSupplierFilter, setDraftSupplierFilter] = useState("");
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
-  const [draftFilterTagIds, setDraftFilterTagIds] = useState<string[]>([]);
   const [allTags, setAllTags] = useState<ProductTag[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
-  const [draftStatusFilter, setDraftStatusFilter] = useState("");
   /** Filtro por vínculo com produto no cache */
   const [linkFilter, setLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
-  const [draftLinkFilter, setDraftLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
   /** Somente anúncios Full (ml_items.is_fulfillment) */
   const [fullOnly, setFullOnly] = useState(false);
-  const [draftFullOnly, setDraftFullOnly] = useState(false);
   const [calculating, setCalculating] = useState(false);
   const [isMercadoLider, setIsMercadoLider] = useState(false);
   /** Gold/Platinum na API de reputação — frete sempre incluído nos cálculos. */
@@ -1125,8 +1129,6 @@ function PrecosPageContent() {
   /** Filtro por lucratividade (%): condição + quantidade, no mesmo padrão de Vendidos. */
   const [profitOpFilter, setProfitOpFilter] = useState<StockCompareOp | "">("");
   const [profitQtyFilter, setProfitQtyFilter] = useState("");
-  const [draftProfitOpFilter, setDraftProfitOpFilter] = useState<StockCompareOp | "">("");
-  const [draftProfitQtyFilter, setDraftProfitQtyFilter] = useState("");
   /** Quantidade vendida (soma das quantidades nos pedidos) últimos 30 dias por item_id */
   /** Número de pedidos (pagados) que contêm o item nos últimos 30 dias por item_id */
   const [ordersData, setOrdersData] = useState<Record<string, number>>({});
@@ -1150,21 +1152,14 @@ function PrecosPageContent() {
   /** Filtro por vendas 30d (pedidos pagos): condição + quantidade. */
   const [sales30dOpFilter, setSales30dOpFilter] = useState<StockCompareOp | "">("");
   const [sales30dQtyFilter, setSales30dQtyFilter] = useState("");
-  const [draftSales30dOpFilter, setDraftSales30dOpFilter] = useState<StockCompareOp | "">("");
-  const [draftSales30dQtyFilter, setDraftSales30dQtyFilter] = useState("");
   /** Filtro por custo (R$): condição + quantidade. */
   const [costOpFilter, setCostOpFilter] = useState<StockCompareOp | "">("");
   const [costQtyFilter, setCostQtyFilter] = useState("");
-  const [draftCostOpFilter, setDraftCostOpFilter] = useState<StockCompareOp | "">("");
-  const [draftCostQtyFilter, setDraftCostQtyFilter] = useState("");
   /** Desconto % (preço ML → promoção): condição + valor, filtro no cliente */
   const [discountOpFilter, setDiscountOpFilter] = useState<StockCompareOp | "">("");
   const [discountQtyFilter, setDiscountQtyFilter] = useState("");
-  const [draftDiscountOpFilter, setDraftDiscountOpFilter] = useState<StockCompareOp | "">("");
-  const [draftDiscountQtyFilter, setDraftDiscountQtyFilter] = useState("");
   /** Sem campanhas/promoções ativas no ML (seller-promotions) no último refresh do cache */
   const [semPromoMlAtiva, setSemPromoMlAtiva] = useState(false);
-  const [draftSemPromoMlAtiva, setDraftSemPromoMlAtiva] = useState(false);
   /** Com filtros no cliente: carregar até 2000 itens de uma vez (em vez de 500) */
   /** Itens selecionados para criar campanha ML (por id de listing) */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1236,6 +1231,7 @@ function PrecosPageContent() {
     total_rows: number;
     valid_rows: number;
     error_rows: number;
+    errors_truncated?: boolean;
     errors?: Array<{ row: number; field?: string; message: string }>;
     preview: PrecosImportPreviewRow[];
     valid_items?: PrecosImportRowValid[];
@@ -2533,88 +2529,64 @@ function PrecosPageContent() {
     return m;
   }, [allTags]);
 
-  const syncFiltersDraftFromApplied = useCallback(() => {
-    setSearchInput(search);
-    setDraftSkuFilter(skuFilter);
-    setDraftSupplierFilter(supplierFilter);
-    setDraftStatusFilter(statusFilter);
-    setDraftLinkFilter(linkFilter);
-    setDraftFullOnly(fullOnly);
-    setDraftFilterTagIds(filterTagIds);
-    setDraftSales30dOpFilter(sales30dOpFilter);
-    setDraftSales30dQtyFilter(sales30dQtyFilter);
-    setDraftCostOpFilter(costOpFilter);
-    setDraftCostQtyFilter(costQtyFilter);
-    setDraftDiscountOpFilter(discountOpFilter);
-    setDraftDiscountQtyFilter(discountQtyFilter);
-    setDraftSemPromoMlAtiva(semPromoMlAtiva);
-    setDraftProfitOpFilter(profitOpFilter);
-    setDraftProfitQtyFilter(profitQtyFilter);
-  }, [
-    search,
-    skuFilter,
-    supplierFilter,
-    statusFilter,
-    linkFilter,
-    fullOnly,
-    filterTagIds,
-    sales30dOpFilter,
-    sales30dQtyFilter,
-    costOpFilter,
-    costQtyFilter,
-    discountOpFilter,
-    discountQtyFilter,
-    semPromoMlAtiva,
-    profitOpFilter,
-    profitQtyFilter,
-  ]);
-
-  const handleFiltersApply = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      setSearch(searchInput.trim());
-      setSkuFilter(draftSkuFilter.trim());
-      setSupplierFilter(draftSupplierFilter.trim());
-      setStatusFilter(draftStatusFilter);
-      setLinkFilter(draftLinkFilter);
-      setFullOnly(draftFullOnly);
-      setFilterTagIds(draftFilterTagIds);
-      setSales30dOpFilter(draftSales30dOpFilter);
-      setSales30dQtyFilter(draftSales30dQtyFilter.trim());
-      setCostOpFilter(draftCostOpFilter);
-      setCostQtyFilter(draftCostQtyFilter.trim());
-      setDiscountOpFilter(draftDiscountOpFilter);
-      setDiscountQtyFilter(draftDiscountQtyFilter.trim());
-      setSemPromoMlAtiva(draftSemPromoMlAtiva);
-      setProfitOpFilter(draftProfitOpFilter);
-      setProfitQtyFilter(draftProfitQtyFilter.trim());
-      setPage(1);
-      setFiltersModalOpen(false);
-    },
+  const appliedPrecosFilters = useMemo(
+    (): PrecosFiltersValues => ({
+      search,
+      skuFilter,
+      supplierFilter,
+      statusFilter,
+      linkFilter,
+      fullOnly,
+      filterTagIds,
+      sales30dOpFilter,
+      sales30dQtyFilter,
+      costOpFilter,
+      costQtyFilter,
+      discountOpFilter,
+      discountQtyFilter,
+      semPromoMlAtiva,
+      profitOpFilter,
+      profitQtyFilter,
+    }),
     [
-      searchInput,
-      draftSkuFilter,
-      draftSupplierFilter,
-      draftStatusFilter,
-      draftLinkFilter,
-      draftFullOnly,
-      draftFilterTagIds,
-      draftSales30dOpFilter,
-      draftSales30dQtyFilter,
-      draftCostOpFilter,
-      draftCostQtyFilter,
-      draftDiscountOpFilter,
-      draftDiscountQtyFilter,
-      draftSemPromoMlAtiva,
-      draftProfitOpFilter,
-      draftProfitQtyFilter,
+      search,
+      skuFilter,
+      supplierFilter,
+      statusFilter,
+      linkFilter,
+      fullOnly,
+      filterTagIds,
+      sales30dOpFilter,
+      sales30dQtyFilter,
+      costOpFilter,
+      costQtyFilter,
+      discountOpFilter,
+      discountQtyFilter,
+      semPromoMlAtiva,
+      profitOpFilter,
+      profitQtyFilter,
     ]
   );
 
-  const toggleDraftFilterTag = useCallback((tagId: string) => {
-    setDraftFilterTagIds((prev) =>
-      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
-    );
+  const applyPrecosFilters = useCallback((values: PrecosFiltersValues) => {
+    setSearch(values.search);
+    setSkuFilter(values.skuFilter);
+    setSupplierFilter(values.supplierFilter);
+    setStatusFilter(values.statusFilter);
+    setLinkFilter(values.linkFilter);
+    setFullOnly(values.fullOnly);
+    setFilterTagIds(values.filterTagIds);
+    setSales30dOpFilter(values.sales30dOpFilter);
+    setSales30dQtyFilter(values.sales30dQtyFilter);
+    setCostOpFilter(values.costOpFilter);
+    setCostQtyFilter(values.costQtyFilter);
+    setDiscountOpFilter(values.discountOpFilter);
+    setDiscountQtyFilter(values.discountQtyFilter);
+    setSemPromoMlAtiva(values.semPromoMlAtiva);
+    setProfitOpFilter(values.profitOpFilter);
+    setProfitQtyFilter(values.profitQtyFilter);
+    setPage(1);
+    setFiltersModalOpen(false);
   }, []);
 
   const appliedPrecosFilterLabels = useMemo(() => {
@@ -2699,37 +2671,21 @@ function PrecosPageContent() {
 
   const clearPrecosFilters = useCallback(() => {
     setSearch("");
-    setSearchInput("");
     setSkuFilter("");
-    setDraftSkuFilter("");
     setSupplierFilter("");
-    setDraftSupplierFilter("");
     setFilterTagIds([]);
-    setDraftFilterTagIds([]);
     setStatusFilter("");
-    setDraftStatusFilter("");
     setLinkFilter("all");
-    setDraftLinkFilter("all");
     setFullOnly(false);
-    setDraftFullOnly(false);
     setSales30dOpFilter("");
-    setDraftSales30dOpFilter("");
     setSales30dQtyFilter("");
-    setDraftSales30dQtyFilter("");
     setCostOpFilter("");
-    setDraftCostOpFilter("");
     setCostQtyFilter("");
-    setDraftCostQtyFilter("");
     setDiscountOpFilter("");
-    setDraftDiscountOpFilter("");
     setDiscountQtyFilter("");
-    setDraftDiscountQtyFilter("");
     setSemPromoMlAtiva(false);
-    setDraftSemPromoMlAtiva(false);
     setProfitOpFilter("");
-    setDraftProfitOpFilter("");
     setProfitQtyFilter("");
-    setDraftProfitQtyFilter("");
     setSortBy("");
     setPage(1);
     setFiltersModalOpen(false);
@@ -3320,25 +3276,46 @@ function PrecosPageContent() {
     setPrecosImportResult(null);
     setPrecosImportLoaderProgress({ done: 0, total: 0, stage: "parse" });
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch("/api/pricing/import", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) {
-        setSaveMessage({ type: "error", text: data.error ?? "Erro ao processar CSV." });
+      const buffer = await file.arrayBuffer();
+      const parsed = parsePrecosImportCsv(buffer);
+      if (parsed.headerError) {
+        const data = {
+          ok: false,
+          total_rows: parsed.total_rows,
+          valid_rows: 0,
+          error_rows: parsed.total_rows,
+          errors: [{ row: 0, field: "header", message: parsed.headerError }],
+          preview: [] as PrecosImportPreviewRow[],
+          valid_items: [] as PrecosImportRowValid[],
+        };
+        setPrecosImportResult(data);
+        setSaveMessage({ type: "error", text: parsed.headerError });
         setTimeout(() => setSaveMessage(null), 6000);
         return;
       }
+      const data = {
+        ok: parsed.ok,
+        total_rows: parsed.total_rows,
+        valid_rows: parsed.valid_rows,
+        error_rows: parsed.error_rows,
+        errors_truncated: parsed.errors_truncated,
+        errors: parsed.errors,
+        preview: parsed.preview,
+        valid_items: parsed.valid_items,
+      };
       setPrecosImportResult(data);
-      if (data.ok === false && (data.errors?.length || data.headerError)) {
+      if (!parsed.ok && parsed.errors.length > 0) {
         setSaveMessage({
           type: "error",
-          text: data.errors?.[0]?.message ?? data.headerError ?? "Erro no CSV.",
+          text: parsed.errors[0]?.message ?? "Erro no CSV.",
         });
         setTimeout(() => setSaveMessage(null), 6000);
       }
     } catch {
-      setSaveMessage({ type: "error", text: "Erro de conexão ao importar CSV." });
+      setSaveMessage({
+        type: "error",
+        text: "Não foi possível ler o arquivo CSV. Verifique o formato e tente novamente.",
+      });
       setTimeout(() => setSaveMessage(null), 6000);
     } finally {
       setPrecosImportLoading(false);
@@ -3419,16 +3396,6 @@ function PrecosPageContent() {
       setPrecosImportLoaderProgress(null);
     }
   }, [precosImportResult, isMercadoLider, loadListings]);
-
-  if (loading && listings.length === 0) {
-    return (
-      <div className="adminty-precos-page space-y-5">
-        <div className="table-page-shell p-4">
-          <p className="text-sm text-slate-500 dark:text-slate-400">Carregando…</p>
-        </div>
-      </div>
-    );
-  }
 
   function renderPricingHeaderMenu(
     colIndex: number,
@@ -4182,8 +4149,7 @@ function PrecosPageContent() {
               type="button"
               onClick={() => {
                 setLastUpdatedInfoOpen(false);
-                syncFiltersDraftFromApplied();
-                setFiltersModalOpen(true);
+                startTransition(() => setFiltersModalOpen(true));
               }}
               className="btn btn-icon btn-sm btn-outline-secondary"
               title="Abrir filtros"
@@ -4434,7 +4400,12 @@ function PrecosPageContent() {
                   </li>
                 ))}
                 {(precosImportResult.errors?.length ?? 0) > 50 && (
-                  <li>… e mais {(precosImportResult.errors?.length ?? 0) - 50} erros.</li>
+                  <li>… e mais {(precosImportResult.errors?.length ?? 0) - 50} erros listados acima.</li>
+                )}
+                {precosImportResult.errors_truncated && (
+                  <li className="list-none pt-1 text-xs font-medium">
+                    Há mais erros no arquivo; apenas os primeiros {precosImportResult.errors?.length ?? 0} são exibidos.
+                  </li>
                 )}
               </ul>
             </div>
@@ -5146,397 +5117,14 @@ function PrecosPageContent() {
         )}
       </div>
 
-      {filtersModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4"
-          onClick={() => setFiltersModalOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Filtros"
-        >
-          <div className="modal-panel-filters" onClick={(e) => e.stopPropagation()}>
-            <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-3 dark:border-slate-600">
-              <div>
-                <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">Filtros</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Busca, anúncio, tags, métricas e promoção — use as seções abaixo.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setFiltersModalOpen(false)}
-                className="rounded border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-800 dark:border-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-                aria-label="Fechar filtros"
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleFiltersApply} className="flex min-h-0 flex-1 flex-col">
-              <div className="modal-panel-filters-body space-y-6">
-                <section>
-                  <p className="modal-panel-filters-section-title">Identificação</p>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <div className="sm:col-span-2 lg:col-span-3">
-                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
-                        Buscar
-                      </label>
-                      <input
-                        type="text"
-                        value={searchInput}
-                        onChange={(e) => setSearchInput(e.target.value)}
-                        placeholder="Título ou MLB…"
-                        className="input"
-                        autoFocus
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">SKU</label>
-                      <input
-                        type="text"
-                        value={draftSkuFilter}
-                        onChange={(e) => setDraftSkuFilter(e.target.value)}
-                        placeholder="Filtrar por SKU…"
-                        className="input font-mono text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
-                        Fornecedor
-                      </label>
-                      <input
-                        type="text"
-                        value={draftSupplierFilter}
-                        onChange={(e) => setDraftSupplierFilter(e.target.value)}
-                        placeholder="Nome ou parte do fornecedor…"
-                        className="input"
-                      />
-                    </div>
-                  </div>
-                </section>
-
-                <section>
-                  <p className="modal-panel-filters-section-title">Anúncio</p>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">Status</label>
-                      <select
-                        value={draftStatusFilter}
-                        onChange={(e) => setDraftStatusFilter(e.target.value)}
-                        className="input text-xs font-medium"
-                      >
-                        <option value="">Todos os status</option>
-                        <option value="active">Ativo</option>
-                        <option value="paused">Pausado</option>
-                        <option value="closed">Fechado</option>
-                        <option value="under_review">Em revisão</option>
-                        <option value="inactive">Inativo</option>
-                        <option value="deleted">Removido</option>
-                        <option value="not_yet_active">Aguardando ativação</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
-                        Vínculo MLB → produto
-                      </label>
-                      <select
-                        value={draftLinkFilter}
-                        onChange={(e) =>
-                          setDraftLinkFilter(e.target.value as "all" | "linked" | "unlinked")
-                        }
-                        className="input text-xs font-medium"
-                      >
-                        <option value="all">Todos</option>
-                        <option value="linked">Só vinculados</option>
-                        <option value="unlinked">Só não vinculados</option>
-                      </select>
-                    </div>
-                    <div className="flex items-end sm:col-span-2">
-                      <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
-                        <input
-                          type="checkbox"
-                          checked={draftFullOnly}
-                          onChange={(e) => setDraftFullOnly(e.target.checked)}
-                          className="rounded border-slate-300"
-                        />
-                        Mostrar somente anúncios Full
-                      </label>
-                    </div>
-                  </div>
-                </section>
-
-                {allTags.length > 0 && (
-                  <section>
-                    <p className="modal-panel-filters-section-title">
-                      Tags do produto vinculado (qualquer uma)
-                    </p>
-                    <div className="flex flex-wrap gap-2 rounded-lg border border-slate-100 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-800/40">
-                      {allTags.map((t) => (
-                        <label
-                          key={t.id}
-                          className={`cursor-pointer rounded border px-2 py-1 text-xs ${
-                            draftFilterTagIds.includes(t.id)
-                              ? "border-[#0d6efd] bg-[#0d6efd]/10 text-[#0d6efd]"
-                              : "border-slate-200 bg-card text-slate-700 dark:border-slate-600 dark:text-slate-200"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            className="sr-only"
-                            checked={draftFilterTagIds.includes(t.id)}
-                            onChange={() => toggleDraftFilterTag(t.id)}
-                          />
-                          {t.name}
-                        </label>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-                <section>
-                  <p className="modal-panel-filters-section-title">Métricas</p>
-                  <div className="grid gap-4 lg:grid-cols-3">
-              <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
-                <p className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">Vendas 30d</p>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                  <div>
-                    <label
-                      htmlFor="precos-sales30d-op"
-                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Condição
-                    </label>
-                    <select
-                      id="precos-sales30d-op"
-                      value={draftSales30dOpFilter}
-                      onChange={(e) => setDraftSales30dOpFilter(e.target.value as StockCompareOp | "")}
-                      className="input w-full"
-                    >
-                      <option value="">Sem filtro de vendas 30d</option>
-                      {STOCK_COMPARE_OPS.map((op) => (
-                        <option key={op} value={op}>
-                          {stockCompareLabel(op)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label
-                      htmlFor="precos-sales30d-qty"
-                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Quantidade
-                    </label>
-                    <input
-                      id="precos-sales30d-qty"
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={draftSales30dQtyFilter}
-                      onChange={(e) => setDraftSales30dQtyFilter(e.target.value)}
-                      disabled={!draftSales30dOpFilter}
-                      placeholder={draftSales30dOpFilter ? "Ex.: 1" : "Escolha a condição"}
-                      className="input w-full disabled:cursor-not-allowed disabled:opacity-50"
-                    />
-                  </div>
-                  {draftSales30dOpFilter && draftSales30dQtyFilter.trim() === "" && (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">
-                      Informe a quantidade para aplicar o filtro de vendas 30d.
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
-                <p className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">Custo</p>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                  <div>
-                    <label
-                      htmlFor="precos-cost-op"
-                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Condição
-                    </label>
-                    <select
-                      id="precos-cost-op"
-                      value={draftCostOpFilter}
-                      onChange={(e) => setDraftCostOpFilter(e.target.value as StockCompareOp | "")}
-                      className="input w-full"
-                    >
-                      <option value="">Sem filtro de custo</option>
-                      {STOCK_COMPARE_OPS.map((op) => (
-                        <option key={op} value={op}>
-                          {stockCompareLabel(op)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label
-                      htmlFor="precos-cost-qty"
-                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Quantidade (R$)
-                    </label>
-                    <input
-                      id="precos-cost-qty"
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={draftCostQtyFilter}
-                      onChange={(e) => setDraftCostQtyFilter(e.target.value)}
-                      disabled={!draftCostOpFilter}
-                      placeholder={draftCostOpFilter ? "Ex.: 50,00" : "Escolha a condição"}
-                      className="input w-full disabled:cursor-not-allowed disabled:opacity-50"
-                    />
-                  </div>
-                  {draftCostOpFilter && draftCostQtyFilter.trim() === "" && (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">
-                      Informe a quantidade para aplicar o filtro de custo.
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
-                <p className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">Lucratividade</p>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                  <div>
-                    <label
-                      htmlFor="precos-profit-op"
-                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Condição
-                    </label>
-                    <select
-                      id="precos-profit-op"
-                      value={draftProfitOpFilter}
-                      onChange={(e) => setDraftProfitOpFilter(e.target.value as StockCompareOp | "")}
-                      className="input w-full"
-                    >
-                      <option value="">Sem filtro de lucratividade</option>
-                      {STOCK_COMPARE_OPS.map((op) => (
-                        <option key={op} value={op}>
-                          {stockCompareLabel(op)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label
-                      htmlFor="precos-profit-qty"
-                      className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Quantidade (%)
-                    </label>
-                    <input
-                      id="precos-profit-qty"
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={draftProfitQtyFilter}
-                      onChange={(e) => setDraftProfitQtyFilter(e.target.value)}
-                      disabled={!draftProfitOpFilter}
-                      placeholder={draftProfitOpFilter ? "Ex.: 20" : "Escolha a condição"}
-                      className="input w-full disabled:cursor-not-allowed disabled:opacity-50"
-                    />
-                  </div>
-                  {draftProfitOpFilter && draftProfitQtyFilter.trim() === "" && (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">
-                      Informe a quantidade para aplicar o filtro de lucratividade.
-                    </p>
-                  )}
-                </div>
-              </div>
-                  </div>
-                </section>
-
-                <section>
-                  <p className="modal-panel-filters-section-title">Promoção</p>
-                  <div className="space-y-3">
-                    <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
-                      <p className="mb-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                        Desconto (% entre Preço ML e Promoção)
-                      </p>
-                      <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-                        Ex.: sem desconto = igual a <strong>0</strong>; abaixo do mínimo de campanha ML = menor que{" "}
-                        <strong>{ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}</strong>.
-                      </p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div>
-                          <label
-                            htmlFor="precos-discount-op"
-                            className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
-                          >
-                            Condição
-                          </label>
-                          <select
-                            id="precos-discount-op"
-                            value={draftDiscountOpFilter}
-                            onChange={(e) =>
-                              setDraftDiscountOpFilter(e.target.value as StockCompareOp | "")
-                            }
-                            className="input w-full"
-                          >
-                            <option value="">Sem filtro de desconto</option>
-                            {STOCK_COMPARE_OPS.map((op) => (
-                              <option key={op} value={op}>
-                                {stockCompareLabel(op)}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label
-                            htmlFor="precos-discount-qty"
-                            className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
-                          >
-                            Desconto (%)
-                          </label>
-                          <input
-                            id="precos-discount-qty"
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={0.01}
-                            value={draftDiscountQtyFilter}
-                            onChange={(e) => setDraftDiscountQtyFilter(e.target.value)}
-                            disabled={!draftDiscountOpFilter}
-                            placeholder={draftDiscountOpFilter ? "Ex.: 0 ou 5" : "Escolha a condição"}
-                            className="input w-full disabled:cursor-not-allowed disabled:opacity-50"
-                          />
-                        </div>
-                        {draftDiscountOpFilter && draftDiscountQtyFilter.trim() === "" && (
-                          <p className="text-xs text-amber-700 dark:text-amber-300 sm:col-span-2">
-                            Informe o percentual de desconto para aplicar o filtro.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <label
-                      className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-card px-3 py-2.5 text-xs text-slate-700 dark:border-slate-600 dark:text-slate-200"
-                      title="Exibe apenas anúncios sem promoções ativas no cache de Promoções (coluna Promo ML = 0)"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={draftSemPromoMlAtiva}
-                        onChange={(e) => setDraftSemPromoMlAtiva(e.target.checked)}
-                        className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-primary focus:ring-primary"
-                      />
-                      Sem Promo ML ativa
-                    </label>
-                  </div>
-                </section>
-              </div>
-              <div className="modal-panel-filters-footer flex justify-end gap-2">
-                <button type="button" onClick={() => clearPrecosFilters()} className="btn btn-secondary btn-sm">
-                  Limpar filtros
-                </button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  Aplicar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <PrecosFiltersModal
+        open={filtersModalOpen}
+        onClose={() => setFiltersModalOpen(false)}
+        applied={appliedPrecosFilters}
+        allTags={allTags}
+        onApply={applyPrecosFilters}
+        onClearAll={clearPrecosFilters}
+      />
 
     </div>
   );

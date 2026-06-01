@@ -41,6 +41,8 @@ export interface PrecosImportParseResult {
   valid_rows: number;
   error_rows: number;
   errors: PrecosImportRowError[];
+  /** Verdadeiro quando há mais erros do que o limite retornado na lista `errors`. */
+  errors_truncated?: boolean;
   preview: PrecosImportPreviewRow[];
   valid_items: PrecosImportRowValid[];
 }
@@ -183,6 +185,11 @@ export function parsePrecosImportCsv(buffer: ArrayBuffer): PrecosImportParseResu
   const previewRows: PrecosImportPreviewRow[] = [];
   const seenKeys = new Set<string>();
   const PREVIEW_MAX = 20;
+  /** Limite de erros detalhados no retorno (evita JSON/state gigante em CSVs com muitas linhas inválidas). */
+  const ERRORS_MAX = 250;
+  const pushError = (err: PrecosImportRowError) => {
+    if (errors.length < ERRORS_MAX) errors.push(err);
+  };
 
   for (let i = 0; i < dataLines.length; i++) {
     const line = dataLines[i];
@@ -200,15 +207,16 @@ export function parsePrecosImportCsv(buffer: ArrayBuffer): PrecosImportParseResu
     };
 
     const itemId = unquoteCsvCell(cell(cols, map.mlb)).trim().toUpperCase();
+
     if (!itemId) {
-      errors.push({ row: rowNum, field: "MLB", message: "MLB obrigatório" });
+      pushError({ row: rowNum, field: "MLB", message: "MLB obrigatório" });
       preview.error = "MLB obrigatório";
       if (previewRows.length < PREVIEW_MAX) previewRows.push(preview);
       continue;
     }
 
     if (!itemId.startsWith("MLB")) {
-      errors.push({ row: rowNum, field: "MLB", message: "MLB deve começar com MLB" });
+      pushError({ row: rowNum, field: "MLB", message: "MLB deve começar com MLB" });
       preview.error = "MLB inválido";
       if (previewRows.length < PREVIEW_MAX) previewRows.push(preview);
       continue;
@@ -219,7 +227,7 @@ export function parsePrecosImportCsv(buffer: ArrayBuffer): PrecosImportParseResu
     if (rawVar !== "") {
       const n = parseInt(rawVar, 10);
       if (Number.isNaN(n) || n < 0) {
-        errors.push({ row: rowNum, field: "Variacao", message: "Variacao deve ser número inteiro ou vazio" });
+        pushError({ row: rowNum, field: "Variacao", message: "Variacao deve ser número inteiro ou vazio" });
         preview.error = "Variacao inválida";
         if (previewRows.length < PREVIEW_MAX) previewRows.push(preview);
         continue;
@@ -236,21 +244,21 @@ export function parsePrecosImportCsv(buffer: ArrayBuffer): PrecosImportParseResu
     const hasMargem = margemRaw !== "" && Number.isFinite(margem);
 
     if (promocaoRaw !== "" && !hasPromocao) {
-      errors.push({ row: rowNum, field: "Promocao", message: "Promocao inválida (use vírgula para decimais, ex: 99,90)" });
+      pushError({ row: rowNum, field: "Promocao", message: "Promocao inválida (use vírgula para decimais, ex: 99,90)" });
       preview.error = "Promocao inválida";
       if (previewRows.length < PREVIEW_MAX) previewRows.push(preview);
       continue;
     }
 
     if (margemRaw !== "" && !hasMargem) {
-      errors.push({ row: rowNum, field: "Margem %", message: "Margem % inválida (ex: 25 ou 25,5)" });
+      pushError({ row: rowNum, field: "Margem %", message: "Margem % inválida (ex: 25 ou 25,5)" });
       preview.error = "Margem % inválida";
       if (previewRows.length < PREVIEW_MAX) previewRows.push(preview);
       continue;
     }
 
     if (!hasPromocao && !hasMargem) {
-      errors.push({
+      pushError({
         row: rowNum,
         field: "Promocao/Margem %",
         message: "Informe Promocao ou Margem % para atualizar o anúncio",
@@ -265,7 +273,7 @@ export function parsePrecosImportCsv(buffer: ArrayBuffer): PrecosImportParseResu
 
     const key = listingKey(itemId, variationId);
     if (seenKeys.has(key)) {
-      errors.push({ row: rowNum, field: "MLB", message: "MLB + Variacao duplicado no arquivo" });
+      pushError({ row: rowNum, field: "MLB", message: "MLB + Variacao duplicado no arquivo" });
       preview.error = "Duplicado no CSV";
       if (previewRows.length < PREVIEW_MAX) previewRows.push(preview);
       continue;
@@ -285,6 +293,7 @@ export function parsePrecosImportCsv(buffer: ArrayBuffer): PrecosImportParseResu
   }
 
   result.errors = errors;
+  result.errors_truncated = errors.length >= ERRORS_MAX;
   result.valid_rows = validItems.length;
   result.error_rows = result.total_rows - validItems.length;
   result.preview = previewRows;
