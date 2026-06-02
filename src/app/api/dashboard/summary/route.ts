@@ -1,3 +1,4 @@
+import { fetchAllWholesaleDraftsForAccount } from "@/lib/atacado-drafts";
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -119,7 +120,7 @@ export async function GET(request: NextRequest) {
   const [
     { data: items },
     { data: variationRows },
-    { data: drafts },
+    drafts,
     { data: cacheRows },
     { data: refs },
   ] = await Promise.all([
@@ -128,7 +129,7 @@ export async function GET(request: NextRequest) {
       .select("item_id, has_variations, wholesale_prices_json")
       .eq("account_id", accountId),
     supabase.from("ml_variations").select("item_id, variation_id").eq("account_id", accountId),
-    supabase.from("wholesale_drafts").select("item_id, variation_id, tiers_json").eq("account_id", accountId),
+    fetchAllWholesaleDraftsForAccount(supabase, accountId),
     supabase
       .from("pricing_cache")
       .select(
@@ -142,7 +143,7 @@ export async function GET(request: NextRequest) {
   ]);
 
   const validDraftKeys = new Set<string>();
-  for (const d of drafts ?? []) {
+  for (const d of drafts) {
     if (!hasValidTier(d.tiers_json)) continue;
     const iid = String(d.item_id).trim().toUpperCase();
     if (d.variation_id == null) validDraftKeys.add(`${iid}:item`);

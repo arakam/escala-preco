@@ -5,7 +5,12 @@
  */
 
 import type { Tier } from "@/lib/atacado";
-import { getItemPrices, postItemPricesQuantity } from "./client";
+import {
+  getItemPrices,
+  getStandardPriceAmount,
+  postItemPricesQuantity,
+  type MLItemPricesResponse,
+} from "./client";
 
 /** Draft validado para envio (item ou variação). */
 export interface ValidWholesaleDraft {
@@ -58,19 +63,67 @@ export function validateDraftForApply(
   };
 }
 
+/** Preço por quantidade (atacado B2B) no GET /items/{id}/prices. */
+function isWholesaleQuantityPrice(
+  p: MLItemPricesResponse["prices"][number]
+): boolean {
+  const minUnit = p.conditions?.min_purchase_unit;
+  return minUnit != null && Number.isFinite(Number(minUnit));
+}
+
+/**
+ * Regras do ML para a tabela de atacado: preço unitário decrescente por faixa e abaixo do standard.
+ * https://developers.mercadolivre.com.br/pt_br/precos-por-quantidade
+ */
+export function validateTiersCoherenceForMl(
+  tiers: Tier[],
+  standardAmount: number | null
+): string | null {
+  const sorted = [...tiers].sort((a, b) => a.min_qty - b.min_qty);
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].price >= sorted[i - 1].price) {
+      return (
+        `Faixa qtd ${sorted[i].min_qty} (R$ ${sorted[i].price}) deve ter preço menor que a faixa anterior ` +
+        `(qtd ${sorted[i - 1].min_qty}, R$ ${sorted[i - 1].price}).`
+      );
+    }
+  }
+  if (standardAmount != null && Number.isFinite(standardAmount)) {
+    for (const t of sorted) {
+      if (t.price >= standardAmount) {
+        return (
+          `Faixa qtd ${t.min_qty} (R$ ${t.price}) deve ser menor que o preço padrão do anúncio no ML (R$ ${standardAmount}).`
+        );
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Monta o payload para POST /items/{item_id}/prices/standard/quantity.
- * amount em reais. ML exige amount ÚNICO em cada preço por quantidade (invalid.price_per_quantity).
- * Se dois tiers tiverem o mesmo preço, mantemos o de menor min_qty.
+ * - Mantém todos os preços que NÃO são atacado (só `{ id }`), conforme doc do ML.
+ * - Omite IDs das faixas de atacado atuais → ML remove a tabela antiga antes de aplicar as novas.
+ * - amount em reais; valores duplicados entre faixas são ignorados (ML exige amounts únicos).
  */
 function buildWholesalePayload(
   tiers: Tier[],
-  standardPriceId: string | null,
+  currentPrices: MLItemPricesResponse | null,
   currencyId = "BRL"
 ): { prices: Array<Record<string, unknown>> } {
+  const keepPriceStubs: Array<Record<string, unknown>> = [];
+  const seenKeepIds = new Set<string>();
+  for (const p of currentPrices?.prices ?? []) {
+    if (!p.id || seenKeepIds.has(p.id)) continue;
+    if (isWholesaleQuantityPrice(p)) continue;
+    seenKeepIds.add(p.id);
+    keepPriceStubs.push({ id: p.id });
+  }
+
   const seenAmounts = new Set<number>();
   const quantityPrices: Array<Record<string, unknown>> = [];
-  for (const t of tiers.slice(0, 5)) {
+  const sortedTiers = [...tiers].sort((a, b) => a.min_qty - b.min_qty);
+  for (const t of sortedTiers.slice(0, 5)) {
     const amount = Number(t.price);
     if (seenAmounts.has(amount)) continue;
     seenAmounts.add(amount);
@@ -83,12 +136,8 @@ function buildWholesalePayload(
       },
     });
   }
-  const prices: Array<Record<string, unknown>> = [];
-  if (standardPriceId) {
-    prices.push({ id: standardPriceId });
-  }
-  prices.push(...quantityPrices);
-  return { prices };
+
+  return { prices: [...keepPriceStubs, ...quantityPrices] };
 }
 
 export type UpdateWholesaleResult =
@@ -113,9 +162,17 @@ export async function updateWholesalePrices(
   _hasVariations: boolean
 ): Promise<UpdateWholesaleResult> {
   const currentPrices = await getItemPrices(itemId, accessToken, { showAllPrices: true });
-  const standardId =
-    currentPrices?.prices?.find((p) => !p.conditions?.min_purchase_unit)?.id ?? null;
-  const payload = buildWholesalePayload(tiers, standardId, "BRL");
+  const standardAmount = getStandardPriceAmount(currentPrices);
+  const coherenceError = validateTiersCoherenceForMl(tiers, standardAmount);
+  if (coherenceError) {
+    return {
+      ok: false,
+      status: 400,
+      message: coherenceError,
+      responseJson: { error: "invalid.price_per_quantity", message: coherenceError },
+    };
+  }
+  const payload = buildWholesalePayload(tiers, currentPrices, "BRL");
   const result = await postItemPricesQuantity(itemId, accessToken, payload);
   if (result.ok) return { ok: true };
   return {

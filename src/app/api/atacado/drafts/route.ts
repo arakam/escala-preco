@@ -124,6 +124,22 @@ export async function POST(request: NextRequest) {
 
   for (let i = 0; i < withTiers.length; i += UPSERT_CHUNK) {
     const chunk = withTiers.slice(i, i + UPSERT_CHUNK);
+    const itemIdsToClearNullDraft = [
+      ...new Set(chunk.filter((r) => r.variation_id == null).map((r) => r.item_id)),
+    ];
+    for (let j = 0; j < itemIdsToClearNullDraft.length; j += DELETE_PARALLEL) {
+      const idBatch = itemIdsToClearNullDraft.slice(j, j + DELETE_PARALLEL);
+      await Promise.all(
+        idBatch.map((itemId) =>
+          supabase
+            .from("wholesale_drafts")
+            .delete()
+            .eq("account_id", accountId)
+            .eq("item_id", itemId)
+            .is("variation_id", null)
+        )
+      );
+    }
     const payload = chunk.map((row) => ({
       account_id: accountId,
       item_id: row.item_id,

@@ -34,7 +34,7 @@ async function getJobAndCheckOwnership(
  * Retorna status do job e últimos logs. Só se o job pertencer ao usuário (via account).
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   const supabase = await createClient();
@@ -59,7 +59,10 @@ export async function GET(
   await expireStaleJobsForAccount(supabase, accountId, "sync_items");
   await expireStaleJobsForAccount(supabase, accountId, "sync_fulfillment_stock");
 
-  const { job: fullJob, logs } = await getJobWithLogs(supabase, jobId);
+  const logsParam = request.nextUrl.searchParams.get("logs")?.trim();
+  const logsLimit = logsParam === "all" ? ("all" as const) : 50;
+
+  const { job: fullJob, logs } = await getJobWithLogs(supabase, jobId, logsLimit);
   if (fullJob && fullJob.type === "sync_items" && needsSyncWorkerRestart(fullJob)) {
     restartSyncJobIfStuck(jobId, accountId);
   }

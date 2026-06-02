@@ -55,6 +55,8 @@ export interface SmartLoaderOverlayProps {
   children?: ReactNode;
   /** Classes do cartão interno (ex.: `max-w-lg` para painéis com lista de erros) */
   panelClassName?: string;
+  /** Quando true, para animação de “em andamento” e não marca aria-busy */
+  completed?: boolean;
 }
 
 /**
@@ -69,6 +71,7 @@ export function SmartLoaderOverlay({
   footerHint: footerHintProp,
   children,
   panelClassName,
+  completed = false,
 }: SmartLoaderOverlayProps) {
   const lines = useMemo(() => {
     if (messages && messages.length > 0) return messages;
@@ -100,13 +103,14 @@ export function SmartLoaderOverlay({
   useEffect(() => {
     if (!open) return;
     setText(lines[0] ?? "");
+    if (completed || lines.length <= 1) return;
     let messageIndex = 0;
     const messageInterval = setInterval(() => {
       messageIndex = (messageIndex + 1) % lines.length;
       setText(lines[messageIndex] ?? "");
     }, 2000);
     return () => clearInterval(messageInterval);
-  }, [open, lines]);
+  }, [open, lines, completed]);
 
   useEffect(() => {
     if (!open) return;
@@ -130,7 +134,7 @@ export function SmartLoaderOverlay({
       className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/45 backdrop-blur-[2px]"
       role="status"
       aria-live="polite"
-      aria-busy="true"
+      aria-busy={completed ? "false" : "true"}
     >
       <div
         className={`flex w-full flex-col items-center rounded-app-lg bg-card px-8 py-10 shadow-card ring-1 ring-stroke dark:ring-slate-600 ${cardClass}`}
@@ -140,7 +144,7 @@ export function SmartLoaderOverlay({
           alt=""
           width={360}
           height={100}
-          className="mb-6 h-14 w-auto animate-pulse object-contain sm:h-16"
+          className={`mb-6 h-14 w-auto object-contain sm:h-16 ${completed ? "" : "animate-pulse"}`}
           priority
         />
         <p className="mb-4 text-center text-sm text-fg-muted">{text}</p>

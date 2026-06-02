@@ -266,21 +266,51 @@ export interface JobLogEntry {
 export async function getJobWithLogs(
   supabase: SupabaseClient,
   jobId: string,
-  logsLimit = 50
+  logsLimit: number | "all" = 50
 ): Promise<{ job: JobRow | null; logs: JobLogEntry[] }> {
   const { data: job } = await supabase
     .from("ml_jobs")
     .select("*")
     .eq("id", jobId)
     .single();
-  const { data: logs } = await supabase
-    .from("ml_job_logs")
-    .select("item_id, variation_id, status, message, created_at, response_json")
-    .eq("job_id", jobId)
-    .order("created_at", { ascending: false })
-    .limit(logsLimit);
+
+  let logs: JobLogEntry[];
+  if (logsLimit === "all") {
+    logs = await fetchAllJobLogs(supabase, jobId);
+  } else {
+    const { data: page } = await supabase
+      .from("ml_job_logs")
+      .select("item_id, variation_id, status, message, created_at, response_json")
+      .eq("job_id", jobId)
+      .order("created_at", { ascending: false })
+      .limit(logsLimit);
+    logs = (page ?? []) as JobLogEntry[];
+  }
+
   return {
     job: job as JobRow | null,
-    logs: (logs ?? []) as JobLogEntry[],
+    logs,
   };
+}
+
+const JOB_LOGS_PAGE_SIZE = 1000;
+
+/** Carrega todos os logs do job (paginado). Ordem cronológica para CSV. */
+async function fetchAllJobLogs(supabase: SupabaseClient, jobId: string): Promise<JobLogEntry[]> {
+  const all: JobLogEntry[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("ml_job_logs")
+      .select("item_id, variation_id, status, message, created_at, response_json")
+      .eq("job_id", jobId)
+      .order("created_at", { ascending: true })
+      .range(from, from + JOB_LOGS_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as JobLogEntry[];
+    all.push(...page);
+    if (page.length < JOB_LOGS_PAGE_SIZE) break;
+    from += JOB_LOGS_PAGE_SIZE;
+  }
+  return all;
 }

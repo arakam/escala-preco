@@ -386,10 +386,15 @@ export async function GET(request: NextRequest) {
   const itemKey = (itemId: string, variationId: number | null) =>
     `${String(itemId ?? "").trim().toUpperCase()}:${variationId ?? "item"}`;
   for (const d of drafts) {
-    draftsByKey.set(itemKey(d.item_id, d.variation_id ?? null), {
+    const key = itemKey(d.item_id, d.variation_id ?? null);
+    const next = {
       tiers: (d.tiers_json as unknown[]) ?? [],
       updated_at: d.updated_at ?? "",
-    });
+    };
+    const existing = draftsByKey.get(key);
+    if (!existing || next.updated_at > existing.updated_at) {
+      draftsByKey.set(key, next);
+    }
   }
 
   const plannedByKey = new Map<string, number>();

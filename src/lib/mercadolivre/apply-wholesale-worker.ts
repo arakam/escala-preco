@@ -7,16 +7,16 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getValidAccessToken } from "./refresh";
 import { updateJob, addJobLog, type JobStatus } from "@/lib/jobs";
 import { runWithConcurrency } from "./client";
+import {
+  fetchAllWholesaleDraftsForAccount,
+  fetchHasVariationsByItemId,
+  selectDraftRowsForItemApply,
+  tiersFromDraftRows,
+} from "@/lib/atacado-drafts";
 import { validateDraftForApply, updateWholesalePrices } from "./wholesale";
 
 const JOB_TYPE = "apply_wholesale_prices" as const;
 const CONCURRENCY = 3;
-
-interface DraftRow {
-  item_id: string;
-  variation_id: number | null;
-  tiers_json: unknown;
-}
 
 export async function runApplyWholesaleJob(jobId: string, accountId: string): Promise<void> {
   const supabase = createServiceClient();
@@ -60,28 +60,13 @@ export async function runApplyWholesaleJob(jobId: string, accountId: string): Pr
       return;
     }
 
-    const { data: draftsRows } = await supabase
-      .from("wholesale_drafts")
-      .select("item_id, variation_id, tiers_json")
-      .eq("account_id", accountId)
-      .order("item_id", { ascending: true })
-      .order("variation_id", { ascending: true, nullsFirst: true });
-    const drafts = (draftsRows ?? []) as DraftRow[];
+    const drafts = await fetchAllWholesaleDraftsForAccount(supabase, accountId);
+    const uniqueItemIds = Array.from(new Set(drafts.map((d) => d.item_id)));
+    const hasVariationsByItem = await fetchHasVariationsByItemId(supabase, accountId, uniqueItemIds);
 
-    const { data: itemsRows } = await supabase
-      .from("ml_items")
-      .select("item_id, has_variations")
-      .eq("account_id", accountId)
-      .in("item_id", Array.from(new Set(drafts.map((d) => d.item_id))));
-    const hasVariationsByItem = new Map<string, boolean>();
-    for (const row of itemsRows ?? []) {
-      const r = row as { item_id: string; has_variations: boolean };
-      hasVariationsByItem.set(r.item_id, r.has_variations === true);
-    }
-
-    // API de preços por quantidade é por item. Agrupa por item_id e MESCLA todos os tiers
-    // dos drafts desse item (para enviar todos os preços por quantidade, não só do primeiro draft).
-    const draftsByItem = new Map<string, DraftRow[]>();
+    // API de preços por quantidade é por item. Agrupa por item_id e usa o rascunho mais recente
+    // por variation_id (evita mesclar rascunhos duplicados com variation_id NULL).
+    const draftsByItem = new Map<string, typeof drafts>();
     for (const d of drafts) {
       const list = draftsByItem.get(d.item_id) ?? [];
       list.push(d);
@@ -94,24 +79,8 @@ export async function runApplyWholesaleJob(jobId: string, accountId: string): Pr
       const itemId = entries[e][0];
       const itemDrafts = entries[e][1];
       const hasVariations = hasVariationsByItem.get(itemId) ?? false;
-      const allTiers: { min_qty: number; price: number }[] = [];
-      const seenMinQty = new Set<number>();
-      for (let i = 0; i < itemDrafts.length; i++) {
-        const d = itemDrafts[i];
-        const tiersArr = Array.isArray(d.tiers_json) ? d.tiers_json : [];
-        for (let j = 0; j < tiersArr.length; j++) {
-          const t = tiersArr[j];
-          if (t && typeof t === "object" && "min_qty" in t && "price" in t) {
-            const minQty = Number((t as { min_qty: number }).min_qty);
-            const price = Number((t as { price: number }).price);
-            if (Number.isInteger(minQty) && minQty >= 2 && price > 0 && !seenMinQty.has(minQty)) {
-              seenMinQty.add(minQty);
-              allTiers.push({ min_qty: minQty, price });
-            }
-          }
-        }
-      }
-      const sorted = allTiers.sort((a, b) => a.min_qty - b.min_qty).slice(0, 5);
+      const selectedDrafts = selectDraftRowsForItemApply(itemDrafts, hasVariations);
+      const sorted = tiersFromDraftRows(selectedDrafts);
       if (sorted.length === 0) {
         await addJobLog(supabase, jobId, {
           item_id: itemId,
@@ -121,13 +90,13 @@ export async function runApplyWholesaleJob(jobId: string, accountId: string): Pr
         continue;
       }
       const validated = validateDraftForApply(
-        { item_id: itemId, variation_id: itemDrafts[0].variation_id, tiers: sorted },
+        { item_id: itemId, variation_id: selectedDrafts[0]?.variation_id ?? null, tiers: sorted },
         hasVariations
       );
       if (!validated.valid) {
         await addJobLog(supabase, jobId, {
           item_id: itemId,
-          variation_id: itemDrafts[0].variation_id ?? undefined,
+          variation_id: selectedDrafts[0]?.variation_id ?? undefined,
           status: "error",
           message: validated.reason,
         });

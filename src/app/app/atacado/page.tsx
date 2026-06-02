@@ -14,6 +14,7 @@ import {
 import { ReceivableModal } from "@/components/ReceivableModal";
 import { SmartLoaderOverlay } from "@/components/SmartLoaderOverlay";
 import { normalizeTiers, validateTiers, type Tier } from "@/lib/atacado";
+import { downloadAtacadoApplyLogCsv } from "@/lib/atacado-apply-log-csv";
 import { CSV_HEADER_EXACT } from "@/lib/atacado-import-csv";
 
 interface ImportPreviewRow {
@@ -551,6 +552,7 @@ function AtacadoPageContent() {
     logs: Array<{ item_id: string | null; variation_id: number | null; status: string; message: string | null; response_json?: unknown }>;
   } | null>(null);
   const [applyLoading, setApplyLoading] = useState(false);
+  const [applyConfirmModalOpen, setApplyConfirmModalOpen] = useState(false);
 
   /** Texto digitado no campo de preço (por linha e tier) para permitir decimais com vírgula enquanto digita */
   const [editingPrice, setEditingPrice] = useState<Record<string, string>>({});
@@ -1783,12 +1785,31 @@ function AtacadoPageContent() {
     return () => clearTimeout(t);
   }, [message]);
 
-  const fetchApplyJob = useCallback(async (jobId: string) => {
-    const res = await fetch(`/api/jobs/${jobId}`);
+  const applyJobFullLogsLoadedRef = useRef(false);
+
+  const fetchApplyJob = useCallback(async (jobId: string, allLogs = false) => {
+    const res = await fetch(`/api/jobs/${jobId}${allLogs ? "?logs=all" : ""}`);
     if (!res.ok) return;
     const data = await res.json();
     setApplyJob({ job: data.job, logs: data.logs ?? [] });
   }, []);
+
+  const downloadApplyJobLogCsv = useCallback(async () => {
+    const jobId = applyJobId ?? applyJob?.job.id;
+    if (!jobId || !applyJob) return;
+    let logs = applyJob.logs;
+    let job = applyJob.job;
+    if (job.processed > 0 && logs.length < job.processed) {
+      const res = await fetch(`/api/jobs/${jobId}?logs=all`);
+      if (res.ok) {
+        const data = await res.json();
+        logs = data.logs ?? logs;
+        job = data.job ?? job;
+        setApplyJob({ job, logs });
+      }
+    }
+    downloadAtacadoApplyLogCsv(logs, job);
+  }, [applyJob, applyJobId]);
 
   const startApply = async () => {
     if (!accountId) return;
@@ -1823,15 +1844,89 @@ function AtacadoPageContent() {
   };
 
   useEffect(() => {
-    if (!applyJobId) return;
+    if (!applyJobId) {
+      applyJobFullLogsLoadedRef.current = false;
+      return;
+    }
     const status = applyJob?.job?.status;
     if (status === "queued" || status === "running") {
+      applyJobFullLogsLoadedRef.current = false;
       const interval = setInterval(() => fetchApplyJob(applyJobId), 2500);
       return () => clearInterval(interval);
+    }
+    if (
+      status &&
+      status !== "queued" &&
+      status !== "running" &&
+      !applyJobFullLogsLoadedRef.current
+    ) {
+      applyJobFullLogsLoadedRef.current = true;
+      void fetchApplyJob(applyJobId, true);
     }
   }, [applyJobId, applyJob?.job?.status, fetchApplyJob]);
 
   const totalPages = computeTotalPages(total, pageSize);
+
+  const atacadoRefetching = loadingRows && rows.length > 0;
+  const atacadoLoaderMessages = [
+    "Carregando anúncios…",
+    "Buscando anúncios no banco…",
+    "Mesclando rascunhos de atacado…",
+    "Montando a grade de preços…",
+  ] as const;
+  const applyLoaderMessages = [
+    "Enviando preços de atacado ao Mercado Livre…",
+    "Cada anúncio é atualizado na API do ML…",
+    "Aguarde — volumes grandes podem levar alguns minutos…",
+  ] as const;
+
+  const applyJobRunning =
+    applyJob != null && (applyJob.job.status === "queued" || applyJob.job.status === "running");
+  const applyJobCompleted = applyJob != null && !applyJobRunning;
+
+  const applyOverlayMessages = useMemo((): string[] => {
+    if (!applyJob) return [...applyLoaderMessages];
+    if (applyJobRunning) return [...applyLoaderMessages];
+    const { status, ok, errors, total } = applyJob.job;
+    if (status === "success") {
+      return [`Aplicação concluída: ${ok} de ${total} anúncio(s) atualizado(s) no Mercado Livre.`];
+    }
+    if (status === "partial") {
+      return [
+        `Aplicação concluída: ${ok} de ${total} anúncio(s) OK; ${errors} com erro. Revise a lista abaixo ou baixe o CSV.`,
+      ];
+    }
+    if (status === "failed") {
+      return [`Aplicação não concluída: ${errors} erro(s) em ${total} anúncio(s).`];
+    }
+    return ["Processamento encerrado."];
+  }, [applyJob, applyJobRunning]);
+
+  const applyStatusLabel = (status: string): string => {
+    switch (status) {
+      case "success":
+        return "Concluído";
+      case "partial":
+        return "Concluído com erros";
+      case "failed":
+        return "Falhou";
+      case "running":
+        return "Em andamento";
+      case "queued":
+        return "Na fila";
+      default:
+        return status;
+    }
+  };
+
+  const smartLoaderOpen = atacadoRefetching || applyJob != null;
+  const applyDeterminatePercent = (() => {
+    if (loadingRows || !applyJob) return undefined;
+    const { total: jobTotal, processed, status } = applyJob.job;
+    if (jobTotal > 0) return Math.min(100, (processed / jobTotal) * 100);
+    if (status === "queued" || status === "running") return undefined;
+    return 100;
+  })();
 
   if (accountsLoaded && accounts.length === 0) {
     return (
@@ -1857,38 +1952,21 @@ function AtacadoPageContent() {
     );
   }
 
-  const atacadoRefetching = loadingRows && rows.length > 0;
-  const atacadoLoaderMessages = [
-    "Carregando anúncios…",
-    "Buscando anúncios no banco…",
-    "Mesclando rascunhos de atacado…",
-    "Montando a grade de preços…",
-  ] as const;
-  const applyLoaderMessages = [
-    "Enviando preços de atacado ao Mercado Livre…",
-    "Cada anúncio é atualizado na API do ML…",
-    "Aguarde — volumes grandes podem levar alguns minutos…",
-  ] as const;
-
-  const smartLoaderOpen = atacadoRefetching || applyJob != null;
-  const applyDeterminatePercent = (() => {
-    if (loadingRows || !applyJob) return undefined;
-    const { total, processed, status } = applyJob.job;
-    if (total > 0) return Math.min(100, (processed / total) * 100);
-    if (status === "queued" || status === "running") return undefined;
-    return 100;
-  })();
-
   return (
     <div className="adminty-atacado-page space-y-5">
       <div className="table-page-shell">
         <SmartLoaderOverlay
         open={smartLoaderOpen}
-        messages={atacadoRefetching ? [...atacadoLoaderMessages] : applyJob != null ? [...applyLoaderMessages] : [...atacadoLoaderMessages]}
+        messages={
+          atacadoRefetching ? [...atacadoLoaderMessages] : applyJob != null ? applyOverlayMessages : [...atacadoLoaderMessages]
+        }
         determinatePercent={applyDeterminatePercent}
+        completed={!loadingRows && !atacadoRefetching && applyJobCompleted}
         footerHint={
           !loadingRows && applyJob
-            ? `Status: ${applyJob.job.status} · Progresso: ${applyJob.job.processed}/${applyJob.job.total} · OK: ${applyJob.job.ok} · Erros: ${applyJob.job.errors}`
+            ? applyJobCompleted
+              ? `${applyStatusLabel(applyJob.job.status)} · ${applyJob.job.ok} OK · ${applyJob.job.errors} erro(s) · ${applyJob.job.processed}/${applyJob.job.total} anúncios · Clique em Fechar`
+              : `${applyStatusLabel(applyJob.job.status)} · Anúncios: ${applyJob.job.processed}/${applyJob.job.total} · OK: ${applyJob.job.ok} · Erros: ${applyJob.job.errors}`
             : undefined
         }
         panelClassName={applyJob != null && !loadingRows ? "max-w-lg max-h-[min(90vh,40rem)] overflow-y-auto" : undefined}
@@ -1905,6 +1983,13 @@ function AtacadoPageContent() {
                 className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
               >
                 Atualizar
+              </button>
+              <button
+                type="button"
+                onClick={downloadApplyJobLogCsv}
+                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
+              >
+                Baixar log (CSV)
               </button>
               <button
                 type="button"
@@ -1931,7 +2016,10 @@ function AtacadoPageContent() {
                       </li>
                     ))}
                   {applyJob.logs.filter((l) => l.status === "error").length > 20 && (
-                    <li className="text-red-600 dark:text-red-400">… e mais erros (veja logs no servidor)</li>
+                    <li className="text-red-600 dark:text-red-400">
+                      … e mais {applyJob.logs.filter((l) => l.status === "error").length - 20} erro(s). Use{" "}
+                      <strong>Baixar log (CSV)</strong> para ver todos.
+                    </li>
                   )}
                 </ul>
               </div>
@@ -2021,7 +2109,7 @@ function AtacadoPageContent() {
             </button>
             <button
               type="button"
-              onClick={startApply}
+              onClick={() => setApplyConfirmModalOpen(true)}
               disabled={applyLoading || saving || !accountId}
               className="btn btn-success btn-sm disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -2172,6 +2260,63 @@ function AtacadoPageContent() {
             {message.text}
           </div>
         )}
+
+      {applyConfirmModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50"
+            aria-label="Fechar"
+            onClick={() => !applyLoading && setApplyConfirmModalOpen(false)}
+          />
+          <div
+            className="modal-panel relative w-full max-w-md p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="apply-ml-confirm-title"
+          >
+            <h2 id="apply-ml-confirm-title" className="mb-2 text-lg font-semibold text-slate-900 dark:text-slate-50">
+              Aplicar no Mercado Livre?
+            </h2>
+            <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+              Os valores de atacado salvos nos rascunhos serão enviados ao Mercado Livre e passarão a valer nos
+              anúncios elegíveis desta conta.
+              {editedCount > 0 && (
+                <>
+                  {" "}
+                  Há <strong>{editedCount}</strong> linha{editedCount !== 1 ? "s" : ""} com alterações não salvas; elas
+                  serão gravadas antes da aplicação.
+                </>
+              )}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setApplyConfirmModalOpen(false)}
+                disabled={applyLoading}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await startApply();
+                  setApplyConfirmModalOpen(false);
+                }}
+                disabled={applyLoading}
+                className="btn btn-success btn-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {applyLoading
+                  ? editedCount > 0
+                    ? "Salvando e aplicando…"
+                    : "Aplicando…"
+                  : "Confirmar e aplicar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {bulkMinQtyModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
