@@ -3320,13 +3320,11 @@ function PrecosPageContent() {
     a.download = `precos_${new Date().toISOString().split("T")[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    setOptionsMenuOpen(false);
   }, [sortedListings, ordersData, priceRefsByRow, getProfitPercent]);
 
   const openPrecosImportCsv = useCallback(() => {
     setPrecosImportResult(null);
     setPrecosImportCsvModalOpen(true);
-    setOptionsMenuOpen(false);
   }, []);
 
   const onPrecosImportFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
