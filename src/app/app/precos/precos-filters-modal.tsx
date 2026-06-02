@@ -8,6 +8,7 @@ import {
   type StockCompareOp,
 } from "@/lib/mercadolivre/item-tags";
 import type { ProductTag } from "@/lib/db/types";
+import type { ProductHasPmaFilter } from "@/lib/product-filters";
 
 const ML_MIN_CAMPAIGN_DISCOUNT_PERCENT = 5;
 
@@ -28,6 +29,7 @@ export type PrecosFiltersValues = {
   semPromoMlAtiva: boolean;
   profitOpFilter: StockCompareOp | "";
   profitQtyFilter: string;
+  hasPmaFilter: ProductHasPmaFilter;
 };
 
 type PrecosFiltersDraft = PrecosFiltersValues;
@@ -50,6 +52,7 @@ function draftFromApplied(applied: PrecosFiltersValues): PrecosFiltersDraft {
     semPromoMlAtiva: applied.semPromoMlAtiva,
     profitOpFilter: applied.profitOpFilter,
     profitQtyFilter: applied.profitQtyFilter,
+    hasPmaFilter: applied.hasPmaFilter,
   };
 }
 
@@ -70,6 +73,7 @@ const EMPTY_DRAFT: PrecosFiltersDraft = draftFromApplied({
   semPromoMlAtiva: false,
   profitOpFilter: "",
   profitQtyFilter: "",
+  hasPmaFilter: "",
 });
 
 type PrecosFiltersModalProps = {
@@ -241,6 +245,25 @@ export function PrecosFiltersModal({
                     <option value="all">Todos</option>
                     <option value="linked">Só vinculados</option>
                     <option value="unlinked">Só não vinculados</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                    PMA no produto
+                  </label>
+                  <select
+                    value={draft.hasPmaFilter}
+                    onChange={(e) =>
+                      setDraft((p) => ({
+                        ...p,
+                        hasPmaFilter: e.target.value as ProductHasPmaFilter,
+                      }))
+                    }
+                    className="input text-xs font-medium"
+                  >
+                    <option value="">Todos</option>
+                    <option value="yes">Com PMA cadastrado</option>
+                    <option value="no">Sem PMA cadastrado</option>
                   </select>
                 </div>
                 <div className="flex items-end sm:col-span-2">

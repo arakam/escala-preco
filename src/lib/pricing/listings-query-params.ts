@@ -2,6 +2,7 @@ import {
   parseStockCompareFilter,
   parseStockCompareFilterDecimal,
 } from "@/lib/mercadolivre/item-tags";
+import { parseHasPmaParam, type ProductHasPmaFilter } from "@/lib/product-filters";
 
 /** Filtros de GET /api/pricing/listings e POST /api/pricing/recalculate-fees (mesmos query params). */
 export type PricingListingsQueryParams = {
@@ -19,6 +20,7 @@ export type PricingListingsQueryParams = {
   semPromoMlAtiva: boolean;
   fullOnly: boolean;
   tagIds: string[];
+  hasPma: ProductHasPmaFilter;
 };
 
 export function parsePricingListingsQueryParams(url: URL): PricingListingsQueryParams {
@@ -51,5 +53,6 @@ export function parsePricingListingsQueryParams(url: URL): PricingListingsQueryP
     fullOnly:
       url.searchParams.get("full_only") === "1" || url.searchParams.get("full_only") === "true",
     tagIds: tagIdsParam ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean) : [],
+    hasPma: parseHasPmaParam(url.searchParams.get("has_pma")),
   };
 }

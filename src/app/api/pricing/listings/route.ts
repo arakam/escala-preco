@@ -2,7 +2,9 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
   intersectMlItemIdFilters,
+  parseHasPmaParam,
   resolveMlItemIdsByFulfillment,
+  resolveMlItemIdsByProductHasPma,
   resolveMlItemIdsByProductSupplier,
 } from "@/lib/product-filters";
 import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
@@ -16,6 +18,7 @@ import {
   parseStockCompareFilterDecimal,
 } from "@/lib/mercadolivre/item-tags";
 import { applyNumericCompareFilter } from "@/lib/pricing/listings-query-filters";
+import { attachProductPmaToRows } from "@/lib/pricing/attach-product-pma";
 import { NextRequest, NextResponse } from "next/server";
 
 export interface PricingListingRow {
@@ -50,6 +53,8 @@ export interface PricingListingRow {
   calculated_at?: string | null;
   /** % taxa ML (fee/preço) por categoria+tipo — iteração rápida de margem */
   reference_fee_percent?: number | null;
+  /** PMA (R$) do produto vinculado — piso da promoção na tela de preços */
+  pma?: number | null;
 }
 
 export async function GET(req: NextRequest) {
@@ -99,6 +104,7 @@ export async function GET(req: NextRequest) {
   const tagIds = tagIdsParam
     ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
+  const hasPmaFilter = parseHasPmaParam(url.searchParams.get("has_pma"));
 
   const offset = showAll ? 0 : (page - 1) * limit;
 
@@ -117,7 +123,7 @@ export async function GET(req: NextRequest) {
 
   /** MLB com produto tagueado, fornecedor ou Full (via ml_items), não só product_id no cache. */
   let allowedItemIds: string[] | null = null;
-  if (tagIds.length > 0 || supplierFilter || fullOnly) {
+  if (tagIds.length > 0 || supplierFilter || fullOnly || hasPmaFilter) {
     try {
       const byTags =
         tagIds.length > 0
@@ -132,9 +138,17 @@ export async function GET(req: NextRequest) {
           )
         : null;
       const byFull = fullOnly ? await resolveMlItemIdsByFulfillment(serviceSupabase, account.id) : null;
+      const byPma = hasPmaFilter
+        ? await resolveMlItemIdsByProductHasPma(
+            serviceSupabase,
+            account.id,
+            user.id,
+            hasPmaFilter
+          )
+        : null;
       allowedItemIds = intersectMlItemIdFilters(
-        intersectMlItemIdFilters(byTags, bySupplier),
-        byFull
+        intersectMlItemIdFilters(intersectMlItemIdFilters(byTags, bySupplier), byFull),
+        byPma
       );
       if (allowedItemIds !== null && allowedItemIds.length === 0) {
         return NextResponse.json({
@@ -331,8 +345,10 @@ export async function GET(req: NextRequest) {
       return row;
     });
 
+    const listingsWithPma = await attachProductPmaToRows(serviceSupabase, listings);
+
     const uniqueItemIds = Array.from(
-      new Set(listings.map((l) => String(l.item_id).trim().toUpperCase()))
+      new Set(listingsWithPma.map((l) => String(l.item_id).trim().toUpperCase()))
     );
     const priceRefsMap: Record<
       string,
@@ -381,7 +397,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      listings,
+      listings: listingsWithPma,
       total,
       page,
       limit: fetchLimit,

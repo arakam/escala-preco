@@ -106,6 +106,26 @@ export async function resolveMlItemIdsByProductSupplier(
   return resolveMlItemIdsByProductIds(supabase, accountId, productIds);
 }
 
+/** MLB da conta cujo produto vinculado tem ou não PMA cadastrado. */
+export async function resolveMlItemIdsByProductHasPma(
+  supabase: SupabaseClient,
+  accountId: string,
+  userId: string,
+  hasPma: ProductHasPmaFilter
+): Promise<string[] | null> {
+  if (!hasPma) return null;
+
+  let q = supabase.from("products").select("id").eq("user_id", userId);
+  q = applyProductFiltersToQuery(q, { supplier: "", hasPma });
+  const { data, error } = await q;
+  if (error) throw error;
+
+  const productIds = (data ?? []).map((r: { id: string }) => r.id);
+  if (productIds.length === 0) return [];
+
+  return resolveMlItemIdsByProductIds(supabase, accountId, productIds);
+}
+
 /** MLB da conta marcados como Full em ml_items (is_fulfillment). */
 export async function resolveMlItemIdsByFulfillment(
   supabase: SupabaseClient,

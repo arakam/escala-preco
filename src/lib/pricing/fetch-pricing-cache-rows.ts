@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   intersectMlItemIdFilters,
   resolveMlItemIdsByFulfillment,
+  resolveMlItemIdsByProductHasPma,
   resolveMlItemIdsByProductSupplier,
 } from "@/lib/product-filters";
 import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
@@ -21,7 +22,12 @@ export async function fetchAllPricingCacheRowsForFilters(
   filters: PricingListingsQueryParams
 ): Promise<{ rows: PricingCacheRow[]; error: unknown }> {
   let allowedItemIds: string[] | null = null;
-  if (filters.tagIds.length > 0 || filters.supplierFilter || filters.fullOnly) {
+  if (
+    filters.tagIds.length > 0 ||
+    filters.supplierFilter ||
+    filters.fullOnly ||
+    filters.hasPma
+  ) {
     try {
       const byTags =
         filters.tagIds.length > 0
@@ -38,9 +44,17 @@ export async function fetchAllPricingCacheRowsForFilters(
       const byFull = filters.fullOnly
         ? await resolveMlItemIdsByFulfillment(serviceSupabase, accountId)
         : null;
+      const byPma = filters.hasPma
+        ? await resolveMlItemIdsByProductHasPma(
+            serviceSupabase,
+            accountId,
+            userId,
+            filters.hasPma
+          )
+        : null;
       allowedItemIds = intersectMlItemIdFilters(
-        intersectMlItemIdFilters(byTags, bySupplier),
-        byFull
+        intersectMlItemIdFilters(intersectMlItemIdFilters(byTags, bySupplier), byFull),
+        byPma
       );
       if (allowedItemIds !== null && allowedItemIds.length === 0) {
         return { rows: [], error: null };

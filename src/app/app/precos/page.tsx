@@ -48,8 +48,14 @@ import {
   type PrecosImportPreviewRow,
   type PrecosImportRowValid,
 } from "@/lib/precos-import-csv";
+import {
+  clampPromoPriceToPmaFloor,
+  formatPmaClampBulkSuffix,
+  formatPmaClampSingleMessage,
+} from "@/lib/pricing/pma-floor";
 import { PrecosHelpContent } from "./precos-help-content";
 import type { PrecosFiltersValues } from "./precos-filters-modal";
+import type { ProductHasPmaFilter } from "@/lib/product-filters";
 import { PrecosToolbarIcons } from "./precos-toolbar-icons";
 import {
   consumePricingListingsStaleFlag,
@@ -81,6 +87,8 @@ interface PricingListing {
   ml_active_promotions?: string | null;
   /** % taxa ML (fee/preço) por categoria+tipo, preenchido no refresh do cache após sync */
   reference_fee_percent?: number | null;
+  /** PMA (R$) do produto vinculado — piso da promoção */
+  pma?: number | null;
 }
 
 type CalculatedPricing = FullPricingBreakdown;
@@ -245,6 +253,23 @@ function promotionPriceForDiscountPercent(currentPrice: number, discountPercent:
   const pct = Math.min(ML_MAX_CAMPAIGN_DISCOUNT_PERCENT, Math.max(ML_MIN_CAMPAIGN_DISCOUNT_PERCENT, discountPercent));
   const factor = 1 - pct / 100;
   return Math.floor(currentPrice * factor * 100) / 100;
+}
+
+/** Ajusta preços em mapa ao PMA de cada anúncio; retorna quantos foram limitados. */
+function clampPriceMapToListingPma(
+  listings: ListingWithPricing[],
+  priceByKey: Map<string, number>
+): number {
+  let clampedCount = 0;
+  for (const listing of listings) {
+    const key = listingSelectionKey(listing);
+    const raw = priceByKey.get(key);
+    if (raw == null) continue;
+    const { price, clamped } = clampPromoPriceToPmaFloor(raw, listing.pma);
+    priceByKey.set(key, price);
+    if (clamped) clampedCount++;
+  }
+  return clampedCount;
 }
 
 /** Desconto % entre preço ML (current_price) e promoção planejada (new_price). */
@@ -1131,6 +1156,8 @@ function PrecosPageContent() {
   const [discountQtyFilter, setDiscountQtyFilter] = useState("");
   /** Sem campanhas/promoções ativas no ML (seller-promotions) no último refresh do cache */
   const [semPromoMlAtiva, setSemPromoMlAtiva] = useState(false);
+  /** PMA cadastrado no produto vinculado */
+  const [hasPmaFilter, setHasPmaFilter] = useState<ProductHasPmaFilter>("");
   /** Com filtros no cliente: carregar até 2000 itens de uma vez (em vez de 500) */
   /** Itens selecionados para criar campanha ML (por id de listing) */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1286,6 +1313,7 @@ function PrecosPageContent() {
       params.set("profit_qty", profitQtyFilter.trim());
     }
     if (semPromoMlAtiva) params.set("sem_promo_ml", "1");
+    if (hasPmaFilter) params.set("has_pma", hasPmaFilter);
 
     try {
       const [listingsRes, plannedRes] = await Promise.all([
@@ -1392,6 +1420,7 @@ function PrecosPageContent() {
     profitOpFilter,
     profitQtyFilter,
     semPromoMlAtiva,
+    hasPmaFilter,
   ]);
 
   const fetchRefJob = useCallback(
@@ -1503,7 +1532,7 @@ function PrecosPageContent() {
 
   useEffect(() => {
     setPage(1);
-  }, [profitOpFilter, sales30dOpFilter, costOpFilter, discountOpFilter, semPromoMlAtiva]);
+  }, [profitOpFilter, sales30dOpFilter, costOpFilter, discountOpFilter, semPromoMlAtiva, hasPmaFilter]);
 
   /** Dados sempre vêm do cache (listings já inclui orders_30d). Não busca vendas em separado. */
 
@@ -1647,6 +1676,7 @@ function PrecosPageContent() {
       params.set("profit_qty", profitQtyFilter.trim());
     }
     if (semPromoMlAtiva) params.set("sem_promo_ml", "1");
+    if (hasPmaFilter) params.set("has_pma", hasPmaFilter);
     return params;
   }, [
     search,
@@ -1666,6 +1696,7 @@ function PrecosPageContent() {
     profitOpFilter,
     profitQtyFilter,
     semPromoMlAtiva,
+    hasPmaFilter,
   ]);
 
   const handleCalculateAll = useCallback(async () => {
@@ -1865,21 +1896,29 @@ function PrecosPageContent() {
 
   const handlePriceRowCommit = useCallback(
     async (listing: ListingWithPricing, committedPrice: number) => {
+      const { price: finalPrice, clamped, pmaFloor } = clampPromoPriceToPmaFloor(
+        committedPrice,
+        listing.pma
+      );
+      if (clamped && pmaFloor != null) {
+        setSaveMessage({ type: "ok", text: formatPmaClampSingleMessage(listing, pmaFloor) });
+        setTimeout(() => setSaveMessage(null), 6000);
+      }
       setListings((prev) =>
         prev.map((item) =>
           item.id === listing.id && item.variation_id === listing.variation_id
-            ? { ...item, new_price: committedPrice, dirty: true }
+            ? { ...item, new_price: finalPrice, dirty: true }
             : item
         )
       );
-      await handleCalculateSingle({ ...listing, new_price: committedPrice }, { price: committedPrice });
+      await handleCalculateSingle({ ...listing, new_price: finalPrice }, { price: finalPrice });
       await persistPlannedPrices(
         [
           {
             item_id: listing.item_id,
             variation_id: listing.variation_id,
             sku: listing.sku ?? undefined,
-            planned_price: committedPrice,
+            planned_price: finalPrice,
           },
         ],
         { quietSuccess: true }
@@ -1930,27 +1969,35 @@ function PrecosPageContent() {
         }
 
         const p = Math.round(solved.price * 100) / 100;
+        const { price: finalPrice, clamped, pmaFloor } = clampPromoPriceToPmaFloor(p, listing.pma);
+        if (clamped && pmaFloor != null) {
+          setSaveMessage({ type: "ok", text: formatPmaClampSingleMessage(listing, pmaFloor) });
+          setTimeout(() => setSaveMessage(null), 6000);
+        }
 
         setListings((prev) =>
           prev.map((item) =>
             item.id === listing.id && item.variation_id === listing.variation_id
               ? {
                   ...item,
-                  new_price: p,
+                  new_price: finalPrice,
                   dirty: true,
-                  calculated: solved.calculated,
+                  calculated: clamped ? undefined : solved.calculated,
                   calculating: false,
                 }
               : item
           )
         );
+        if (clamped) {
+          await handleCalculateSingle({ ...listing, new_price: finalPrice }, { price: finalPrice });
+        }
         await persistPlannedPrices(
           [
             {
               item_id: listing.item_id,
               variation_id: listing.variation_id,
               sku: listing.sku ?? undefined,
-              planned_price: p,
+              planned_price: finalPrice,
             },
           ],
           { quietSuccess: true }
@@ -1970,13 +2017,16 @@ function PrecosPageContent() {
         setTimeout(() => setSaveMessage(null), 5000);
       }
     },
-    [isMercadoLider, persistPlannedPrices]
+    [isMercadoLider, persistPlannedPrices, handleCalculateSingle]
   );
-
-  /** Ajusta a promoção para o mínimo aceito na promoção ML (desconto de 5%). Arredonda para baixo para nunca ultrapassar 95%. */
   const handleApplyMinDiscount = useCallback(
     async (listing: ListingWithPricing) => {
-      const newPrice = Math.floor(listing.current_price * 0.95 * 100) / 100;
+      let newPrice = Math.floor(listing.current_price * 0.95 * 100) / 100;
+      const { price: finalPrice, clamped: pmaClamped, pmaFloor } = clampPromoPriceToPmaFloor(
+        newPrice,
+        listing.pma
+      );
+      newPrice = finalPrice;
       try {
         setListings((prev) =>
           prev.map((item) =>
@@ -2069,10 +2119,11 @@ function PrecosPageContent() {
           { quietSuccess: true }
         );
         if (pres.ok) {
-          setSaveMessage({
-            type: "ok",
-            text: "Promoção ajustada ao mínimo de 5% (promo ML) e salva automaticamente.",
-          });
+          let text = "Promoção ajustada ao mínimo de 5% (promo ML) e salva automaticamente.";
+          if (pmaClamped && pmaFloor != null) {
+            text = `${formatPmaClampSingleMessage(listing, pmaFloor)} Salvo automaticamente.`;
+          }
+          setSaveMessage({ type: "ok", text });
           setTimeout(() => setSaveMessage(null), 5000);
         }
       }
@@ -2122,6 +2173,7 @@ function PrecosPageContent() {
     for (const l of eligible) {
       priceByKey.set(listingSelectionKey(l), promotionPriceForDiscountPercent(l.current_price, targetDiscountPct));
     }
+    const pmaClampedCount = clampPriceMapToListingPma(eligible, priceByKey);
 
     setBulkDiscountModalOpen(false);
 
@@ -2187,6 +2239,7 @@ function PrecosPageContent() {
       let msg = `Promoção ajustada para desconto de ${targetDiscountPct}% em ${eligible.length} anúncio(s) (taxa por referência, sem listing_prices por item).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); ajuste manual ou use Recalcular taxa e frete.`;
+      msg += formatPmaClampBulkSuffix(pmaClampedCount);
       if (pres.ok) msg += " Alterações salvas automaticamente.";
       else msg += ` Falha ao gravar no servidor${pres.error ? `: ${pres.error}` : ""}.`;
       setSaveMessage({ type: errCount > 0 || !pres.ok ? "error" : "ok", text: msg });
@@ -2240,6 +2293,7 @@ function PrecosPageContent() {
     for (const l of eligible) {
       priceByKey.set(listingSelectionKey(l), Math.round(l.current_price * 100) / 100);
     }
+    const pmaClampedCount = clampPriceMapToListingPma(eligible, priceByKey);
 
     bulkRestoreOriginalBusyRef.current = true;
     setListings((prev) =>
@@ -2303,6 +2357,7 @@ function PrecosPageContent() {
       let msg = `Promoção restaurada para o preço do ML em ${eligible.length} anúncio(s) (taxa por referência, sem listing_prices por item).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem preço ou dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); use Recalcular taxa e frete se precisar.`;
+      msg += formatPmaClampBulkSuffix(pmaClampedCount);
       if (presRestore.ok) msg += " Alterações salvas automaticamente.";
       else msg += ` Falha ao gravar no servidor${presRestore.error ? `: ${presRestore.error}` : ""}.`;
       setSaveMessage({ type: errCount > 0 || !presRestore.ok ? "error" : "ok", text: msg });
@@ -2366,7 +2421,7 @@ function PrecosPageContent() {
     setCalculating(true);
     setBulkMarginLoaderProgress({ done: 0, total: eligible.length });
     try {
-      const updates = new Map<string, { price: number; calculated: CalculatedPricing }>();
+      const updates = new Map<string, { price: number; calculated: CalculatedPricing | undefined }>();
       const { results: bulkResults, errors: bulkErrors } = await solveMarginBulkViaApi(
         eligible,
         targetPct,
@@ -2374,18 +2429,30 @@ function PrecosPageContent() {
       );
 
       const selectionKeyByPricingKey = new Map<string, string>();
+      const eligibleBySelectionKey = new Map<string, ListingWithPricing>();
       for (const l of eligible) {
+        const selKey = listingSelectionKey(l);
+        eligibleBySelectionKey.set(selKey, l);
         selectionKeyByPricingKey.set(
           pricingResultKey(l.item_id, l.variation_id),
-          listingSelectionKey(l)
+          selKey
         );
       }
+      let pmaClampedCount = 0;
+      const pmaClampedKeys = new Set<string>();
       for (const r of bulkResults) {
         const selKey = selectionKeyByPricingKey.get(pricingResultKey(r.item_id, r.variation_id));
         if (!selKey) continue;
+        const listing = eligibleBySelectionKey.get(selKey);
+        const rawPrice = Math.round(r.price * 100) / 100;
+        const { price, clamped } = clampPromoPriceToPmaFloor(rawPrice, listing?.pma);
+        if (clamped) {
+          pmaClampedCount++;
+          pmaClampedKeys.add(selKey);
+        }
         updates.set(selKey, {
-          price: Math.round(r.price * 100) / 100,
-          calculated: r.calculated,
+          price,
+          calculated: clamped ? undefined : r.calculated,
         });
       }
 
@@ -2404,12 +2471,50 @@ function PrecosPageContent() {
               new_price: u.price,
               dirty: true,
               calculated: u.calculated,
-              calculating: false,
+              calculating: pmaClampedKeys.has(key),
             };
           }
           return { ...item, calculating: false };
         })
       );
+
+      if (pmaClampedKeys.size > 0) {
+        const itemsToRecalc = eligible
+          .filter((l) => pmaClampedKeys.has(listingSelectionKey(l)))
+          .map((item) => ({
+            item_id: item.item_id,
+            variation_id: item.variation_id,
+            price: updates.get(listingSelectionKey(item))!.price,
+            listing_type_id: item.listing_type_id!,
+            category_id: item.category_id!,
+            weight_kg: item.weight_kg,
+            height_cm: item.height_cm,
+            width_cm: item.width_cm,
+            length_cm: item.length_cm,
+            reference_fee_percent: item.reference_fee_percent ?? null,
+          }));
+        const { results: recalcResults } = await fetchPricingCalculateBatches(
+          itemsToRecalc,
+          isMercadoLider,
+          undefined,
+          { linearFees: true }
+        );
+        const recalcMap = buildPricingResultsMap(recalcResults);
+        setListings((prev) => {
+          const withCalc = applyCalculatedResultsToListings(prev, recalcMap, pmaClampedKeys);
+          return withCalc.map((item) =>
+            pmaClampedKeys.has(listingSelectionKey(item))
+              ? { ...item, calculating: false }
+              : item
+          );
+        });
+      } else {
+        setListings((prev) =>
+          prev.map((item) =>
+            keySet.has(listingSelectionKey(item)) ? { ...item, calculating: false } : item
+          )
+        );
+      }
 
       setBulkMarginLoaderProgress(null);
       setCalculating(false);
@@ -2435,6 +2540,7 @@ function PrecosPageContent() {
       if (skippedNoData > 0) {
         msg += ` ${skippedNoData} ignorado(s) (sem custo ou tipo de anúncio).`;
       }
+      msg += formatPmaClampBulkSuffix(pmaClampedCount);
       if (presMargin.ok) msg += " Alterações salvas automaticamente.";
       else msg += ` Falha ao gravar no servidor${presMargin.error ? `: ${presMargin.error}` : ""}.`;
       setSaveMessage({
@@ -2509,6 +2615,7 @@ function PrecosPageContent() {
       semPromoMlAtiva,
       profitOpFilter,
       profitQtyFilter,
+      hasPmaFilter,
     }),
     [
       search,
@@ -2527,6 +2634,7 @@ function PrecosPageContent() {
       semPromoMlAtiva,
       profitOpFilter,
       profitQtyFilter,
+      hasPmaFilter,
     ]
   );
 
@@ -2547,6 +2655,7 @@ function PrecosPageContent() {
     setSemPromoMlAtiva(values.semPromoMlAtiva);
     setProfitOpFilter(values.profitOpFilter);
     setProfitQtyFilter(values.profitQtyFilter);
+    setHasPmaFilter(values.hasPmaFilter);
     setPage(1);
   }, []);
 
@@ -2592,6 +2701,8 @@ function PrecosPageContent() {
       }
     }
     if (semPromoMlAtiva) labels.push("Sem Promo ML ativa");
+    if (hasPmaFilter === "yes") labels.push("PMA: com valor cadastrado");
+    if (hasPmaFilter === "no") labels.push("PMA: sem valor cadastrado");
     if (profitOpFilter) {
       const qty = Number(profitQtyFilter.trim().replace(",", "."));
       if (Number.isFinite(qty) && qty >= 0) {
@@ -2628,6 +2739,7 @@ function PrecosPageContent() {
     sortBy,
     filterTagIds,
     tagNameById,
+    hasPmaFilter,
   ]);
 
   const clearPrecosFilters = useCallback(() => {
@@ -2645,6 +2757,7 @@ function PrecosPageContent() {
     setDiscountOpFilter("");
     setDiscountQtyFilter("");
     setSemPromoMlAtiva(false);
+    setHasPmaFilter("");
     setProfitOpFilter("");
     setProfitQtyFilter("");
     setSortBy("");
