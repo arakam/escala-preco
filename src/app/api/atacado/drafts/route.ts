@@ -124,9 +124,9 @@ export async function POST(request: NextRequest) {
 
   for (let i = 0; i < withTiers.length; i += UPSERT_CHUNK) {
     const chunk = withTiers.slice(i, i + UPSERT_CHUNK);
-    const itemIdsToClearNullDraft = [
-      ...new Set(chunk.filter((r) => r.variation_id == null).map((r) => r.item_id)),
-    ];
+    const itemIdsToClearNullDraft = Array.from(
+      new Set(chunk.filter((r) => r.variation_id == null).map((r) => r.item_id))
+    );
     for (let j = 0; j < itemIdsToClearNullDraft.length; j += DELETE_PARALLEL) {
       const idBatch = itemIdsToClearNullDraft.slice(j, j + DELETE_PARALLEL);
       await Promise.all(
