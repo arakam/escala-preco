@@ -75,7 +75,7 @@ function toSolveInput(row: CacheRow): SolveMarginFastInput {
 /**
  * POST /api/pricing/import/confirm
  * Body: { items: PrecosImportRowValid[], is_mercado_lider?: boolean }
- * Aplica promoção ou margem alvo por MLB e grava planned_prices + cache.
+ * Aplica preço calculado ou margem alvo por MLB e grava planned_prices + cache.
  */
 export async function POST(req: NextRequest) {
   const auth = await getRouteAuth();
@@ -170,7 +170,7 @@ export async function POST(req: NextRequest) {
     if (item.mode === "promocao") {
       const price = Number(item.promocao);
       if (!Number.isFinite(price) || price < 0) {
-        applyErrors.push({ item_id: itemId, variation_id: variationId, error: "Promocao inválida" });
+        applyErrors.push({ item_id: itemId, variation_id: variationId, error: "Preço Calculado inválido" });
         continue;
       }
       if (!cacheRow.listing_type_id || !cacheRow.category_id) {

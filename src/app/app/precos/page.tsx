@@ -31,6 +31,14 @@ import {
   readCalcularFretePreference,
 } from "@/lib/pricing/mercado-lider-freight";
 import {
+  applyPriceRounding,
+  formatTargetCentsLabel,
+  loadPriceRoundingPreference,
+  PRICING_ROUNDING_PREFERENCE_EVENT,
+  readPriceRoundingPreference,
+  type PriceRoundingConfig,
+} from "@/lib/pricing/price-rounding";
+import {
   sanitizeMlSellerCampaignNameInput,
   isValidMlSellerCampaignName,
   ML_SELLER_CAMPAIGN_NAME_HINT,
@@ -242,7 +250,7 @@ function skuDisplayParts(rawSku: string): { primary: string; extraCount: number 
 const ML_MIN_CAMPAIGN_DISCOUNT_PERCENT = 5;
 const ML_MAX_CAMPAIGN_DISCOUNT_PERCENT = 80;
 
-/** Mercado Livre exige desconto mínimo de 5% na promoção: valor em Promoção deve ser ≤ 95% do preço. */
+/** Mercado Livre exige desconto mínimo de 5% na campanha: preço calculado deve ser ≤ 95% do preço ML. */
 function meetsMlMinCampaignDiscount(listing: Pick<ListingWithPricing, "current_price" | "new_price">): boolean {
   if (listing.current_price <= 0 || listing.new_price <= 0) return false;
   const maxPromoOverCurrent = 1 - ML_MIN_CAMPAIGN_DISCOUNT_PERCENT / 100;
@@ -350,7 +358,7 @@ function buildUpdatePriceIssuesCsv(rows: UpdatePriceItemResult[]): string {
       lines.push([r.item_id, vid, "erro_api", r.error].map(escapeCsvField).join(sep));
     } else {
       lines.push(
-        [r.item_id, vid, "promocao_invalida", "Promoção inválida ou zero na linha selecionada"]
+        [r.item_id, vid, "promocao_invalida", "Preço Calculado inválido ou zero na linha selecionada"]
           .map(escapeCsvField)
           .join(sep)
       );
@@ -370,7 +378,8 @@ const PRECOS_EXPORT_CSV_HEADERS = [
   "Preco ML",
   "Competitividade",
   "Margem %",
-  "Promocao",
+  "Preco Calculado",
+  "Preco Final",
   "Vai Receber",
   "Lucro",
   "Lucro %",
@@ -392,7 +401,8 @@ function buildPrecosExportCsv(
   rows: ListingWithPricing[],
   ordersData: Record<string, number>,
   priceRefsByRow: Record<string, PriceReferenceCell>,
-  getProfitPercent: (listing: ListingWithPricing) => number | null
+  getProfitPercent: (listing: ListingWithPricing) => number | null,
+  priceRounding: PriceRoundingConfig
 ): string {
   const sep = ";";
   const lines: string[] = [PRECOS_EXPORT_CSV_HEADERS.map((h) => escapeCsvField(h)).join(sep)];
@@ -429,6 +439,7 @@ function buildPrecosExportCsv(
         compLabel,
         csvExportDecimal(profitPercent, 1),
         csvExportDecimal(listing.new_price),
+        csvExportDecimal(applyPriceRounding(listing.new_price, priceRounding)),
         csvExportDecimal(listing.calculated?.vai_receber),
         csvExportDecimal(profit),
         csvExportDecimal(profitPercent, 1),
@@ -476,10 +487,11 @@ const PRICING_COLUMNS: { label: string; minWidth: number }[] = [
   { label: "Preço", minWidth: 90 },
   { label: "Competitividade", minWidth: 110 },
   { label: "Margem", minWidth: 76 },
-  { label: "Promoção", minWidth: 100 },
+  { label: "Preço Calculado", minWidth: 120 },
+  { label: "Preço Final", minWidth: 100 },
   { label: "Vai Receber", minWidth: 95 },
   { label: "Lucro", minWidth: 95 },
-  /** Valor R$ + % sobre Promoção (ou referência), estilo Lucro */
+  /** Valor R$ + % sobre Preço Calculado (ou referência), estilo Lucro */
   { label: "Taxa ML", minWidth: 82 },
   { label: "Frete", minWidth: 72 },
   { label: "Imposto", minWidth: 80 },
@@ -488,7 +500,8 @@ const PRICING_COLUMNS: { label: string; minWidth: number }[] = [
   { label: "Link", minWidth: 88 },
 ];
 
-const PRICOS_STICKY_STORAGE_KEY = "escalapreco.precos.pinnedColumns.v4";
+const PRICOS_STICKY_STORAGE_KEY = "escalapreco.precos.pinnedColumns.v5";
+const PRICOS_STICKY_V4_KEY = "escalapreco.precos.pinnedColumns.v4";
 /** Layout anterior: Promo ML no índice 8, Preço no 7 — ver `swapPinnedPromoAndPriceColumnIndices`. */
 const PRICOS_STICKY_V3_KEY = "escalapreco.precos.pinnedColumns.v3";
 /** Valor anterior a `v3`: mesma tabela sem a coluna Promo ML (19 colunas, índices 0–18). */
@@ -500,6 +513,11 @@ const PRICING_TABLE_COL_COUNT_BEFORE_PROMO_ML = 19;
 /** Coluna Promo ML inserida após Preço (índice 8): índices fixos antigos ≥ 8 avançam 1. */
 function bumpStickyIndicesAfterPromoMlColumn(nums: number[]): number[] {
   return nums.map((c) => (c >= 8 ? c + 1 : c));
+}
+
+/** v4 → v5: coluna Preço Final no índice 12; índices fixos antigos ≥ 12 avançam 1. */
+function bumpStickyIndicesAfterPrecoFinalColumn(nums: number[]): number[] {
+  return nums.map((c) => (c >= 12 ? c + 1 : c));
 }
 
 /** v3 → v4: Promo ML passou a ficar à esquerda de Preço (trocam de posição nos índices 7 e 8). */
@@ -540,6 +558,30 @@ function readPrecosStickyInitial(): Set<number> {
           typeof x === "number" && Number.isInteger(x) && x >= 0 && x < n
       );
       return new Set(nums);
+    }
+    const v4raw = localStorage.getItem(PRICOS_STICKY_V4_KEY);
+    if (v4raw) {
+      const arr = JSON.parse(v4raw) as unknown;
+      if (Array.isArray(arr)) {
+        const n = PRICING_COLUMNS.length;
+        const oldColCount = n - 1;
+        const nums = arr.filter(
+          (x): x is number =>
+            typeof x === "number" && Number.isInteger(x) && x >= 0 && x < oldColCount
+        );
+        const migrated = bumpStickyIndicesAfterPrecoFinalColumn(nums).filter((x) => x >= 0 && x < n);
+        const set = new Set(migrated);
+        try {
+          localStorage.setItem(
+            PRICOS_STICKY_STORAGE_KEY,
+            JSON.stringify(Array.from(set).sort((a, b) => a - b))
+          );
+          localStorage.removeItem(PRICOS_STICKY_V4_KEY);
+        } catch {
+          // ignore
+        }
+        return set;
+      }
     }
     const v3raw = localStorage.getItem(PRICOS_STICKY_V3_KEY);
     if (v3raw) {
@@ -744,7 +786,7 @@ function MarginInput({
         onFocus={() => setIsFocused(true)}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        title="Margem líquida sobre o preço de promoção. Ao confirmar, a promoção é ajustada pela calculadora (taxas ML, frete, impostos)."
+        title="Margem líquida sobre o preço calculado. Ao confirmar, o preço calculado é ajustado pela calculadora (taxas ML, frete, impostos)."
         className={`pricing-inline-input w-[4.25rem] px-1.5 py-1 ${
           dirty ? "pricing-inline-input--dirty" : ""
         }`}
@@ -1120,6 +1162,9 @@ function PrecosPageContent() {
   const [isMercadoLider, setIsMercadoLider] = useState(false);
   /** Gold/Platinum na API de reputação — frete sempre incluído nos cálculos. */
   const [detectedMercadoLider, setDetectedMercadoLider] = useState(false);
+  const [priceRounding, setPriceRounding] = useState<PriceRoundingConfig>(() =>
+    readPriceRoundingPreference()
+  );
   const [precosTab, setPrecosTab] = useState<"calculadora" | "como-funciona">("calculadora");
   const [saveMessage, setSaveMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   /** Filtro por lucratividade (%): condição + quantidade, no mesmo padrão de Vendidos. */
@@ -1265,6 +1310,18 @@ function PrecosPageContent() {
     window.addEventListener(PRICING_FRETE_PREFERENCE_EVENT, syncFretePreference);
     return () => window.removeEventListener(PRICING_FRETE_PREFERENCE_EVENT, syncFretePreference);
   }, [detectedMercadoLider]);
+
+  useEffect(() => {
+    void loadPriceRoundingPreference().then(setPriceRounding);
+  }, []);
+
+  useEffect(() => {
+    const syncRounding = () => {
+      void loadPriceRoundingPreference().then(setPriceRounding);
+    };
+    window.addEventListener(PRICING_ROUNDING_PREFERENCE_EVENT, syncRounding);
+    return () => window.removeEventListener(PRICING_ROUNDING_PREFERENCE_EVENT, syncRounding);
+  }, []);
 
   const pageForRequest = apiListPage(pageSize, page);
   const limitForRequest = isAllPageSize(pageSize) ? 0 : pageSize;
@@ -2119,7 +2176,7 @@ function PrecosPageContent() {
           { quietSuccess: true }
         );
         if (pres.ok) {
-          let text = "Promoção ajustada ao mínimo de 5% (promo ML) e salva automaticamente.";
+          let text = "Preço calculado ajustado ao mínimo de 5% (promo ML) e salvo automaticamente.";
           if (pmaClamped && pmaFloor != null) {
             text = `${formatPmaClampSingleMessage(listing, pmaFloor)} Salvo automaticamente.`;
           }
@@ -2236,7 +2293,7 @@ function PrecosPageContent() {
 
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
-      let msg = `Promoção ajustada para desconto de ${targetDiscountPct}% em ${eligible.length} anúncio(s) (taxa por referência, sem listing_prices por item).`;
+      let msg = `Preço calculado ajustado para desconto de ${targetDiscountPct}% em ${eligible.length} anúncio(s) (taxa por referência, sem listing_prices por item).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); ajuste manual ou use Recalcular taxa e frete.`;
       msg += formatPmaClampBulkSuffix(pmaClampedCount);
@@ -2263,7 +2320,7 @@ function PrecosPageContent() {
     await handleBulkApplyDiscountPercent();
   }, [handleBulkApplyDiscountPercent]);
 
-  /** Promoção = preço do anúncio no ML (coluna Preço), com recálculo em lote. */
+  /** Preço calculado = preço do anúncio no ML (coluna Preço), com recálculo em lote. */
   const handleBulkRestoreOriginalPrice = useCallback(async () => {
     setBulkActionsOpen(false);
     if (bulkRestoreOriginalBusyRef.current) return;
@@ -2354,7 +2411,7 @@ function PrecosPageContent() {
 
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
-      let msg = `Promoção restaurada para o preço do ML em ${eligible.length} anúncio(s) (taxa por referência, sem listing_prices por item).`;
+      let msg = `Preço calculado restaurado para o preço do ML em ${eligible.length} anúncio(s) (taxa por referência, sem listing_prices por item).`;
       if (skippedNoType > 0) msg += ` ${skippedNoType} ignorado(s) (sem preço ou dados para cálculo).`;
       if (errCount > 0) msg += ` Falha no cálculo em ${errCount} linha(s); use Recalcular taxa e frete se precisar.`;
       msg += formatPmaClampBulkSuffix(pmaClampedCount);
@@ -3080,7 +3137,7 @@ function PrecosPageContent() {
       const more = invalid.length > 5 ? ` e mais ${invalid.length - 5}` : "";
       setUpdatePriceMessage({
         type: "error",
-        text: `${invalid.length} item(ns) selecionado(s) sem promoção válida (> 0): ${names.join(", ")}${more}.`,
+        text: `${invalid.length} item(ns) selecionado(s) sem preço calculado válido (> 0): ${names.join(", ")}${more}.`,
       });
       return;
     }
@@ -3311,7 +3368,8 @@ function PrecosPageContent() {
       sortedListings,
       ordersData,
       priceRefsByRow,
-      getProfitPercent
+      getProfitPercent,
+      priceRounding
     );
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -3320,7 +3378,7 @@ function PrecosPageContent() {
     a.download = `precos_${new Date().toISOString().split("T")[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [sortedListings, ordersData, priceRefsByRow, getProfitPercent]);
+  }, [sortedListings, ordersData, priceRefsByRow, getProfitPercent, priceRounding]);
 
   const openPrecosImportCsv = useCallback(() => {
     setPrecosImportResult(null);
@@ -3674,7 +3732,7 @@ function PrecosPageContent() {
   const loaderMessages =
     precosImportLoaderActive && precosImportLoaderProgress
       ? precosImportLoaderProgress.stage === "parse"
-        ? ["Lendo arquivo CSV…", "Validando colunas MLB, Promoção e Margem %…"]
+        ? ["Lendo arquivo CSV…", "Validando colunas MLB, Preço Calculado e Margem %…"]
         : [
             `Salvando preços: ${precosImportLoaderProgress.done} de ${precosImportLoaderProgress.total} linha(s)…`,
             "Gravando preços planejados e atualizando cache…",
@@ -3801,7 +3859,7 @@ function PrecosPageContent() {
                 </div>
               </div>
               <p className="text-xs text-fg-muted">
-                Use os anúncios selecionados nesta página. O preço de cada item virá da &quot;Promoção&quot; salva (planned_price).
+                Use os anúncios selecionados nesta página. O preço de cada item virá do &quot;Preço Calculado&quot; salvo (planned_price).
               </p>
             </div>
             <div className="mt-6 flex justify-end gap-2">
@@ -3898,7 +3956,7 @@ function PrecosPageContent() {
                             </li>
                             {summary.skipped > 0 ? (
                               <li>
-                                <strong>{summary.skipped}</strong> ignorado(s) (promoção inválida ou zero)
+                                <strong>{summary.skipped}</strong> ignorado(s) (preço calculado inválido ou zero)
                               </li>
                             ) : null}
                             {summary.errors > 0 ? (
@@ -3922,7 +3980,7 @@ function PrecosPageContent() {
                               const detail =
                                 row.status === "error"
                                   ? row.error
-                                  : "Promoção inválida ou zero na linha selecionada";
+                                  : "Preço Calculado inválido ou zero na linha selecionada";
                               return (
                                 <li
                                   key={key}
@@ -3980,7 +4038,7 @@ function PrecosPageContent() {
                 <div className="space-y-3">
                   <p>
                     Serão atualizados <strong>{selectedCount}</strong> anúncio(s) selecionado(s). O valor enviado é o da
-                    coluna <strong>Promoção</strong> de cada linha.
+                    coluna <strong>Preço Calculado</strong> de cada linha.
                   </p>
                   <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
                     <p className="mb-2 font-medium">Impactos no Mercado Livre</p>
@@ -4114,7 +4172,7 @@ function PrecosPageContent() {
           <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
             <h2 className="mb-2 text-lg font-semibold">Margem nos selecionados</h2>
             <p className="mb-4 text-xs text-fg-muted">
-              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço de promoção) em todos os anúncios marcados que tenham custo e tipo de listagem. Processamento em lote no servidor (taxa de referência + frete em tabela, até 3 passadas por faixa de frete). Confira depois com <strong>Recalcular taxa e frete</strong> (menu Ações) se quiser alinhar a taxa exata do ML.
+              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço calculado) em todos os anúncios marcados que tenham custo e tipo de listagem. Processamento em lote no servidor (taxa de referência + frete em tabela, até 3 passadas por faixa de frete). Confira depois com <strong>Recalcular taxa e frete</strong> (menu Ações) se quiser alinhar a taxa exata do ML.
             </p>
             <form
               className="space-y-4"
@@ -4258,7 +4316,7 @@ function PrecosPageContent() {
                   title={
                     total > listings.length
                       ? `Recalcula taxa e frete para todos os ${total} anúncios do filtro atual (não só esta página)`
-                      : "Recalcula taxa e frete para todas as linhas carregadas (preço da promoção atual)"
+                      : "Recalcula taxa e frete para todas as linhas carregadas (preço calculado atual)"
                   }
                 >
                   {calculating ? "Recalculando taxa e frete…" : "Recalcular taxa e frete"}
@@ -4279,7 +4337,7 @@ function PrecosPageContent() {
             onClick={handleOpenUpdatePrice}
             disabled={listings.length === 0 || selectedCount === 0 || updatePriceLoading}
             className="btn btn-sm border-2 border-yellow-400 bg-white text-amber-950 shadow-sm hover:bg-yellow-50 focus:ring-yellow-400/40 disabled:cursor-not-allowed disabled:opacity-50 dark:border-yellow-500 dark:bg-slate-900 dark:text-yellow-100 dark:hover:bg-yellow-950/40"
-            title="Envia o valor da coluna Promoção como preço do anúncio no Mercado Livre"
+            title="Envia o valor da coluna Preço Calculado como preço do anúncio no Mercado Livre"
           >
             {updatePriceLoading ? "Atualizando…" : `Atualizar preço ML (${selectedCount})`}
           </button>
@@ -4326,9 +4384,9 @@ function PrecosPageContent() {
                   onClick={() => void handleBulkRestoreOriginalPrice()}
                   disabled={calculating}
                   className="btn-dropdown-item"
-                  title="Define a promoção igual ao preço do Mercado Livre (última sync) em cada selecionado"
-                >
-                  Voltar promoção ao preço (ML)
+                  title="Define o preço calculado igual ao preço do Mercado Livre (última sync) em cada selecionado"
+                  >
+                  Restaurar preço calculado (ML)
                 </button>
                 <button
                   type="button"
@@ -4483,9 +4541,9 @@ function PrecosPageContent() {
                 referência de cada linha é a coluna <strong>MLB</strong>.
               </p>
               <p>
-                Preencha <strong>Promocao</strong> (preço em R$) ou <strong>Margem %</strong> (margem líquida alvo) em
-                cada linha — pelo menos uma delas. Se ambas estiverem preenchidas, usa-se <strong>Promocao</strong>.
-                Também aceita o CSV exportado por esta tela (edite só MLB + Promoção ou Margem %).
+                Preencha <strong>Preço Calculado</strong> (preço em R$) ou <strong>Margem %</strong> (margem líquida alvo) em
+                cada linha — pelo menos uma delas. Se ambas estiverem preenchidas, usa-se <strong>Preço Calculado</strong>.
+                Também aceita o CSV exportado por esta tela (edite só MLB + Preço Calculado ou Margem %).
               </p>
               <p>
                 Para margem, o anúncio precisa ter custo vinculado. Contas Mercado Líder (Gold/Platinum) incluem frete
@@ -4540,7 +4598,7 @@ function PrecosPageContent() {
                     <th className="p-2 font-medium">Linha</th>
                     <th className="p-2 font-medium">MLB</th>
                     <th className="p-2 font-medium">Variacao</th>
-                    <th className="p-2 font-medium">Promocao</th>
+                    <th className="p-2 font-medium">Preço Calculado</th>
                     <th className="p-2 font-medium">Margem %</th>
                     <th className="p-2 font-medium">Modo</th>
                     <th className="p-2 font-medium">Status</th>
@@ -4557,7 +4615,7 @@ function PrecosPageContent() {
                       <td className="p-2">{pr.variation_id || "—"}</td>
                       <td className="p-2">{pr.promocao?.trim() ? pr.promocao : "—"}</td>
                       <td className="p-2">{pr.margem?.trim() ? pr.margem : "—"}</td>
-                      <td className="p-2">{pr.mode === "promocao" ? "Promoção" : pr.mode === "margem" ? "Margem" : "—"}</td>
+                      <td className="p-2">{pr.mode === "promocao" ? "Preço Calculado" : pr.mode === "margem" ? "Margem" : "—"}</td>
                       <td className="p-2">
                         {pr.valid ? (
                           <span className="rounded bg-green-200 px-2 py-0.5 text-green-800 dark:bg-green-900/50 dark:text-green-200">
@@ -4832,15 +4890,24 @@ function PrecosPageContent() {
                 {renderPricingColumnHeader(10, "Margem", {
                   align: "right",
                   title:
-                    "(Lucro) ÷ preço Promoção, com Lucro = Vai receber − custo − imposto − taxa extra − desp. fixas",
+                    "(Lucro) ÷ Preço Calculado, com Lucro = Vai receber − custo − imposto − taxa extra − desp. fixas",
                 })}
-                {renderPricingColumnHeader(11, "Promoção", { align: "right", title: "Promoção ML exige desconto ≥ 5%" })}
-                {renderPricingColumnHeader(12, "Vai Receber", {
+                {renderPricingColumnHeader(11, "Preço Calculado", {
                   align: "right",
-                  title: "Valor bruto (Promoção) − taxa ML − frete",
+                  title: "Campanhas ML exigem desconto ≥ 5% em relação ao preço do anúncio",
+                })}
+                {renderPricingColumnHeader(12, "Preço Final", {
+                  align: "right",
+                  title: priceRounding.enabled
+                    ? `Centavos do Preço Calculado ajustados para ${formatTargetCentsLabel(priceRounding.targetCents)} (reais inalterados; Configuração → Preços)`
+                    : "Ative o arredondamento em Configuração → Preços para ver o valor arredondado",
+                })}
+                {renderPricingColumnHeader(13, "Vai Receber", {
+                  align: "right",
+                  title: "Valor bruto (Preço Calculado) − taxa ML − frete",
                 })}
                 {renderPricingColumnHeader(
-                  13,
+                  14,
                   <>
                     Lucro
                     {sortBy === "profit_desc" && " ↓"}
@@ -4848,19 +4915,19 @@ function PrecosPageContent() {
                   </>,
                   { align: "right", sortMode: "profit" }
                 )}
-                {renderPricingColumnHeader(14, "Taxa ML", {
+                {renderPricingColumnHeader(15, "Taxa ML", {
                   align: "right",
                   title:
-                    "Comissão ML em R$ sobre a Promoção. Abaixo: mesmo percentual (taxa ÷ Promoção) ou referência por categoria se ainda não calculou.",
+                    "Comissão ML em R$ sobre o Preço Calculado. Abaixo: mesmo percentual (taxa ÷ Preço Calculado) ou referência por categoria se ainda não calculou.",
                 })}
-                {renderPricingColumnHeader(15, "Frete", { align: "right" })}
-                {renderPricingColumnHeader(16, "Imposto", { align: "right", title: "Imposto sobre o preço" })}
-                {renderPricingColumnHeader(17, "Taxa Extra", { align: "right", title: "Taxa extra sobre o preço" })}
-                {renderPricingColumnHeader(18, "Desp. Fixas", {
+                {renderPricingColumnHeader(16, "Frete", { align: "right" })}
+                {renderPricingColumnHeader(17, "Imposto", { align: "right", title: "Imposto sobre o preço" })}
+                {renderPricingColumnHeader(18, "Taxa Extra", { align: "right", title: "Taxa extra sobre o preço" })}
+                {renderPricingColumnHeader(19, "Desp. Fixas", {
                   align: "right",
                   title: "Despesas fixas em R$ (cadastrado no produto)",
                 })}
-                {renderPricingColumnHeader(19, "Link")}
+                {renderPricingColumnHeader(20, "Link")}
               </tr>
             </thead>
             <tbody key={tableFilterEpoch}>
@@ -5104,14 +5171,40 @@ function PrecosPageContent() {
                             onClick={() => void handleApplyMinDiscount(listing)}
                             disabled={listing.calculating}
                             className="text-xs text-amber-600 underline hover:text-amber-700 disabled:opacity-50 whitespace-nowrap"
-                            title="Clique para ajustar ao desconto mínimo de 5% (promoção = 95% do preço)"
+                            title="Clique para ajustar ao desconto mínimo de 5% (preço calculado = 95% do preço ML)"
                           >
                             Ajustar para 5%
                           </button>
                         )}
                       </div>
                     </td>
-                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
+                    <td className={`p-2 text-right text-sm font-medium ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
+                      {listing.new_price > 0 ? (
+                        (() => {
+                          const finalPrice = applyPriceRounding(listing.new_price, priceRounding);
+                          const rounded =
+                            priceRounding.enabled &&
+                            Math.abs(finalPrice - listing.new_price) >= 0.005;
+                          return (
+                            <span
+                              className={rounded ? "text-indigo-700 dark:text-indigo-300" : "text-fg"}
+                              title={
+                                rounded
+                                  ? `Arredondado de R$ ${formatBRL(listing.new_price)} (Configuração → Preços)`
+                                  : priceRounding.enabled
+                                    ? "Igual ao Preço Calculado"
+                                    : "Arredondamento desativado em Configuração → Preços"
+                              }
+                            >
+                              R$ {formatBRL(finalPrice)}
+                            </span>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-fg-muted">—</span>
+                      )}
+                    </td>
+                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -5122,7 +5215,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : profit != null ? (
@@ -5151,7 +5244,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
                       {listing.calculating ? (
                         <div className="flex flex-col items-end gap-0.5">
                           <span className="text-fg-muted">…</span>
@@ -5172,7 +5265,7 @@ function PrecosPageContent() {
                               title={
                                 mlFeeShareIsReference
                                   ? "Referência por categoria/tipo (última sync)"
-                                  : "Taxa ML ÷ valor da Promoção (último cálculo)"
+                                  : "Taxa ML ÷ Preço Calculado (último cálculo)"
                               }
                             >
                               {mlFeeSharePct.toFixed(1).replace(".", ",")}%
@@ -5189,7 +5282,7 @@ function PrecosPageContent() {
                           {mlFeeSharePct != null && mlFeeShareIsReference ? (
                             <span
                               className="text-xs tabular-nums text-slate-400 dark:text-slate-500"
-                              title="Referência de taxa por categoria/tipo (última sincronização). Calcule ou edite a Promoção para ver o valor em R$."
+                              title="Referência de taxa por categoria/tipo (última sincronização). Calcule ou edite o Preço Calculado para ver o valor em R$."
                             >
                               {mlFeeSharePct.toFixed(1).replace(".", ",")}%
                             </span>
@@ -5197,7 +5290,7 @@ function PrecosPageContent() {
                         </div>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -5216,7 +5309,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -5236,7 +5329,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyBodyStyles[18]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -5256,7 +5349,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyBodyStyles[18]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(19) ? "sticky-col" : ""}`} style={stickyBodyStyles[19]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -5276,7 +5369,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 ${stickyColumns.has(19) ? "sticky-col" : ""}`} style={stickyBodyStyles[19]}>
+                    <td className={`p-2 ${stickyColumns.has(20) ? "sticky-col" : ""}`} style={stickyBodyStyles[20]}>
                       {listing.permalink ? (
                         <a
                           href={listing.permalink}

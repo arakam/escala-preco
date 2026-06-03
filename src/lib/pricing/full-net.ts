@@ -1,7 +1,7 @@
 /**
  * Mesma regra da tela Preços / Promoções.
  *
- * **Valor bruto** = preço usado no cálculo (`result.price`): em Preços é o valor da coluna Promoção;
+ * **Valor bruto** = preço usado no cálculo (`result.price`): em Preços é o valor da coluna Preço Calculado;
  * em Promoções é o preço da promoção.
  *
  * - **vai_receber:** valor bruto − taxa ML − frete (+ subsídio ML, quando informado).

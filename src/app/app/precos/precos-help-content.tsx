@@ -52,7 +52,7 @@ export function PrecosHelpContent() {
         <div>
           <p className="font-semibold text-sky-900 dark:text-sky-50">Leia antes de começar</p>
           <p className="mt-1 text-sky-800/95 dark:text-sky-200/95">
-            Leia antes de começar — evita erros comuns e retrabalho. Simular <strong>Promoção</strong> aqui não altera
+            Leia antes de começar — evita erros comuns e retrabalho. Simular <strong>Preço Calculado</strong> aqui não altera
             o Mercado Livre até você usar <strong>Atualizar preço ML</strong> ou <strong>Criar campanha ML</strong>.
           </p>
         </div>
@@ -70,12 +70,12 @@ export function PrecosHelpContent() {
         </div>
         <p>
           A aba <strong>Calculadora</strong> simula preços de venda em massa para anúncios do Mercado Livre: você
-          ajusta a coluna <strong>Promoção</strong> ou <strong>Margem</strong> e o sistema calcula taxa ML, frete,
+          ajusta a coluna <strong>Preço Calculado</strong> ou <strong>Margem</strong> e o sistema calcula taxa ML, frete,
           impostos, lucro e valor líquido.
         </p>
         <p>
           Ao confirmar um preço (Enter ou sair do campo), o valor é gravado como preço planejado (MLB + SKU) e alimenta
-          campanhas e exportações. Com <strong>Atualizar preço ML</strong>, o valor da <strong>Promoção</strong> passa
+          campanhas e exportações. Com <strong>Atualizar preço ML</strong>, o valor do <strong>Preço Calculado</strong> passa
           a ser o preço do anúncio no Mercado Livre.
         </p>
         <p className="text-slate-600 dark:text-slate-400">
@@ -97,12 +97,12 @@ export function PrecosHelpContent() {
             <strong>funil</strong>, preencha o modal <strong>Filtros</strong> e clique em <strong>Aplicar</strong>.
           </li>
           <li>
-            Na tabela, edite <strong>Promoção</strong> (valor em R$) ou <strong>Margem</strong> (%); pressione Enter ou
+            Na tabela, edite <strong>Preço Calculado</strong> (valor em R$) ou <strong>Margem</strong> (%); pressione Enter ou
             clique fora para recalcular e salvar automaticamente.
           </li>
           <li>
             Para várias linhas, marque a coluna de seleção, abra <strong>Ações em massa</strong> (desconto, margem ou
-            voltar promoção) ou use o menu <strong>Ações</strong> → <strong>Recalcular taxa e frete</strong>.
+            restaurar preço calculado) ou use o menu <strong>Ações</strong> → <strong>Recalcular taxa e frete</strong>.
           </li>
           <li>
             Com linhas selecionadas, clique em <strong>Criar campanha ML</strong> (promoção no ML via campanha do
@@ -132,15 +132,15 @@ export function PrecosHelpContent() {
               e <strong>Recalcular taxa e frete</strong> (taxa ML + frete para as linhas visíveis).
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Criar campanha ML">
-              Cria campanha do vendedor no ML com o preço da <strong>Promoção</strong> salva; exige seleção na tabela e
+              Cria campanha do vendedor no ML com o <strong>Preço Calculado</strong> salvo; exige seleção na tabela e
               desconto ≥ 5% sobre o <strong>Preço</strong>.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Atualizar preço ML">
-              Envia o valor da <strong>Promoção</strong> como preço do anúncio no Mercado Livre; exige linhas
+              Envia o valor do <strong>Preço Calculado</strong> como preço do anúncio no Mercado Livre; exige linhas
               selecionadas e confirmação no modal.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Ações em massa">
-              Desconto, restaurar promoção ao preço ML ou margem líquida nos anúncios marcados na coluna de seleção.
+              Desconto, restaurar preço calculado ao preço ML ou margem líquida nos anúncios marcados na coluna de seleção.
             </HelpFieldRow>
           </div>
         </div>
@@ -174,7 +174,7 @@ export function PrecosHelpContent() {
               independente de quantas linhas por página você escolher.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Desconto (%)">
-              Compara o desconto entre <strong>Preço</strong> ML e <strong>Promoção</strong> (ex.: igual a 0% = sem
+              Compara o desconto entre <strong>Preço</strong> ML e <strong>Preço Calculado</strong> (ex.: igual a 0% = sem
               desconto; menor que 5% = fora do mínimo de campanha ML).
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Sem Promo ML ativa">
@@ -200,12 +200,16 @@ export function PrecosHelpContent() {
             Colunas editáveis da tabela
           </h3>
           <div className="space-y-2">
-            <HelpFieldRow kind="required" name="Promoção">
+            <HelpFieldRow kind="required" name="Preço Calculado">
               Preço bruto simulado (R$, vírgula ou ponto); base para taxas e lucro; gravado ao confirmar o campo.
             </HelpFieldRow>
+            <HelpFieldRow kind="optional" name="Preço Final">
+              Exibição do Preço Calculado com centavos ajustados em <strong>Configuração → Preços</strong> (salvo na
+              sua conta; ex.: 88,93 → 88,90). Os reais não mudam. Não altera o valor salvo.
+            </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Margem">
-              Margem líquida alvo em %; exige <strong>Custo</strong> e tipo de anúncio; ao confirmar, recalcula a{" "}
-              <strong>Promoção</strong>.
+              Margem líquida alvo em %; exige <strong>Custo</strong> e tipo de anúncio; ao confirmar, recalcula o{" "}
+              <strong>Preço Calculado</strong>.
             </HelpFieldRow>
           </div>
         </div>
@@ -235,13 +239,13 @@ export function PrecosHelpContent() {
               <strong>Atualizar competitividade</strong>.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Vai Receber">
-              Promoção − taxa ML − frete (calculado).
+              Preço Calculado − taxa ML − frete (calculado).
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Lucro">
               Vai receber − custo − imposto − taxa extra − desp. fixas.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Taxa ML / Frete / Imposto / Taxa Extra / Desp. Fixas">
-              Derivados da <strong>Promoção</strong> e do cadastro em <strong>Produtos</strong>.
+              Derivados do <strong>Preço Calculado</strong> e do cadastro em <strong>Produtos</strong>.
             </HelpFieldRow>
           </div>
         </div>
@@ -252,7 +256,7 @@ export function PrecosHelpContent() {
           </h3>
           <div className="space-y-2">
             <HelpFieldRow kind="optional" name="Importar CSV">
-              Atualiza <strong>Promoção</strong> ou <strong>Margem</strong> em lote por MLB; confirme em{" "}
+              Atualiza <strong>Preço Calculado</strong> ou <strong>Margem</strong> em lote por MLB; confirme em{" "}
               <strong>Confirmar importação</strong> após o preview.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Exportar CSV">

@@ -21,7 +21,7 @@ type ItemApplyResult =
 /**
  * POST /api/mercadolivre/update-item-prices
  * Body: { items: [{ item_id, variation_id?, promotion_price }] }
- * Envia o preço da coluna Promoção para o Mercado Livre (PUT /items/{id}).
+ * Envia o preço da coluna Preço Calculado para o Mercado Livre (PUT /items/{id}).
  */
 export async function POST(req: NextRequest) {
   const supabase = await createClient();

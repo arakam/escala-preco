@@ -15,6 +15,13 @@ import {
   readCalcularFretePreference,
   writeCalcularFretePreference,
 } from "@/lib/pricing/mercado-lider-freight";
+import {
+  formatTargetCentsLabel,
+  loadPriceRoundingPreference,
+  readPriceRoundingPreference,
+  savePriceRoundingPreference,
+  type PriceRoundingConfig,
+} from "@/lib/pricing/price-rounding";
 
 const IS_NEXT_DEV = process.env.NODE_ENV === "development";
 const STORAGE_KEY_ACCOUNT = "escalapreco_dashboard_account_id";
@@ -106,20 +113,6 @@ interface ReputationData {
   user_product_seller?: boolean;
 }
 
-interface WebhookNotificationRow {
-  id: string;
-  created_at: string;
-  account_id: string;
-  ml_user_id: number;
-  topic: string;
-  resource: string | null;
-  application_id: string | null;
-  attempts: number | null;
-  ml_sent_at: string | null;
-  actions: unknown;
-  notification_id: string | null;
-}
-
 function getReputationColor(levelId: string | null): { bg: string; text: string; label: string } {
   if (!levelId) return { bg: "bg-gray-100", text: "text-gray-600", label: "Sem reputação" };
   
@@ -159,15 +152,12 @@ function ConfiguracaoContent() {
   const [shippingLoading, setShippingLoading] = useState(true);
   const [reputationLoading, setReputationLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<
-    "ml" | "sincronizacao" | "notificacoes" | "comunicacoes" | "frete" | "aparencia"
+    "ml" | "sincronizacao" | "comunicacoes" | "precos" | "frete" | "aparencia"
   >("ml");
   const [communications, setCommunications] = useState<MLCommunicationNoticeRow[]>([]);
   const [communicationsLoading, setCommunicationsLoading] = useState(false);
   const [communicationsError, setCommunicationsError] = useState<string | null>(null);
   const [communicationsUnread, setCommunicationsUnread] = useState(0);
-  const [webhookNotifications, setWebhookNotifications] = useState<WebhookNotificationRow[]>([]);
-  const [webhookNotificationsLoading, setWebhookNotificationsLoading] = useState(false);
-  const [webhookNotificationsError, setWebhookNotificationsError] = useState<string | null>(null);
   const [syncSettings, setSyncSettings] = useState<SyncSettingsAccount[]>([]);
   const [syncSettingsLoading, setSyncSettingsLoading] = useState(false);
   const [syncSettingsError, setSyncSettingsError] = useState<string | null>(null);
@@ -178,6 +168,11 @@ function ConfiguracaoContent() {
   const [devResetting, setDevResetting] = useState(false);
   const [calcularFretePrecos, setCalcularFretePrecos] = useState(false);
   const [calcularFreteHydrated, setCalcularFreteHydrated] = useState(false);
+  const [priceRounding, setPriceRounding] = useState<PriceRoundingConfig>(() =>
+    readPriceRoundingPreference()
+  );
+  const [priceRoundingHydrated, setPriceRoundingHydrated] = useState(false);
+  const [priceRoundingSaving, setPriceRoundingSaving] = useState(false);
   const { theme, setTheme } = useTheme();
   const searchParams = useSearchParams();
 
@@ -186,6 +181,18 @@ function ConfiguracaoContent() {
   useEffect(() => {
     setCalcularFretePrecos(readCalcularFretePreference());
     setCalcularFreteHydrated(true);
+    void loadPriceRoundingPreference().then((config) => {
+      setPriceRounding(config);
+      setPriceRoundingHydrated(true);
+    });
+  }, []);
+
+  const persistPriceRounding = useCallback(async (next: PriceRoundingConfig) => {
+    setPriceRounding(next);
+    setPriceRoundingSaving(true);
+    const saved = await savePriceRoundingPreference(next);
+    if (saved) setPriceRounding(saved);
+    setPriceRoundingSaving(false);
   }, []);
 
   const loadAccounts = useCallback(async () => {
@@ -339,23 +346,6 @@ function ConfiguracaoContent() {
     setCommunicationsUnread(0);
   }
 
-  const loadWebhookNotifications = useCallback(async () => {
-    setWebhookNotificationsLoading(true);
-    setWebhookNotificationsError(null);
-    try {
-      const res = await fetch("/api/mercadolivre/webhook-notifications");
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setWebhookNotificationsError((data as { error?: string }).error || "Falha ao carregar notificações.");
-        setWebhookNotifications([]);
-        return;
-      }
-      setWebhookNotifications((data as { notifications?: WebhookNotificationRow[] }).notifications ?? []);
-    } finally {
-      setWebhookNotificationsLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     loadAccounts();
     loadShippingCosts();
@@ -381,12 +371,6 @@ function ConfiguracaoContent() {
   }, [activeTab, loadSyncSettings]);
 
   useEffect(() => {
-    if (activeTab === "notificacoes") {
-      void loadWebhookNotifications();
-    }
-  }, [activeTab, loadWebhookNotifications]);
-
-  useEffect(() => {
     if (activeTab === "comunicacoes") {
       void loadCommunications();
     }
@@ -396,6 +380,8 @@ function ConfiguracaoContent() {
     const tab = searchParams.get("tab");
     if (tab === "comunicacoes") {
       setActiveTab("comunicacoes");
+    } else if (tab === "precos") {
+      setActiveTab("precos");
     }
   }, [searchParams]);
 
@@ -498,14 +484,14 @@ function ConfiguracaoContent() {
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("notificacoes")}
+          onClick={() => setActiveTab("precos")}
           className={`rounded-t-md px-3 py-2 text-sm font-medium ${
-            activeTab === "notificacoes"
+            activeTab === "precos"
               ? "border border-b-white border-gray-200 bg-white text-blue-600 dark:border-slate-700 dark:border-b-slate-900 dark:bg-slate-900 dark:text-blue-400"
               : "text-gray-600 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400"
           }`}
         >
-          Webhooks
+          Preços
         </button>
         <button
           type="button"
@@ -967,116 +953,68 @@ function ConfiguracaoContent() {
         </section>
       )}
 
-      {activeTab === "notificacoes" && (
+      {activeTab === "precos" && (
         <section className="mb-8">
-          <h2 className="mb-3 text-lg font-medium text-fg-strong">Notificações do Mercado Livre</h2>
-          <p className="mb-2 text-gray-600 dark:text-slate-300">
-            Eventos recebidos via webhook nas últimas 24 horas (metadados; histórico completo no servidor é mantido por
-            7 dias). O Mercado Livre envia um POST para a URL de callback configurada no seu aplicativo; apenas
-            notificações cujo{" "}
-            <code className="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-slate-800">user_id</code> corresponde a
-            uma conta conectada aqui aparecem na lista.
-          </p>
-          <p className="mb-4 text-sm text-gray-500 dark:text-slate-400">
-            Callback em produção:{" "}
-            <code className="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-slate-800">
-              https://app.escalapreco.com.br/wh/api
-            </code>
-            . Documentação:{" "}
-            <a
-              href="https://developers.mercadolivre.com.br/pt_br/produto-receba-notificacoes"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline dark:text-blue-400"
-            >
-              Receba notificações
-            </a>
-            .
+          <h2 className="mb-3 text-lg font-medium text-fg-strong">Preços</h2>
+          <p className="mb-4 text-gray-600 dark:text-slate-300">
+            Opções da calculadora de preços exibidas na tela <strong>Preços</strong>.
           </p>
 
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void loadWebhookNotifications()}
-              disabled={webhookNotificationsLoading}
-              className="btn btn-secondary btn-sm disabled:opacity-60"
-            >
-              {webhookNotificationsLoading ? "Atualizando…" : "Atualizar lista"}
-            </button>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-600 dark:bg-slate-800/50">
+            <h3 className="mb-2 text-sm font-semibold text-fg-strong">Arredondamento do Preço Final</h3>
+            <p className="mb-3 text-sm text-gray-600 dark:text-slate-300">
+              A coluna <strong>Preço Final</strong> mostra o <strong>Preço Calculado</strong> com os centavos
+              ajustados para o valor configurado — os reais não mudam (somente exibição; o valor salvo continua sendo
+              o Preço Calculado).
+            </p>
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-gray-700 dark:text-slate-200">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                checked={priceRoundingHydrated ? priceRounding.enabled : false}
+                disabled={!priceRoundingHydrated || priceRoundingSaving}
+                onChange={(e) => {
+                  void persistPriceRounding({ ...priceRounding, enabled: e.target.checked });
+                }}
+              />
+              <span>
+                <strong>Ativar arredondamento</strong> na coluna Preço Final
+              </span>
+            </label>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <label htmlFor="price-rounding-cents" className="text-sm text-gray-700 dark:text-slate-200">
+                Centavos finais:
+              </label>
+              <select
+                id="price-rounding-cents"
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
+                value={priceRounding.targetCents}
+                disabled={!priceRoundingHydrated || !priceRounding.enabled || priceRoundingSaving}
+                onChange={(e) => {
+                  void persistPriceRounding({
+                    ...priceRounding,
+                    targetCents: Number(e.target.value),
+                  });
+                }}
+              >
+                {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99].map((c) => (
+                  <option key={c} value={c}>
+                    {formatTargetCentsLabel(c)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {priceRoundingHydrated && priceRounding.enabled && (
+              <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
+                Exemplo: 88,93 → 88{formatTargetCentsLabel(priceRounding.targetCents)} · 102,53 → 102
+                {formatTargetCentsLabel(priceRounding.targetCents)}
+              </p>
+            )}
+            <p className="mt-2 text-xs text-gray-500 dark:text-slate-400">
+              Salvo na sua conta — vale em qualquer dispositivo onde você entrar no EscalaPreço.
+              {priceRoundingSaving ? " Salvando…" : null}
+            </p>
           </div>
-
-          {webhookNotificationsError && (
-            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/30">
-              <p className="text-sm text-amber-800 dark:text-amber-200">{webhookNotificationsError}</p>
-              <p className="mt-2 text-xs text-amber-700 dark:text-amber-300/90">
-                Se acabou de criar a tabela, execute a migration{" "}
-                <code className="rounded bg-amber-100/80 px-1 dark:bg-amber-900/50">018_ml_webhook_notifications.sql</code>{" "}
-                no Supabase.
-              </p>
-            </div>
-          )}
-
-          {webhookNotificationsLoading && webhookNotifications.length === 0 && !webhookNotificationsError ? (
-            <p className="text-gray-500 dark:text-slate-400">Carregando…</p>
-          ) : webhookNotifications.length === 0 ? (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-6 text-center dark:border-slate-700 dark:bg-slate-800/80">
-              <p className="text-sm text-gray-600 dark:text-slate-300">
-                Nenhuma notificação nas últimas 24 horas para suas contas conectadas.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
-              <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-slate-700">
-                <thead className="bg-gray-50 dark:bg-slate-800">
-                  <tr>
-                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Recebido</th>
-                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Tópico</th>
-                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Recurso</th>
-                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">Conta ML</th>
-                    <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-fg-strong">ID / tentativas</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
-                  {webhookNotifications.map((n) => {
-                    const acc = accounts.find((a) => a.id === n.account_id);
-                    const accLabel = acc?.ml_nickname || `ID ${n.ml_user_id}`;
-                    return (
-                      <tr key={n.id} className="align-top hover:bg-gray-50 dark:hover:bg-slate-800">
-                        <td className="whitespace-nowrap px-3 py-2 text-gray-700 dark:text-slate-200">
-                          {new Date(n.created_at).toLocaleString("pt-BR", {
-                            timeZone: "America/Sao_Paulo",
-                            dateStyle: "short",
-                            timeStyle: "medium",
-                          })}
-                        </td>
-                        <td className="px-3 py-2 font-medium text-fg-strong">{n.topic}</td>
-                        <td className="max-w-[14rem] truncate px-3 py-2 text-gray-600 dark:text-slate-300" title={n.resource ?? ""}>
-                          {n.resource ?? "—"}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2 text-gray-700 dark:text-slate-200">{accLabel}</td>
-                        <td className="px-3 py-2 text-xs text-gray-600 dark:text-slate-300">
-                          <div>{n.notification_id ?? "—"}</div>
-                          {n.attempts != null && (
-                            <div className="text-gray-500 dark:text-slate-400">tentativas: {n.attempts}</div>
-                          )}
-                          {n.ml_sent_at && (
-                            <div className="text-gray-500 dark:text-slate-400">
-                              enviado ML:{" "}
-                              {new Date(n.ml_sent_at).toLocaleString("pt-BR", {
-                                timeZone: "America/Sao_Paulo",
-                                dateStyle: "short",
-                                timeStyle: "short",
-                              })}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
         </section>
       )}
 

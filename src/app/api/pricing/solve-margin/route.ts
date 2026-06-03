@@ -36,7 +36,7 @@ interface SolveMarginBody {
   is_mercado_lider?: boolean;
   /** Preço atual no ML (coluna Preço) — melhora o intervalo da busca linear */
   current_price?: number | null;
-  /** Promoção / preço planejado atual — melhora o intervalo da busca linear */
+  /** Preço calculado / preço planejado atual — melhora o intervalo da busca linear */
   planned_price?: number | null;
   /** Se o cache ainda não tem referência, usamos este preço para um listing_prices único e persistimos % */
   seed_price?: number | null;

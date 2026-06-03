@@ -57,7 +57,7 @@ interface AtacadoRow {
   sku: string | null;
   title: string | null;
   current_price: number | null;
-  /** Preço promoção / calculadora (planned_prices) */
+  /** Preço calculado / calculadora (planned_prices) */
   planned_price?: number | null;
   listing_type_id?: string | null;
   category_id?: string | null;
@@ -222,7 +222,7 @@ function bulkBasePrice(r: AtacadoRow, base: "current" | "promotion"): number | n
   return n > 0 ? n : null;
 }
 
-/** Valor usado nas condições (promoção = planned_prices; atual = ML). */
+/** Valor usado nas condições (preço calculado = planned_prices; atual = ML). */
 function bulkCompareFieldValue(r: AtacadoRow, field: "promotion" | "current"): number | null {
   return bulkBasePrice(r, field);
 }
@@ -360,7 +360,7 @@ function AtacadoHelpContent() {
           </li>
           <li>
             Edite <strong>Qt. Atac. 1–5</strong> e <strong>R$ Atac. 1–5</strong> na tabela (cada quantidade preenchida
-            deve ser maior que a da coluna à esquerda). Use <strong>Preço R$</strong> e <strong>Promoção R$</strong> só
+            deve ser maior que a da coluna à esquerda). Use <strong>Preço R$</strong> e <strong>Preço Calculado R$</strong> só
             como referência.
           </li>
           <li>
@@ -473,7 +473,7 @@ function AtacadoHelpContent() {
             <HelpFieldRow kind="optional" name="Preço R$">
               Preço atual no Mercado Livre (somente leitura).
             </HelpFieldRow>
-            <HelpFieldRow kind="optional" name="Promoção R$">
+            <HelpFieldRow kind="optional" name="Preço Calculado R$">
               Preço planejado na calculadora (<strong>Preços</strong>); referência para descontos em massa.
             </HelpFieldRow>
             <HelpFieldRow kind="optional" name="Status">
@@ -1332,14 +1332,14 @@ function AtacadoPageContent() {
       setMessage({
         type: "error",
         text:
-          "Nenhuma linha foi atualizada: falta preço atual ou promoção onde a regra aplicável exige (incluindo a base do desconto após critérios condicionais).",
+          "Nenhuma linha foi atualizada: falta preço atual ou preço calculado onde a regra aplicável exige (incluindo a base do desconto após critérios condicionais).",
       });
       return false;
     }
     const parts: string[] = [];
     const defN = matchCount.get("default") ?? 0;
     if (bulkDiscountConditionals.length === 0) {
-      const baseLabel = bulkPriceBase === "current" ? "preço atual (ML)" : "promoção (calculadora)";
+      const baseLabel = bulkPriceBase === "current" ? "preço atual (ML)" : "preço calculado (calculadora)";
       setMessage({
         type: "success",
         text:
@@ -2450,7 +2450,7 @@ function AtacadoPageContent() {
                     onChange={() => setBulkPriceBase("promotion")}
                     className="text-indigo-600"
                   />
-                  Promoção
+                  Preço calculado
                 </label>
               </div>
             </div>
@@ -2489,7 +2489,7 @@ function AtacadoPageContent() {
                         }
                         className="max-w-[9rem] rounded border border-indigo-200 bg-white px-1.5 py-1 text-[10px] dark:border-indigo-700 dark:bg-slate-900 dark:text-slate-100"
                       >
-                        <option value="promotion">promoção (calculadora)</option>
+                        <option value="promotion">preço calculado (calculadora)</option>
                         <option value="current">preço atual (ML)</option>
                       </select>
                       <select
@@ -2542,7 +2542,7 @@ function AtacadoPageContent() {
                           onChange={() => updateBulkDiscountConditional(rule.id, { discountBase: "promotion" })}
                           className="text-indigo-600"
                         />
-                        promoção
+                        preço calculado
                       </label>
                       <button
                         type="button"
@@ -2661,7 +2661,7 @@ function AtacadoPageContent() {
                     <th className="p-2 font-medium">sku</th>
                     <th className="max-w-[120px] truncate p-2 font-medium">Título</th>
                     <th className="p-2 font-medium">Preço atual R$</th>
-                    <th className="p-2 font-medium">Promoção R$</th>
+                    <th className="p-2 font-medium">Preço Calculado R$</th>
                     <th className="p-2 font-medium">Atacado 1–5</th>
                     <th className="p-2 font-medium">Status</th>
                   </tr>
@@ -2861,7 +2861,7 @@ function AtacadoPageContent() {
                       "SKU do Mercado Livre (SELLER_SKU) ou do produto vinculado em Anúncios. Variações podem ter SKU próprio no ML ou no vínculo.",
                   })}
                   {renderAtacadoColumnHeader(3, "Preço R$", "tabular-nums")}
-                  {renderAtacadoColumnHeader(4, "Promoção R$", "tabular-nums", {
+                  {renderAtacadoColumnHeader(4, "Preço Calculado R$", "tabular-nums", {
                     title: "Valor salvo na calculadora (Preços / planned_prices)",
                   })}
                   {[1, 2, 3, 4, 5].map((n) => {

@@ -1,4 +1,4 @@
-/** PMA cadastrado no produto (> 0) usado como piso da promoção na tela de preços. */
+/** PMA cadastrado no produto (> 0) usado como piso do preço calculado na tela de preços. */
 export function listingPmaFloor(pma: number | null | undefined): number | null {
   if (pma == null || !Number.isFinite(Number(pma))) return null;
   const n = Number(pma);
@@ -33,13 +33,13 @@ export function formatPmaClampSingleMessage(
   pmaFloor: number
 ): string {
   const label = listing.title?.trim() || listing.item_id;
-  return `Promoção ajustada ao PMA (R$ ${formatPmaFloorBrl(pmaFloor)}) em ${label}.`;
+  return `Preço calculado ajustado ao PMA (R$ ${formatPmaFloorBrl(pmaFloor)}) em ${label}.`;
 }
 
 export function formatPmaClampBulkSuffix(clampedCount: number): string {
   if (clampedCount <= 0) return "";
   if (clampedCount === 1) {
-    return " 1 anúncio teve a promoção ajustada ao PMA cadastrado no produto.";
+    return " 1 anúncio teve o preço calculado ajustado ao PMA cadastrado no produto.";
   }
-  return ` ${clampedCount} anúncios tiveram a promoção ajustada ao PMA cadastrado no produto.`;
+  return ` ${clampedCount} anúncios tiveram o preço calculado ajustado ao PMA cadastrado no produto.`;
 }

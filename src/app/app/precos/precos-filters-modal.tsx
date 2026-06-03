@@ -153,7 +153,7 @@ export function PrecosFiltersModal({
           <div>
             <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">Filtros</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Busca, anúncio, tags, métricas e promoção — use as seções abaixo.
+              Busca, anúncio, tags, métricas e preço calculado — use as seções abaixo.
             </p>
           </div>
           <button
@@ -480,11 +480,11 @@ export function PrecosFiltersModal({
             </section>
 
             <section>
-              <p className="modal-panel-filters-section-title">Promoção</p>
+              <p className="modal-panel-filters-section-title">Preço calculado</p>
               <div className="space-y-3">
                 <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-600 dark:bg-slate-800/30">
                   <p className="mb-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                    Desconto (% entre Preço ML e Promoção)
+                    Desconto (% entre Preço ML e Preço Calculado)
                   </p>
                   <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
                     Ex.: sem desconto = igual a <strong>0</strong>; abaixo do mínimo de campanha ML = menor que{" "}

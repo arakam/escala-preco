@@ -1,11 +1,11 @@
 /**
- * Parser de CSV para importação de preços planejados (Promoção) ou margem alvo na Calculadora de Preços.
+ * Parser de CSV para importação de preços planejados (Preço Calculado) ou margem alvo na Calculadora de Preços.
  * Referência principal: coluna MLB (item_id). Aceita o modelo mínimo ou o CSV exportado pela própria tela.
  */
 
 const SEP = ";";
 
-export const PRECOS_IMPORT_CSV_TEMPLATE_HEADER = "MLB;Variacao;Promocao;Margem %";
+export const PRECOS_IMPORT_CSV_TEMPLATE_HEADER = "MLB;Variacao;Preco Calculado;Margem %";
 
 export type PrecosImportUpdateMode = "promocao" | "margem";
 
@@ -112,12 +112,17 @@ function resolveColumnMap(headers: string[]): { map: ColumnMap | null; error?: s
     return { map: null, error: "Coluna MLB (ou item_id) não encontrada no cabeçalho." };
   }
 
-  const promocao = findIndex(["promocao", "promoção"]);
+  const promocao = findIndex([
+    "preco calculado",
+    "preço calculado",
+    "promocao",
+    "promoção",
+  ]);
   const margem = findIndex(["margem %", "margem", "margem_percent", "margem percentual"]);
   if (promocao == null && margem == null) {
     return {
       map: null,
-      error: "Informe ao menos uma coluna Promocao ou Margem % no cabeçalho.",
+      error: "Informe ao menos uma coluna Preço Calculado (ou Promocao) ou Margem % no cabeçalho.",
     };
   }
 
@@ -244,8 +249,12 @@ export function parsePrecosImportCsv(buffer: ArrayBuffer): PrecosImportParseResu
     const hasMargem = margemRaw !== "" && Number.isFinite(margem);
 
     if (promocaoRaw !== "" && !hasPromocao) {
-      pushError({ row: rowNum, field: "Promocao", message: "Promocao inválida (use vírgula para decimais, ex: 99,90)" });
-      preview.error = "Promocao inválida";
+      pushError({
+        row: rowNum,
+        field: "Preço Calculado",
+        message: "Preço Calculado inválido (use vírgula para decimais, ex: 99,90)",
+      });
+      preview.error = "Preço Calculado inválido";
       if (previewRows.length < PREVIEW_MAX) previewRows.push(preview);
       continue;
     }
@@ -260,10 +269,10 @@ export function parsePrecosImportCsv(buffer: ArrayBuffer): PrecosImportParseResu
     if (!hasPromocao && !hasMargem) {
       pushError({
         row: rowNum,
-        field: "Promocao/Margem %",
-        message: "Informe Promocao ou Margem % para atualizar o anúncio",
+        field: "Preço Calculado/Margem %",
+        message: "Informe Preço Calculado ou Margem % para atualizar o anúncio",
       });
-      preview.error = "Promocao ou Margem % obrigatório";
+      preview.error = "Preço Calculado ou Margem % obrigatório";
       if (previewRows.length < PREVIEW_MAX) previewRows.push(preview);
       continue;
     }

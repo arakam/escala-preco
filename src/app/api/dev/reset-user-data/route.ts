@@ -126,6 +126,7 @@ export async function POST() {
 
   await supabase.from("operational_costs").delete().eq("user_id", user.id);
   await supabase.from("tax_parameters").delete().eq("user_id", user.id);
+  await supabase.from("user_preferences").delete().eq("user_id", user.id);
 
   return NextResponse.json({ ok: true });
 }

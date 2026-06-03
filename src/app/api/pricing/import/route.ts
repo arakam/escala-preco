@@ -7,7 +7,7 @@ export const maxDuration = 300;
 /**
  * POST /api/pricing/import
  * multipart/form-data: file (CSV)
- * Parseia com delimitador ";", identifica colunas pelo cabeçalho (MLB, Promocao, Margem %). NÃO salva.
+ * Parseia com delimitador ";", identifica colunas pelo cabeçalho (MLB, Preço Calculado, Margem %). NÃO salva.
  */
 export async function POST(request: NextRequest) {
   const auth = await getRouteAuth();
