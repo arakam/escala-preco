@@ -373,10 +373,7 @@ const PRECOS_EXPORT_CSV_HEADERS = [
   "Titulo",
   "SKU",
   "Vendas 30d",
-  "Custo",
-  "Promo ML",
   "Preco ML",
-  "Competitividade",
   "Margem %",
   "Preco Calculado",
   "Preco Final",
@@ -386,9 +383,12 @@ const PRECOS_EXPORT_CSV_HEADERS = [
   "Taxa ML",
   "Taxa ML %",
   "Frete",
+  "Custo",
   "Imposto",
   "Taxa Extra",
   "Desp. Fixas",
+  "Promo ML",
+  "Competitividade",
   "Link",
 ] as const;
 
@@ -433,10 +433,7 @@ function buildPrecosExportCsv(
         listing.title ?? "",
         listing.sku ?? "",
         ordersData[listing.item_id] ?? "",
-        csvExportDecimal(listing.cost_price),
-        promoMl,
         csvExportDecimal(listing.current_price),
-        compLabel,
         csvExportDecimal(profitPercent, 1),
         csvExportDecimal(listing.new_price),
         csvExportDecimal(applyPriceRounding(listing.new_price, priceRounding)),
@@ -446,9 +443,12 @@ function buildPrecosExportCsv(
         csvExportDecimal(listing.calculated?.fee),
         csvExportDecimal(mlFeeSharePct, 1),
         csvExportDecimal(listing.calculated?.shipping_cost),
+        csvExportDecimal(listing.cost_price),
         csvExportDecimal(listing.calculated?.tax_amount),
         csvExportDecimal(listing.calculated?.extra_fee_amount),
         csvExportDecimal(listing.calculated?.fixed_expenses_amount),
+        promoMl,
+        compLabel,
         listing.permalink ?? "",
       ]
         .map(escapeCsvField)
@@ -482,10 +482,7 @@ const PRICING_COLUMNS: { label: string; minWidth: number }[] = [
   /** SKU costuma ser longo — evita truncar com col estreita */
   { label: "SKU", minWidth: 300 },
   { label: "Vendas 30d", minWidth: 88 },
-  { label: "Custo", minWidth: 80 },
-  { label: "Promo ML", minWidth: 120 },
   { label: "Preço", minWidth: 90 },
-  { label: "Competitividade", minWidth: 110 },
   { label: "Margem", minWidth: 76 },
   { label: "Preço Calculado", minWidth: 120 },
   { label: "Preço Final", minWidth: 100 },
@@ -494,13 +491,17 @@ const PRICING_COLUMNS: { label: string; minWidth: number }[] = [
   /** Valor R$ + % sobre Preço Calculado (ou referência), estilo Lucro */
   { label: "Taxa ML", minWidth: 82 },
   { label: "Frete", minWidth: 72 },
+  { label: "Custo", minWidth: 80 },
   { label: "Imposto", minWidth: 80 },
   { label: "Taxa Extra", minWidth: 88 },
   { label: "Desp. Fixas", minWidth: 88 },
+  { label: "Promo ML", minWidth: 120 },
+  { label: "Competitividade", minWidth: 110 },
   { label: "Link", minWidth: 88 },
 ];
 
-const PRICOS_STICKY_STORAGE_KEY = "escalapreco.precos.pinnedColumns.v5";
+const PRICOS_STICKY_STORAGE_KEY = "escalapreco.precos.pinnedColumns.v6";
+const PRICOS_STICKY_V5_KEY = "escalapreco.precos.pinnedColumns.v5";
 const PRICOS_STICKY_V4_KEY = "escalapreco.precos.pinnedColumns.v4";
 /** Layout anterior: Promo ML no índice 8, Preço no 7 — ver `swapPinnedPromoAndPriceColumnIndices`. */
 const PRICOS_STICKY_V3_KEY = "escalapreco.precos.pinnedColumns.v3";
@@ -518,6 +519,40 @@ function bumpStickyIndicesAfterPromoMlColumn(nums: number[]): number[] {
 /** v4 → v5: coluna Preço Final no índice 12; índices fixos antigos ≥ 12 avançam 1. */
 function bumpStickyIndicesAfterPrecoFinalColumn(nums: number[]): number[] {
   return nums.map((c) => (c >= 12 ? c + 1 : c));
+}
+
+/** v5 → v6: Custo após Frete; Promo ML e Competitividade após Desp. Fixas. */
+const STICKY_V5_TO_V6: Record<number, number> = {
+  0: 0,
+  1: 1,
+  2: 2,
+  3: 3,
+  4: 4,
+  5: 5,
+  6: 14,
+  7: 18,
+  8: 6,
+  9: 19,
+  10: 7,
+  11: 8,
+  12: 9,
+  13: 10,
+  14: 11,
+  15: 12,
+  16: 13,
+  17: 15,
+  18: 16,
+  19: 17,
+  20: 20,
+};
+
+function migrateStickyV5ToV6(nums: number[]): number[] {
+  const out = new Set<number>();
+  for (const c of nums) {
+    const mapped = STICKY_V5_TO_V6[c];
+    if (mapped != null) out.add(mapped);
+  }
+  return Array.from(out).sort((a, b) => a - b);
 }
 
 /** v3 → v4: Promo ML passou a ficar à esquerda de Preço (trocam de posição nos índices 7 e 8). */
@@ -559,6 +594,29 @@ function readPrecosStickyInitial(): Set<number> {
       );
       return new Set(nums);
     }
+    const v5raw = localStorage.getItem(PRICOS_STICKY_V5_KEY);
+    if (v5raw) {
+      const arr = JSON.parse(v5raw) as unknown;
+      if (Array.isArray(arr)) {
+        const n = PRICING_COLUMNS.length;
+        const nums = arr.filter(
+          (x): x is number =>
+            typeof x === "number" && Number.isInteger(x) && x >= 0 && x < n
+        );
+        const migrated = migrateStickyV5ToV6(nums).filter((x) => x >= 0 && x < n);
+        const set = new Set(migrated);
+        try {
+          localStorage.setItem(
+            PRICOS_STICKY_STORAGE_KEY,
+            JSON.stringify(Array.from(set).sort((a, b) => a - b))
+          );
+          localStorage.removeItem(PRICOS_STICKY_V5_KEY);
+        } catch {
+          // ignore
+        }
+        return set;
+      }
+    }
     const v4raw = localStorage.getItem(PRICOS_STICKY_V4_KEY);
     if (v4raw) {
       const arr = JSON.parse(v4raw) as unknown;
@@ -569,7 +627,9 @@ function readPrecosStickyInitial(): Set<number> {
           (x): x is number =>
             typeof x === "number" && Number.isInteger(x) && x >= 0 && x < oldColCount
         );
-        const migrated = bumpStickyIndicesAfterPrecoFinalColumn(nums).filter((x) => x >= 0 && x < n);
+        const migrated = migrateStickyV5ToV6(bumpStickyIndicesAfterPrecoFinalColumn(nums)).filter(
+          (x) => x >= 0 && x < n
+        );
         const set = new Set(migrated);
         try {
           localStorage.setItem(
@@ -592,7 +652,9 @@ function readPrecosStickyInitial(): Set<number> {
           (x): x is number =>
             typeof x === "number" && Number.isInteger(x) && x >= 0 && x < n
         );
-        const migrated = swapPinnedPromoAndPriceColumnIndices(nums).filter((x) => x >= 0 && x < n);
+        const migrated = migrateStickyV5ToV6(swapPinnedPromoAndPriceColumnIndices(nums)).filter(
+          (x) => x >= 0 && x < n
+        );
         const set = new Set(migrated);
         try {
           localStorage.setItem(
@@ -618,8 +680,8 @@ function readPrecosStickyInitial(): Set<number> {
             x >= 0 &&
             x < PRICING_TABLE_COL_COUNT_BEFORE_PROMO_ML
         );
-        const migrated = swapPinnedPromoAndPriceColumnIndices(
-          bumpStickyIndicesAfterPromoMlColumn(nums)
+        const migrated = migrateStickyV5ToV6(
+          swapPinnedPromoAndPriceColumnIndices(bumpStickyIndicesAfterPromoMlColumn(nums))
         ).filter((x) => x >= 0 && x < n);
         const set = new Set(migrated);
         try {
@@ -641,8 +703,10 @@ function readPrecosStickyInitial(): Set<number> {
         Array.isArray(arr) && arr.every((x) => typeof x === "number")
           ? migratePricingStickyV1ToV2(arr as number[])
           : new Set([0, 1, 2, 3, 4]);
-      const withPromoCol = swapPinnedPromoAndPriceColumnIndices(
-        bumpStickyIndicesAfterPromoMlColumn(Array.from(migratedV2))
+      const withPromoCol = migrateStickyV5ToV6(
+        swapPinnedPromoAndPriceColumnIndices(
+          bumpStickyIndicesAfterPromoMlColumn(Array.from(migratedV2))
+        )
       ).filter((x) => x >= 0 && x < PRICING_COLUMNS.length);
       const set = new Set(withPromoCol);
       try {
@@ -4868,46 +4932,28 @@ function PrecosPageContent() {
                     title: "Pedidos pagos nos últimos 30 dias. Ordene pelo menu ▾.",
                   }
                 )}
-                {renderPricingColumnHeader(
-                  6,
-                  <>
-                    Custo
-                    {sortBy === "cost_desc" && " ↓"}
-                    {sortBy === "cost_asc" && " ↑"}
-                  </>,
-                  { align: "right", sortMode: "cost" }
-                )}
-                {renderPricingColumnHeader(7, "Promo ML", {
-                  align: "right",
-                  title:
-                    "Campanhas/promoções ativas (cache de Promoções, sem chamada à API do ML no refresh de Preços). Passe o mouse no badge para detalhes.",
-                })}
-                {renderPricingColumnHeader(8, "Preço", { align: "right" })}
-                {renderPricingColumnHeader(9, "Competitividade", {
-                  align: "right",
-                  title: "Competitividade no Mercado Livre (sugestão / faixa de preço)",
-                })}
-                {renderPricingColumnHeader(10, "Margem", {
+                {renderPricingColumnHeader(6, "Preço", { align: "right" })}
+                {renderPricingColumnHeader(7, "Margem", {
                   align: "right",
                   title:
                     "(Lucro) ÷ Preço Calculado, com Lucro = Vai receber − custo − imposto − taxa extra − desp. fixas",
                 })}
-                {renderPricingColumnHeader(11, "Preço Calculado", {
+                {renderPricingColumnHeader(8, "Preço Calculado", {
                   align: "right",
                   title: "Campanhas ML exigem desconto ≥ 5% em relação ao preço do anúncio",
                 })}
-                {renderPricingColumnHeader(12, "Preço Final", {
+                {renderPricingColumnHeader(9, "Preço Final", {
                   align: "right",
                   title: priceRounding.enabled
                     ? `Centavos do Preço Calculado ajustados para ${formatTargetCentsLabel(priceRounding.targetCents)} (reais inalterados; Configuração → Preços)`
                     : "Ative o arredondamento em Configuração → Preços para ver o valor arredondado",
                 })}
-                {renderPricingColumnHeader(13, "Vai Receber", {
+                {renderPricingColumnHeader(10, "Vai Receber", {
                   align: "right",
                   title: "Valor bruto (Preço Calculado) − taxa ML − frete",
                 })}
                 {renderPricingColumnHeader(
-                  14,
+                  11,
                   <>
                     Lucro
                     {sortBy === "profit_desc" && " ↓"}
@@ -4915,17 +4961,35 @@ function PrecosPageContent() {
                   </>,
                   { align: "right", sortMode: "profit" }
                 )}
-                {renderPricingColumnHeader(15, "Taxa ML", {
+                {renderPricingColumnHeader(12, "Taxa ML", {
                   align: "right",
                   title:
                     "Comissão ML em R$ sobre o Preço Calculado. Abaixo: mesmo percentual (taxa ÷ Preço Calculado) ou referência por categoria se ainda não calculou.",
                 })}
-                {renderPricingColumnHeader(16, "Frete", { align: "right" })}
-                {renderPricingColumnHeader(17, "Imposto", { align: "right", title: "Imposto sobre o preço" })}
-                {renderPricingColumnHeader(18, "Taxa Extra", { align: "right", title: "Taxa extra sobre o preço" })}
-                {renderPricingColumnHeader(19, "Desp. Fixas", {
+                {renderPricingColumnHeader(13, "Frete", { align: "right" })}
+                {renderPricingColumnHeader(
+                  14,
+                  <>
+                    Custo
+                    {sortBy === "cost_desc" && " ↓"}
+                    {sortBy === "cost_asc" && " ↑"}
+                  </>,
+                  { align: "right", sortMode: "cost" }
+                )}
+                {renderPricingColumnHeader(15, "Imposto", { align: "right", title: "Imposto sobre o preço" })}
+                {renderPricingColumnHeader(16, "Taxa Extra", { align: "right", title: "Taxa extra sobre o preço" })}
+                {renderPricingColumnHeader(17, "Desp. Fixas", {
                   align: "right",
                   title: "Despesas fixas em R$ (cadastrado no produto)",
+                })}
+                {renderPricingColumnHeader(18, "Promo ML", {
+                  align: "right",
+                  title:
+                    "Campanhas/promoções ativas (cache de Promoções, sem chamada à API do ML no refresh de Preços). Passe o mouse no badge para detalhes.",
+                })}
+                {renderPricingColumnHeader(19, "Competitividade", {
+                  align: "right",
+                  title: "Competitividade no Mercado Livre (sugestão / faixa de preço)",
                 })}
                 {renderPricingColumnHeader(20, "Link")}
               </tr>
@@ -5102,40 +5166,10 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(6) ? "sticky-col" : ""}`} style={stickyBodyStyles[6]}>
-                      {listing.cost_price != null ? (
-                        <span className="text-fg">
-                          R$ {formatBRL(listing.cost_price)}
-                        </span>
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right ${stickyColumns.has(7) ? "sticky-col" : ""}`} style={stickyBodyStyles[7]}>
-                      <MlActivePromotionsCell text={listing.ml_active_promotions} />
-                    </td>
-                    <td className={`p-2 text-right text-sm font-medium ${stickyColumns.has(8) ? "sticky-col" : ""}`} style={stickyBodyStyles[8]}>
+                    <td className={`p-2 text-right text-sm font-medium ${stickyColumns.has(6) ? "sticky-col" : ""}`} style={stickyBodyStyles[6]}>
                       R$ {formatBRL(listing.current_price)}
                     </td>
-                    <td className={`p-2 text-right ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyBodyStyles[9]}>
-                      {(() => {
-                        const ref = priceRefsByRow[priceRefRowKey(listing.item_id, listing.variation_id)];
-                        const st = ref?.status ?? "none";
-                        const { label, className } = competitivenessBadge(st);
-                        const tip = [
-                          ref?.explanation,
-                          ref?.updated_at ? `Atualizado: ${new Date(ref.updated_at).toLocaleString("pt-BR")}` : null,
-                        ]
-                          .filter(Boolean)
-                          .join("\n");
-                        return (
-                          <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${className}`} title={tip || undefined}>
-                            {label}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td className={`p-2 text-right ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyBodyStyles[10]}>
+                    <td className={`p-2 text-right ${stickyColumns.has(7) ? "sticky-col" : ""}`} style={stickyBodyStyles[7]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : (
@@ -5151,7 +5185,7 @@ function PrecosPageContent() {
                         />
                       )}
                     </td>
-                    <td className={`p-2 ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyBodyStyles[11]}>
+                    <td className={`p-2 ${stickyColumns.has(8) ? "sticky-col" : ""}`} style={stickyBodyStyles[8]}>
                       <div className="flex flex-col items-end gap-0.5">
                         <PriceInput
                           value={listing.new_price}
@@ -5178,7 +5212,7 @@ function PrecosPageContent() {
                         )}
                       </div>
                     </td>
-                    <td className={`p-2 text-right text-sm font-medium ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
+                    <td className={`p-2 text-right text-sm font-medium ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyBodyStyles[9]}>
                       {listing.new_price > 0 ? (
                         (() => {
                           const finalPrice = applyPriceRounding(listing.new_price, priceRounding);
@@ -5204,7 +5238,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
+                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyBodyStyles[10]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -5215,7 +5249,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyBodyStyles[11]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : profit != null ? (
@@ -5244,7 +5278,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
                       {listing.calculating ? (
                         <div className="flex flex-col items-end gap-0.5">
                           <span className="text-fg-muted">…</span>
@@ -5290,7 +5324,7 @@ function PrecosPageContent() {
                         </div>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -5309,7 +5343,16 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
+                      {listing.cost_price != null ? (
+                        <span className="text-fg">
+                          R$ {formatBRL(listing.cost_price)}
+                        </span>
+                      ) : (
+                        <span className="text-fg-muted">—</span>
+                      )}
+                    </td>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -5329,7 +5372,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyBodyStyles[18]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -5349,7 +5392,7 @@ function PrecosPageContent() {
                         <span className="text-fg-muted">—</span>
                       )}
                     </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(19) ? "sticky-col" : ""}`} style={stickyBodyStyles[19]}>
+                    <td className={`p-2 text-right text-sm ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
                       {listing.calculating ? (
                         <span className="text-fg-muted">…</span>
                       ) : listing.calculated ? (
@@ -5368,6 +5411,27 @@ function PrecosPageContent() {
                       ) : (
                         <span className="text-fg-muted">—</span>
                       )}
+                    </td>
+                    <td className={`p-2 text-right ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyBodyStyles[18]}>
+                      <MlActivePromotionsCell text={listing.ml_active_promotions} />
+                    </td>
+                    <td className={`p-2 text-right ${stickyColumns.has(19) ? "sticky-col" : ""}`} style={stickyBodyStyles[19]}>
+                      {(() => {
+                        const ref = priceRefsByRow[priceRefRowKey(listing.item_id, listing.variation_id)];
+                        const st = ref?.status ?? "none";
+                        const { label, className } = competitivenessBadge(st);
+                        const tip = [
+                          ref?.explanation,
+                          ref?.updated_at ? `Atualizado: ${new Date(ref.updated_at).toLocaleString("pt-BR")}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join("\n");
+                        return (
+                          <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${className}`} title={tip || undefined}>
+                            {label}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className={`p-2 ${stickyColumns.has(20) ? "sticky-col" : ""}`} style={stickyBodyStyles[20]}>
                       {listing.permalink ? (
