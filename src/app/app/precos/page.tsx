@@ -916,6 +916,7 @@ async function solveMarginViaApi(
 }
 
 const MAX_PRICING_CALCULATE_BATCH = PRICING_CALCULATE_CLIENT_BATCH_SIZE;
+const PLANNED_PRICES_SAVE_BATCH = 500;
 
 type PricingCalculatePayloadItem = {
   item_id: string;
@@ -1106,9 +1107,19 @@ async function runConcurrentPool<T>(
 }
 
 /** Progresso em lote (desconto/restaurar ML): `flightEnd` = último índice do lote HTTP em curso. */
-type BulkBatchLoaderProgress = { done: number; total: number; flightEnd?: number };
+type BulkBatchLoaderProgress = {
+  done: number;
+  total: number;
+  flightEnd?: number;
+  phase?: "calculate" | "save";
+  saveDone?: number;
+  saveTotal?: number;
+};
 
 function bulkBatchLoaderMessage(p: BulkBatchLoaderProgress): string {
+  if (p.phase === "save" && p.saveTotal != null && p.saveDone != null) {
+    return `Gravando ${p.saveDone} de ${p.saveTotal} preço(s) no servidor…`;
+  }
   const { done, total, flightEnd } = p;
   if (flightEnd != null && flightEnd > done && total > 0) {
     return `Processando ${done + 1} a ${flightEnd} de ${total} anúncios`;
@@ -1117,6 +1128,9 @@ function bulkBatchLoaderMessage(p: BulkBatchLoaderProgress): string {
 }
 
 function bulkBatchLoaderDeterminatePercent(p: BulkBatchLoaderProgress): number {
+  if (p.phase === "save" && p.saveTotal != null && p.saveDone != null && p.saveTotal > 0) {
+    return Math.min(100, (p.saveDone / p.saveTotal) * 100);
+  }
   const { done, total, flightEnd } = p;
   if (total <= 0) return 0;
   if (flightEnd != null && flightEnd > done) {
@@ -1303,7 +1317,7 @@ function PrecosPageContent() {
   const [bulkMarginPercentInput, setBulkMarginPercentInput] = useState("");
   const bulkMarginBusyRef = useRef(false);
   /** Progresso no overlay durante "Definir margem líquida" em massa (ex.: "Processando 12 de 40 anúncios"). */
-  const [bulkMarginLoaderProgress, setBulkMarginLoaderProgress] = useState<{ done: number; total: number } | null>(
+  const [bulkMarginLoaderProgress, setBulkMarginLoaderProgress] = useState<BulkBatchLoaderProgress | null>(
     null
   );
   /** Progresso no overlay durante desconto em massa (recalcular via /api/pricing/calculate em lotes). */
@@ -1877,48 +1891,58 @@ function PrecosPageContent() {
   const persistPlannedPrices = useCallback(
     async (
       items: Array<{ item_id: string; variation_id: number | null; sku?: string; planned_price: number }>,
-      opts?: { quietSuccess?: boolean }
+      opts?: { quietSuccess?: boolean; onSaveProgress?: (done: number, total: number) => void }
     ): Promise<{ ok: boolean; saved: number; error?: string }> => {
       const toSave = items.filter((x) => Number.isFinite(x.planned_price) && x.planned_price >= 0);
       if (toSave.length === 0) return { ok: true, saved: 0 };
 
       if (!opts?.quietSuccess) setSaveMessage(null);
 
-      try {
-        const res = await fetch("/api/pricing/planned-prices", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: toSave.map((l) => ({
-              item_id: l.item_id,
-              variation_id: l.variation_id,
-              sku: l.sku,
-              planned_price: l.planned_price,
-            })),
-          }),
-        });
-        const data = res.ok ? await res.json().catch(() => ({})) : await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const err = (data as { error?: string }).error ?? "Erro ao salvar";
-          setSaveMessage({ type: "error", text: err });
-          return { ok: false, saved: 0, error: err };
-        }
-        const saved = (data as { saved?: number }).saved ?? toSave.length;
-        const savedKeys = new Set(toSave.map((l) => `${l.item_id}:${l.variation_id ?? "n"}`));
+      const clearDirtyForBatch = (batch: typeof toSave) => {
+        const savedKeys = new Set(batch.map((l) => `${l.item_id}:${l.variation_id ?? "n"}`));
         setListings((prev) =>
           prev.map((item) => {
             const key = `${item.item_id}:${item.variation_id ?? "n"}`;
             return savedKeys.has(key) ? { ...item, dirty: false } : item;
           })
         );
+      };
+
+      let totalSaved = 0;
+      try {
+        for (let i = 0; i < toSave.length; i += PLANNED_PRICES_SAVE_BATCH) {
+          const batch = toSave.slice(i, i + PLANNED_PRICES_SAVE_BATCH);
+          const res = await fetch("/api/pricing/planned-prices", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: batch.map((l) => ({
+                item_id: l.item_id,
+                variation_id: l.variation_id,
+                sku: l.sku,
+                planned_price: l.planned_price,
+              })),
+            }),
+          });
+          const data = res.ok ? await res.json().catch(() => ({})) : await res.json().catch(() => ({}));
+          if (!res.ok) {
+            const err = (data as { error?: string }).error ?? "Erro ao salvar";
+            setSaveMessage({ type: "error", text: err });
+            return { ok: false, saved: totalSaved, error: err };
+          }
+          const saved = (data as { saved?: number }).saved ?? batch.length;
+          totalSaved += saved;
+          clearDirtyForBatch(batch);
+          opts?.onSaveProgress?.(Math.min(i + batch.length, toSave.length), toSave.length);
+        }
         if (!opts?.quietSuccess) {
-          setSaveMessage({ type: "ok", text: `${saved} preço(s) salvos (MLB + SKU).` });
+          setSaveMessage({ type: "ok", text: `${totalSaved} preço(s) salvos (MLB + SKU).` });
           setTimeout(() => setSaveMessage(null), 4000);
         }
-        return { ok: true, saved };
+        return { ok: true, saved: totalSaved };
       } catch {
         setSaveMessage({ type: "error", text: "Erro ao salvar preços" });
-        return { ok: false, saved: 0, error: "Erro ao salvar preços" };
+        return { ok: false, saved: totalSaved, error: "Erro ao salvar preços" };
       }
     },
     []
@@ -2343,17 +2367,30 @@ function PrecosPageContent() {
       const resultsMap = buildPricingResultsMap(results);
       setListings((prev) => applyCalculatedResultsToListings(prev, resultsMap, keySet));
 
-      setBulkDiscountLoaderProgress(null);
-      setCalculating(false);
-      bulkDiscountBusyRef.current = false;
-
       const toPersist = eligible.map((l) => ({
         item_id: l.item_id,
         variation_id: l.variation_id,
         sku: l.sku ?? undefined,
         planned_price: priceByKey.get(listingSelectionKey(l))!,
       }));
-      const pres = await persistPlannedPrices(toPersist, { quietSuccess: true });
+      setBulkDiscountLoaderProgress({
+        done: eligible.length,
+        total: eligible.length,
+        phase: "save",
+        saveDone: 0,
+        saveTotal: toPersist.length,
+      });
+      const pres = await persistPlannedPrices(toPersist, {
+        quietSuccess: true,
+        onSaveProgress: (saveDone, saveTotal) =>
+          setBulkDiscountLoaderProgress({
+            done: eligible.length,
+            total: eligible.length,
+            phase: "save",
+            saveDone,
+            saveTotal,
+          }),
+      });
 
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
@@ -2461,17 +2498,30 @@ function PrecosPageContent() {
       const restoreResultsMap = buildPricingResultsMap(results);
       setListings((prev) => applyCalculatedResultsToListings(prev, restoreResultsMap, keySet));
 
-      setBulkRestoreLoaderProgress(null);
-      setCalculating(false);
-      bulkRestoreOriginalBusyRef.current = false;
-
       const toPersistRestore = eligible.map((l) => ({
         item_id: l.item_id,
         variation_id: l.variation_id,
         sku: l.sku ?? undefined,
         planned_price: priceByKey.get(listingSelectionKey(l))!,
       }));
-      const presRestore = await persistPlannedPrices(toPersistRestore, { quietSuccess: true });
+      setBulkRestoreLoaderProgress({
+        done: eligible.length,
+        total: eligible.length,
+        phase: "save",
+        saveDone: 0,
+        saveTotal: toPersistRestore.length,
+      });
+      const presRestore = await persistPlannedPrices(toPersistRestore, {
+        quietSuccess: true,
+        onSaveProgress: (saveDone, saveTotal) =>
+          setBulkRestoreLoaderProgress({
+            done: eligible.length,
+            total: eligible.length,
+            phase: "save",
+            saveDone,
+            saveTotal,
+          }),
+      });
 
       const skippedNoType = selected.length - eligible.length;
       const errCount = errors.length;
@@ -2637,8 +2687,13 @@ function PrecosPageContent() {
         );
       }
 
-      setBulkMarginLoaderProgress(null);
-      setCalculating(false);
+      setBulkMarginLoaderProgress({
+        done: eligible.length,
+        total: eligible.length,
+        phase: "save",
+        saveDone: 0,
+        saveTotal: eligible.filter((l) => updates.has(listingSelectionKey(l))).length,
+      });
 
       const toPersistMargin = eligible
         .filter((l) => updates.has(listingSelectionKey(l)))
@@ -2651,7 +2706,17 @@ function PrecosPageContent() {
             planned_price: u.price,
           };
         });
-      const presMargin = await persistPlannedPrices(toPersistMargin, { quietSuccess: true });
+      const presMargin = await persistPlannedPrices(toPersistMargin, {
+        quietSuccess: true,
+        onSaveProgress: (saveDone, saveTotal) =>
+          setBulkMarginLoaderProgress({
+            done: eligible.length,
+            total: eligible.length,
+            phase: "save",
+            saveDone,
+            saveTotal,
+          }),
+      });
 
       const skippedNoData = selected.length - eligible.length;
       const ok = updates.size;
@@ -3802,7 +3867,7 @@ function PrecosPageContent() {
             "Gravando preços planejados e atualizando cache…",
           ]
     : bulkMarginLoaderActive
-    ? [`Processando ${bulkMarginLoaderProgress.done} de ${bulkMarginLoaderProgress.total} anúncios`]
+    ? [bulkBatchLoaderMessage(bulkMarginLoaderProgress!)]
     : bulkDiscountLoaderActive
       ? [bulkBatchLoaderMessage(bulkDiscountLoaderProgress)]
       : bulkRestoreLoaderActive
@@ -3856,7 +3921,7 @@ function PrecosPageContent() {
     }
     const p = bulkMarginLoaderActive ? bulkMarginLoaderProgress : null;
     if (p == null || !calculating || p.total <= 0) return null;
-    return (p.done / p.total) * 100;
+    return bulkBatchLoaderDeterminatePercent(p);
   })();
   const loaderFooter = bulkProgressLoaderActive
     ? ""
@@ -4743,7 +4808,7 @@ function PrecosPageContent() {
         </div>
       )}
 
-      {dirtyCount > 0 && (
+      {dirtyCount > 0 && !bulkProgressLoaderActive && (
         <div className="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-700">
           {dirtyCount} item(s) com alteração ainda não confirmada no campo (saia do campo com Tab ou clique fora para
           recalcular e gravar automaticamente).

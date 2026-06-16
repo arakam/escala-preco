@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
+const PLANNED_PRICES_UPSERT_BATCH = 500;
+
 /**
  * GET /api/pricing/planned-prices
  * Retorna os preços planejados da conta (vinculados a MLB e SKU).
@@ -123,18 +125,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Nenhum item válido (item_id e planned_price obrigatórios)" }, { status: 400 });
   }
 
-  const { error: upsertError } = await supabase.from("planned_prices").upsert(toUpsert, {
-    onConflict: "account_id,item_id,variation_id",
-    ignoreDuplicates: false,
-  });
+  for (let i = 0; i < toUpsert.length; i += PLANNED_PRICES_UPSERT_BATCH) {
+    const batch = toUpsert.slice(i, i + PLANNED_PRICES_UPSERT_BATCH);
+    const { error: upsertError } = await supabase.from("planned_prices").upsert(batch, {
+      onConflict: "account_id,item_id,variation_id",
+      ignoreDuplicates: false,
+    });
 
-  if (upsertError) {
-    const conflictHint = upsertError.code === "23505" ? " (conflito único: account_id, item_id, variation_id)" : "";
-    console.error("[planned-prices POST]", upsertError);
-    return NextResponse.json(
-      { error: "Erro ao salvar preços" + conflictHint },
-      { status: 500 }
-    );
+    if (upsertError) {
+      const conflictHint = upsertError.code === "23505" ? " (conflito único: account_id, item_id, variation_id)" : "";
+      console.error("[planned-prices POST]", upsertError);
+      return NextResponse.json(
+        { error: "Erro ao salvar preços" + conflictHint },
+        { status: 500 }
+      );
+    }
   }
 
   try {

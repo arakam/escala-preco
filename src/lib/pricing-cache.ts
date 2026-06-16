@@ -11,6 +11,7 @@
  * ou manualmente (POST /api/pricing/cache/refresh).
  */
 import { createHash } from "crypto";
+import { runWithConcurrency } from "@/lib/mercadolivre/client";
 import { createServiceClient } from "@/lib/supabase/service";
 import { loadMlActivePromotionsByItemIdFromPromotionsCache } from "@/lib/mercadolivre/ml-active-promotions-from-cache";
 import { aggregateSales30dFromDb } from "@/lib/mercadolivre/orders-store";
@@ -28,6 +29,8 @@ function cacheRowId(accountId: string, itemId: string, variationId: number): str
 }
 const PAGE_SIZE = 1000;
 const INSERT_BATCH = 500;
+/** Atualizações pontuais de planned_price no cache (após salvar na tela de preços). */
+const PLANNED_PRICE_CACHE_UPDATE_CONCURRENCY = 25;
 
 function extractSku(
   rawJson: Record<string, unknown> | null,
@@ -895,16 +898,17 @@ export async function updatePricingCachePlannedPrices(
 ): Promise<void> {
   if (updates.length === 0) return;
   const supabase = createServiceClient();
-  for (const u of updates) {
+  const cacheUpdatedAt = new Date().toISOString();
+  await runWithConcurrency(updates, PLANNED_PRICE_CACHE_UPDATE_CONCURRENCY, async (u) => {
     const vid = u.variation_id == null ? VARIATION_ID_ITEM : u.variation_id;
     await supabase
       .from("pricing_cache")
       .update({
         planned_price: u.planned_price,
-        cache_updated_at: new Date().toISOString(),
+        cache_updated_at: cacheUpdatedAt,
       })
       .eq("account_id", accountId)
       .eq("item_id", u.item_id.trim().toUpperCase())
       .eq("variation_id", vid);
-  }
+  });
 }
