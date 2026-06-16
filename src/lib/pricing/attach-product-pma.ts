@@ -18,13 +18,17 @@ export async function attachProductPmaToRows<T extends { product_id: string | nu
 
   const pmaByProductId = new Map<string, number>();
   if (productIds.length > 0) {
-    const { data: products, error } = await supabase
-      .from("products")
-      .select("id, pma")
-      .in("id", productIds);
-    if (error) {
-      console.warn("[pricing] attachProductPma products", error);
-    } else {
+    const PRODUCT_BATCH = 500;
+    for (let i = 0; i < productIds.length; i += PRODUCT_BATCH) {
+      const chunk = productIds.slice(i, i + PRODUCT_BATCH);
+      const { data: products, error } = await supabase
+        .from("products")
+        .select("id, pma")
+        .in("id", chunk);
+      if (error) {
+        console.warn("[pricing] attachProductPma products", error);
+        continue;
+      }
       for (const p of products ?? []) {
         const id = String((p as { id?: string }).id ?? "");
         const pma = Number((p as { pma?: number | string | null }).pma);

@@ -10,6 +10,7 @@ import {
 import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 import {
   fetchAllViaRange,
+  fetchAllViaRangeParallel,
   isAllPageSize,
   SUPABASE_RANGE_BATCH,
 } from "@/lib/table-pagination";
@@ -55,6 +56,42 @@ export interface PricingListingRow {
   reference_fee_percent?: number | null;
   /** PMA (R$) do produto vinculado — piso da promoção na tela de preços */
   pma?: number | null;
+}
+
+/** Colunas necessárias na listagem (evita select * e reduz payload em "Todos"). */
+const PRICING_CACHE_LIST_COLUMNS =
+  "id,account_id,item_id,variation_id,title,thumbnail,permalink,status,listing_type_id,category_id," +
+  "current_price,sku,product_id,cost_price,weight_kg,height_cm,width_cm,length_cm," +
+  "tax_percent,extra_fee_percent,fixed_expenses,planned_price,calculated_price,calculated_fee," +
+  "calculated_shipping_cost,calculated_at,reference_fee_percent,ml_active_promotions,sales_30d,orders_30d";
+
+const PRICE_REF_SELECT =
+  "item_id, variation_id, status, suggested_price, min_reference_price, max_reference_price, explanation, updated_at";
+
+function mapPriceRefRow(ref: Record<string, unknown>): {
+  key: string;
+  value: {
+    status: string;
+    suggested_price: number | null;
+    min_reference_price: number | null;
+    max_reference_price: number | null;
+    explanation: string | null;
+    updated_at: string | null;
+  };
+} {
+  const itemId = String(ref.item_id).trim().toUpperCase();
+  const vid = ref.variation_id == null ? "item" : String(ref.variation_id);
+  return {
+    key: `${itemId}:${vid}`,
+    value: {
+      status: ref.status as string,
+      suggested_price: ref.suggested_price != null ? Number(ref.suggested_price) : null,
+      min_reference_price: ref.min_reference_price != null ? Number(ref.min_reference_price) : null,
+      max_reference_price: ref.max_reference_price != null ? Number(ref.max_reference_price) : null,
+      explanation: (ref.explanation as string | null) ?? null,
+      updated_at: (ref.updated_at as string | null) ?? null,
+    },
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -169,7 +206,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const buildCacheQuery = (base: ReturnType<typeof serviceSupabase.from>) => {
-      let q = base.select("*", { count: "exact" }).eq("account_id", account.id);
+      let q = base.select(PRICING_CACHE_LIST_COLUMNS, { count: "exact" }).eq("account_id", account.id);
       if (statusFilter) q = q.eq("status", statusFilter);
       if (linkedParam === "1") q = q.not("product_id", "is", null);
       else if (linkedParam === "0") q = q.is("product_id", null);
@@ -242,9 +279,17 @@ export async function GET(req: NextRequest) {
 
     if (needsBatchFetch) {
       const maxRows = showAll ? undefined : offset + limit;
-      const batchResult = await fetchAllViaRange<Record<string, unknown>>(
-        (from, to) => buildOrderedCacheQuery().range(from, to),
-        maxRows != null ? { maxRows } : undefined
+      const fetchAll = showAll ? fetchAllViaRangeParallel : fetchAllViaRange;
+      const batchResult = await fetchAll<Record<string, unknown>>(
+        async (from, to) => {
+          const result = await buildOrderedCacheQuery().range(from, to);
+          return {
+            data: (result.data ?? []) as unknown as Record<string, unknown>[],
+            error: result.error,
+            count: result.count,
+          };
+        },
+        showAll ? { maxRows, concurrency: 4 } : maxRows != null ? { maxRows } : undefined
       );
       cacheErr = batchResult.error;
       totalCount = batchResult.total;
@@ -342,14 +387,14 @@ export async function GET(req: NextRequest) {
       if (r.calculated_fee != null) row.calculated_fee = Number(r.calculated_fee);
       if (r.calculated_shipping_cost != null) row.calculated_shipping_cost = Number(r.calculated_shipping_cost);
       if (r.calculated_at != null) row.calculated_at = r.calculated_at as string;
+      if (r.reference_fee_percent != null) {
+        row.reference_fee_percent = Number(r.reference_fee_percent);
+      }
       return row;
     });
 
     const listingsWithPma = await attachProductPmaToRows(serviceSupabase, listings);
 
-    const uniqueItemIds = Array.from(
-      new Set(listingsWithPma.map((l) => String(l.item_id).trim().toUpperCase()))
-    );
     const priceRefsMap: Record<
       string,
       {
@@ -361,38 +406,47 @@ export async function GET(req: NextRequest) {
         updated_at: string | null;
       }
     > = {};
-    const REF_BATCH = 100;
-    for (let i = 0; i < uniqueItemIds.length; i += REF_BATCH) {
-      const batch = uniqueItemIds.slice(i, i + REF_BATCH);
-      if (batch.length === 0) continue;
-      const { data: refRows } = await serviceSupabase
-        .from("price_references")
-        .select(
-          "item_id, variation_id, status, suggested_price, min_reference_price, max_reference_price, explanation, updated_at"
-        )
-        .eq("account_id", account.id)
-        .in("item_id", batch);
-      for (const ref of refRows ?? []) {
-        const r = ref as {
-          item_id: string;
-          variation_id: number | null;
-          status: string;
-          suggested_price: number | null;
-          min_reference_price: number | null;
-          max_reference_price: number | null;
-          explanation: string | null;
-          updated_at: string | null;
-        };
-        const vid = r.variation_id == null ? "item" : String(r.variation_id);
-        const key = `${String(r.item_id).trim().toUpperCase()}:${vid}`;
-        priceRefsMap[key] = {
-          status: r.status,
-          suggested_price: r.suggested_price != null ? Number(r.suggested_price) : null,
-          min_reference_price: r.min_reference_price != null ? Number(r.min_reference_price) : null,
-          max_reference_price: r.max_reference_price != null ? Number(r.max_reference_price) : null,
-          explanation: r.explanation ?? null,
-          updated_at: r.updated_at ?? null,
-        };
+
+    if (showAll) {
+      const refResult = await fetchAllViaRangeParallel<Record<string, unknown>>(
+        async (from, to) => {
+          const result = await serviceSupabase
+            .from("price_references")
+            .select(PRICE_REF_SELECT)
+            .eq("account_id", account.id)
+            .order("item_id", { ascending: true })
+            .range(from, to);
+          return {
+            data: (result.data ?? []) as unknown as Record<string, unknown>[],
+            error: result.error,
+            count: result.count,
+          };
+        },
+        { concurrency: 4 }
+      );
+      if (!refResult.error) {
+        for (const ref of refResult.rows) {
+          const { key, value } = mapPriceRefRow(ref);
+          priceRefsMap[key] = value;
+        }
+      }
+    } else {
+      const uniqueItemIds = Array.from(
+        new Set(listingsWithPma.map((l) => String(l.item_id).trim().toUpperCase()))
+      );
+      const REF_BATCH = 500;
+      for (let i = 0; i < uniqueItemIds.length; i += REF_BATCH) {
+        const batch = uniqueItemIds.slice(i, i + REF_BATCH);
+        if (batch.length === 0) continue;
+        const { data: refRows } = await serviceSupabase
+          .from("price_references")
+          .select(PRICE_REF_SELECT)
+          .eq("account_id", account.id)
+          .in("item_id", batch);
+        for (const ref of refRows ?? []) {
+          const { key, value } = mapPriceRefRow(ref as Record<string, unknown>);
+          priceRefsMap[key] = value;
+        }
       }
     }
 

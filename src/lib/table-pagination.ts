@@ -56,3 +56,61 @@ export async function fetchAllViaRange<T>(
   if (total === 0) total = rows.length;
   return { rows, total, error: null };
 }
+
+/**
+ * Como fetchAllViaRange, mas busca os lotes após o primeiro em paralelo (útil em "Linhas → Todos").
+ */
+export async function fetchAllViaRangeParallel<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<RangeQueryResult<T>>,
+  options?: { maxRows?: number; concurrency?: number }
+): Promise<{ rows: T[]; total: number; error: unknown }> {
+  const maxRows = options?.maxRows;
+  const concurrency = Math.max(1, options?.concurrency ?? 4);
+
+  const first = await fetchPage(0, SUPABASE_RANGE_BATCH - 1);
+  if (first.error) return { rows: [], total: 0, error: first.error };
+
+  let total = first.count ?? 0;
+  const rows: T[] = [...(first.data ?? [])];
+
+  if (maxRows != null && rows.length >= maxRows) {
+    if (rows.length > maxRows) rows.length = maxRows;
+    return { rows, total: total || rows.length, error: null };
+  }
+
+  const firstShort = (first.data?.length ?? 0) < SUPABASE_RANGE_BATCH;
+  if (firstShort) {
+    if (total === 0) total = rows.length;
+    return { rows, total, error: null };
+  }
+
+  if (total <= 0) {
+    const rest = await fetchAllViaRange(fetchPage, { maxRows: maxRows != null ? maxRows - rows.length : undefined });
+    if (rest.error) return { rows: [], total: 0, error: rest.error };
+    rows.push(...rest.rows);
+    if (maxRows != null && rows.length > maxRows) rows.length = maxRows;
+    return { rows, total: rest.total || rows.length, error: null };
+  }
+  const remainingRanges: Array<[number, number]> = [];
+  for (let from = SUPABASE_RANGE_BATCH; from < total; from += SUPABASE_RANGE_BATCH) {
+    if (maxRows != null && from >= maxRows) break;
+    const to = from + SUPABASE_RANGE_BATCH - 1;
+    remainingRanges.push([from, to]);
+  }
+
+  for (let i = 0; i < remainingRanges.length; i += concurrency) {
+    const chunk = remainingRanges.slice(i, i + concurrency);
+    const results = await Promise.all(chunk.map(([from, to]) => fetchPage(from, to)));
+    for (const res of results) {
+      if (res.error) return { rows: [], total: 0, error: res.error };
+      rows.push(...(res.data ?? []));
+    }
+    if (maxRows != null && rows.length >= maxRows) {
+      if (rows.length > maxRows) rows.length = maxRows;
+      break;
+    }
+  }
+
+  if (total === 0) total = rows.length;
+  return { rows, total, error: null };
+}

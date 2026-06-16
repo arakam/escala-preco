@@ -917,6 +917,8 @@ async function solveMarginViaApi(
 
 const MAX_PRICING_CALCULATE_BATCH = PRICING_CALCULATE_CLIENT_BATCH_SIZE;
 const PLANNED_PRICES_SAVE_BATCH = 500;
+/** Acima disso, não dispara cálculo automático ao carregar (use "Recalcular taxa e frete"). */
+const AUTO_CALC_ON_LOAD_MAX = 200;
 
 type PricingCalculatePayloadItem = {
   item_id: string;
@@ -1451,9 +1453,14 @@ function PrecosPageContent() {
     if (hasPmaFilter) params.set("has_pma", hasPmaFilter);
 
     try {
+      const loadAllRows = isAllPageSize(limitForRequest);
+      const listingsPromise = fetch(`/api/pricing/listings?${params}`, { cache: "no-store" });
+      const plannedPromise = loadAllRows
+        ? null
+        : fetch("/api/pricing/planned-prices", { cache: "no-store" });
       const [listingsRes, plannedRes] = await Promise.all([
-        fetch(`/api/pricing/listings?${params}`, { cache: "no-store" }),
-        fetch("/api/pricing/planned-prices", { cache: "no-store" }),
+        listingsPromise,
+        plannedPromise ?? Promise.resolve(null),
       ]);
 
       if (fetchGen !== listingsFetchGenRef.current) return;
@@ -1472,7 +1479,7 @@ function PrecosPageContent() {
         setMlAccountId((listingsData as { account_id: string }).account_id);
       }
       const plannedMap = new Map<string, number>();
-      if (plannedRes.ok) {
+      if (plannedRes?.ok) {
         const plannedData = await plannedRes.json();
         const plannedList = plannedData.prices ?? [];
         for (const p of plannedList) {
@@ -1720,20 +1727,25 @@ function PrecosPageContent() {
   
   useEffect(() => {
     if (!loading && listings.length > 0 && !calculating) {
-      const key = `${page}-${search}-${statusFilter}-${linkFilter}-${skuFilter}`;
+      const key = `${pageSize}-${page}-${search}-${statusFilter}-${linkFilter}-${skuFilter}`;
       if (lastCalculatedKey.current !== key) {
+        const skipAutoCalc =
+          isAllPageSize(pageSize) || listings.length > AUTO_CALC_ON_LOAD_MAX;
         const hasUncalculated = listings.some((l) => !l.calculated && l.listing_type_id);
+        if (skipAutoCalc) {
+          if (hasUncalculated) lastCalculatedKey.current = key;
+          return;
+        }
         if (hasUncalculated) {
           lastCalculatedKey.current = key;
           setCalculating(true);
-          // Use a copy of listings to avoid stale closure
           const itemsToCalc = [...listings];
           doCalculate(itemsToCalc, isMercadoLider).finally(() => setCalculating(false));
         }
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, listings.length, calculating, page, search, statusFilter, linkFilter, skuFilter]);
+  }, [loading, listings.length, calculating, pageSize, page, search, statusFilter, linkFilter, skuFilter]);
 
   const calculatePrices = useCallback(
     async (items: ListingWithPricing[]) => {
