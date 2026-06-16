@@ -393,7 +393,9 @@ export async function GET(req: NextRequest) {
       return row;
     });
 
-    const listingsWithPma = await attachProductPmaToRows(serviceSupabase, listings);
+    const listingsWithPma = await attachProductPmaToRows(serviceSupabase, listings, {
+      userId: user.id,
+    });
 
     const priceRefsMap: Record<
       string,
