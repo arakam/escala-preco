@@ -14,10 +14,11 @@ import { getLatestValidAccessToken, getValidAccessToken } from "./refresh";
 import { syncLog } from "./sync-log";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
-  addJobLog,
   getJobStatus,
   isActiveJobStatus,
   updateJob,
+  addJobLog,
+  createBatchedJobProgress,
   type JobStatus,
 } from "@/lib/jobs";
 
@@ -117,6 +118,7 @@ export async function runFulfillmentSyncJob(jobId: string, accountId: string): P
     let lastProactiveTokenCheck = Date.now();
     const fulfillmentStockCache = new FulfillmentStockCache();
     const progressHeartbeat = () => new Date().toISOString();
+    const jobProgress = createBatchedJobProgress(supabase, jobId);
 
     const assertJobStillActive = async (): Promise<boolean> => {
       if (Date.now() - lastJobStatusCheck < 2000) return jobStillActive;
@@ -176,23 +178,14 @@ export async function runFulfillmentSyncJob(jobId: string, accountId: string): P
 
         processed++;
         ok++;
-        await updateJob(supabase, jobId, {
-          processed,
-          ok,
-          errors,
-          started_at: progressHeartbeat(),
-        });
-        await addJobLog(supabase, jobId, { item_id: itemId, status: "ok" });
+        jobProgress.queue(processed, ok, errors);
+        await jobProgress.flush();
       } catch (e) {
         processed++;
         errors++;
         const message = e instanceof Error ? e.message : String(e);
-        await updateJob(supabase, jobId, {
-          processed,
-          ok,
-          errors,
-          started_at: progressHeartbeat(),
-        });
+        jobProgress.queue(processed, ok, errors);
+        await jobProgress.flushForce();
         await addJobLog(supabase, jobId, {
           item_id: itemId,
           status: "error",
@@ -201,6 +194,8 @@ export async function runFulfillmentSyncJob(jobId: string, accountId: string): P
         syncLog(jobId, "fase B: falha estoque Full", { itemId, err: message });
       }
     }
+
+    await jobProgress.flushForce();
 
     const currentStatus = await getJobStatus(supabase, jobId);
     if (!currentStatus || !isActiveJobStatus(currentStatus)) {

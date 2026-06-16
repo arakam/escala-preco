@@ -232,6 +232,49 @@ export async function updateJob(
   if (error) throw error;
 }
 
+/** Atualiza progresso do job em lotes para reduzir round-trips ao banco durante syncs longas. */
+export function createBatchedJobProgress(
+  supabase: SupabaseClient,
+  jobId: string,
+  options?: { flushEvery?: number; flushIntervalMs?: number }
+) {
+  const flushEvery = options?.flushEvery ?? 5;
+  const flushIntervalMs = options?.flushIntervalMs ?? 2000;
+  let pending: { processed: number; ok: number; errors: number } | null = null;
+  let lastFlush = Date.now();
+
+  const flush = async (force = false): Promise<void> => {
+    if (!pending) return;
+    const now = Date.now();
+    if (
+      !force &&
+      pending.processed % flushEvery !== 0 &&
+      now - lastFlush < flushIntervalMs
+    ) {
+      return;
+    }
+    const snapshot = pending;
+    pending = null;
+    lastFlush = now;
+    await updateJob(supabase, jobId, {
+      processed: snapshot.processed,
+      ok: snapshot.ok,
+      errors: snapshot.errors,
+      started_at: new Date().toISOString(),
+    });
+  };
+
+  return {
+    queue(processed: number, ok: number, errors: number) {
+      pending = { processed, ok, errors };
+    },
+    flush,
+    async flushForce() {
+      await flush(true);
+    },
+  };
+}
+
 export async function addJobLog(
   supabase: SupabaseClient,
   jobId: string,

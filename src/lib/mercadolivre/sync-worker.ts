@@ -43,6 +43,7 @@ import {
   isActiveJobStatus,
   updateJob,
   addJobLog,
+  createBatchedJobProgress,
   type JobStatus,
 } from "@/lib/jobs";
 
@@ -191,28 +192,31 @@ async function upsertItemVariations(
   item: MLItemDetail,
   token: string
 ): Promise<MLVariationDetail[]> {
-  const details: MLVariationDetail[] = [];
-  if (!Array.isArray(item.variations) || item.variations.length === 0) return details;
+  if (!Array.isArray(item.variations) || item.variations.length === 0) return [];
 
-  for (const v of item.variations) {
-    let variationDetail: MLVariationDetail;
-    try {
-      if (variationNeedsExtraDetail(v as MLVariationDetail)) {
-        variationDetail = await fetchVariationDetail(item.id, v.id, token);
-      } else {
+  const variationDetails = await runWithConcurrency(
+    item.variations,
+    Math.min(2, getMlSyncConcurrency()),
+    async (v) => {
+      let variationDetail: MLVariationDetail;
+      try {
+        if (variationNeedsExtraDetail(v as MLVariationDetail)) {
+          variationDetail = await fetchVariationDetail(item.id, v.id, token);
+        } else {
+          variationDetail = v as MLVariationDetail;
+        }
+      } catch {
         variationDetail = v as MLVariationDetail;
       }
-    } catch {
-      variationDetail = v as MLVariationDetail;
+      const vRow = mapVariationToRow(accountId, item.id, variationDetail);
+      const { error: vErr } = await (supabase as any).from("ml_variations").upsert(vRow, {
+        onConflict: "account_id,item_id,variation_id",
+      });
+      if (vErr) throw vErr;
+      return variationDetail;
     }
-    details.push(variationDetail);
-    const vRow = mapVariationToRow(accountId, item.id, variationDetail);
-    const { error: vErr } = await (supabase as any).from("ml_variations").upsert(vRow, {
-      onConflict: "account_id,item_id,variation_id",
-    });
-    if (vErr) throw vErr;
-  }
-  return details;
+  );
+  return variationDetails;
 }
 
 function mapVariationToRow(
@@ -320,9 +324,11 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     syncLog(jobId, "listagem concluída; iniciando detalhamento por anúncio", {
       total,
       concurrency: CONCURRENCY,
-      /** Fila única de HTTP ao ML no client (padrão ligado; ML_HTTP_SERIAL=0 desliga) */
-      mlHttpSerialized:
-        process.env.ML_HTTP_SERIAL !== "0" && process.env.ML_HTTP_SERIAL !== "false",
+      /** Limite de HTTP simultâneo ao ML no client (padrão 2; ML_HTTP_SERIAL=0 desliga) */
+      mlHttpMaxConcurrent:
+        process.env.ML_HTTP_SERIAL !== "0" && process.env.ML_HTTP_SERIAL !== "false"
+          ? process.env.ML_HTTP_MAX_CONCURRENT || "2"
+          : "off",
       verbose: syncLogVerbose(),
       heartbeatMs: syncHeartbeatMs(),
     });
@@ -350,6 +356,7 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     const siteIdFallback = (account.site_id ?? "MLB").trim() || "MLB";
     const categoryFeeKeysSynced = new Set<string>();
     const fulfillmentItemIds: string[] = [];
+    const jobProgress = createBatchedJobProgress(supabase, jobId);
 
     const syncOneItem = async (itemId: string, token: string): Promise<void> => {
       if (syncLogVerbose()) {
@@ -357,22 +364,27 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
       }
       // include_attributes=all ajuda a trazer attributes dentro das variações, reduzindo chamadas extras.
       const item = await fetchItemDetail(itemId, token, { includeAttributesAll: true });
-      const pricesResponse = await getItemPrices(itemId, token, { showAllPrices: true });
+      const [pricesResponse, salePriceResponse] = await Promise.all([
+        getItemPrices(itemId, token, { showAllPrices: true }),
+        getItemSalePrice(itemId, token),
+      ]);
       const standardPrice = getStandardPriceAmount(pricesResponse);
-      const salePriceResponse = await getItemSalePrice(itemId, token);
       const salePrice = getSalePriceAmount(salePriceResponse);
       const variationDetails = await upsertItemVariations(supabase, accountId, item, token);
       const baseRow = mapItemToRow(accountId, item);
       const fastFulfillment = resolveFulfillmentFieldsFast(item, variationDetails);
       const inventoryIds = collectFulfillmentInventoryIds(item, variationDetails);
 
-      const { data: existingFulfillmentRow } = await supabase
-        .from("ml_items")
-        .select("fulfillment_stock, fulfillment_synced_at, inventory_id, user_product_id")
-        .eq("account_id", accountId)
-        .eq("item_id", itemId)
-        .maybeSingle();
-      const existingFulfillment = existingFulfillmentRow as StoredFulfillmentRow | null;
+      let existingFulfillment: StoredFulfillmentRow | null = null;
+      if (fastFulfillment.is_fulfillment) {
+        const { data: existingFulfillmentRow } = await supabase
+          .from("ml_items")
+          .select("fulfillment_stock, fulfillment_synced_at, inventory_id, user_product_id")
+          .eq("account_id", accountId)
+          .eq("item_id", itemId)
+          .maybeSingle();
+        existingFulfillment = existingFulfillmentRow as StoredFulfillmentRow | null;
+      }
 
       let fulfillmentStock: number | null = null;
       let fulfillmentSyncedAt: string | null = null;
@@ -402,6 +414,7 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
         }
       }
 
+      const wholesaleTiers = buildWholesaleTiers(pricesResponse);
       const row = {
         ...baseRow,
         price: standardPrice ?? baseRow.price,
@@ -410,6 +423,7 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
         inventory_id: fastFulfillment.inventory_id ?? baseRow.inventory_id,
         fulfillment_stock: fulfillmentStock,
         fulfillment_synced_at: fulfillmentSyncedAt,
+        wholesale_prices_json: wholesaleTiers,
       };
       const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
         onConflict: "account_id,item_id",
@@ -436,14 +450,6 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
           });
         }
       }
-
-      const wholesaleTiers = buildWholesaleTiers(pricesResponse);
-      await (supabase as any)
-        .from("ml_items")
-        .update({ wholesale_prices_json: wholesaleTiers })
-        .eq("account_id", accountId)
-        .eq("item_id", itemId);
-
     };
 
     const heartbeatMs = syncHeartbeatMs();
@@ -503,13 +509,8 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
 
           processed++;
           ok++;
-          await updateJob(supabase, jobId, {
-            processed,
-            ok,
-            errors,
-            started_at: progressHeartbeat(),
-          });
-          await addJobLog(supabase, jobId, { item_id: itemId, status: "ok" });
+          jobProgress.queue(processed, ok, errors);
+          await jobProgress.flush();
           if (syncLogVerbose()) {
             syncLog(jobId, "item OK", { itemId, ms: Date.now() - itemT0 });
           }
@@ -517,12 +518,8 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
           processed++;
           errors++;
           const message = e instanceof Error ? e.message : String(e);
-          await updateJob(supabase, jobId, {
-            processed,
-            ok,
-            errors,
-            started_at: progressHeartbeat(),
-          });
+          jobProgress.queue(processed, ok, errors);
+          await jobProgress.flushForce();
           await addJobLog(supabase, jobId, {
             item_id: itemId,
             status: "error",
@@ -540,6 +537,8 @@ export async function runSyncJob(jobId: string, accountId: string): Promise<void
     } finally {
       if (heartbeat) clearInterval(heartbeat);
     }
+
+    await jobProgress.flushForce();
 
     const finalStatus: JobStatus = errors === 0 ? "success" : total === errors ? "failed" : "partial";
 
@@ -633,9 +632,11 @@ export async function syncSingleItem(
 
   try {
     const item = await fetchItemDetail(itemIdClean, accessToken, { includeAttributesAll: true });
-    const pricesResponse = await getItemPrices(itemIdClean, accessToken, { showAllPrices: true });
+    const [pricesResponse, salePriceResponse] = await Promise.all([
+      getItemPrices(itemIdClean, accessToken, { showAllPrices: true }),
+      getItemSalePrice(itemIdClean, accessToken),
+    ]);
     const standardPrice = getStandardPriceAmount(pricesResponse);
-    const salePriceResponse = await getItemSalePrice(itemIdClean, accessToken);
     const salePrice = getSalePriceAmount(salePriceResponse);
     const variationDetails = await upsertItemVariations(supabase, accountId, item, accessToken);
     const baseRow = mapItemToRow(accountId, item);
@@ -672,6 +673,7 @@ export async function syncSingleItem(
       await persistVariationFulfillmentStocks(supabase, accountId, itemIdClean, stockFields.byInventory);
     }
 
+    const wholesaleTiers = buildWholesaleTiers(pricesResponse);
     const row = {
       ...baseRow,
       price: standardPrice ?? baseRow.price,
@@ -681,6 +683,7 @@ export async function syncSingleItem(
       inventory_id: fastFulfillment.inventory_id ?? baseRow.inventory_id,
       fulfillment_stock: fulfillmentStock,
       fulfillment_synced_at: fulfillmentSyncedAt,
+      wholesale_prices_json: wholesaleTiers,
     };
     const { error: itemErr } = await (supabase as any).from("ml_items").upsert(row, {
       onConflict: "account_id,item_id",
@@ -701,13 +704,6 @@ export async function syncSingleItem(
         accessToken,
       });
     }
-
-    const wholesaleTiers = buildWholesaleTiers(pricesResponse);
-    await (supabase as any)
-      .from("ml_items")
-      .update({ wholesale_prices_json: wholesaleTiers })
-      .eq("account_id", accountId)
-      .eq("item_id", itemIdClean);
 
     try {
       const { autoCreateProductsFromMlSync } = await import("@/lib/products/auto-create-from-ml-sync");

@@ -27,22 +27,53 @@ async function waitMlGlobalCooldown() {
 }
 
 /**
- * Uma fila global por processo Node: só uma requisição HTTP ao ML por vez.
- * Evita 429 quando vários anúncios /items, /prices e variações disparam ao mesmo tempo.
+ * Limita requisições HTTP simultâneas ao ML no mesmo processo Node.
+ * Evita 429 quando /items, /prices e variações disparam ao mesmo tempo.
  * Desative com ML_HTTP_SERIAL=0 (mais rápido, mais risco de 429).
+ * ML_HTTP_MAX_CONCURRENT (padrão 2) controla o paralelismo quando a fila está ligada.
  */
 const ML_HTTP_SERIAL =
   process.env.ML_HTTP_SERIAL !== "0" && process.env.ML_HTTP_SERIAL !== "false";
 
-let mlHttpChain: Promise<unknown> = Promise.resolve();
+function getMlHttpMaxConcurrent(): number {
+  if (!ML_HTTP_SERIAL) return Number.POSITIVE_INFINITY;
+  const raw = process.env.ML_HTTP_MAX_CONCURRENT;
+  if (raw === undefined || raw === "") return 2;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= 1 && n <= 15) return Math.floor(n);
+  return 2;
+}
 
-function runMlHttpSerialized<T>(fn: () => Promise<T>): Promise<T> {
-  const p = mlHttpChain.then(() => fn());
-  mlHttpChain = p.then(
-    () => undefined,
-    () => undefined
-  );
-  return p as Promise<T>;
+let mlHttpActive = 0;
+const mlHttpWaiters: Array<() => void> = [];
+
+async function acquireMlHttpSlot(): Promise<void> {
+  const max = getMlHttpMaxConcurrent();
+  if (!ML_HTTP_SERIAL || mlHttpActive < max) {
+    mlHttpActive++;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    mlHttpWaiters.push(resolve);
+  });
+  mlHttpActive++;
+}
+
+function releaseMlHttpSlot(): void {
+  if (!ML_HTTP_SERIAL) return;
+  mlHttpActive = Math.max(0, mlHttpActive - 1);
+  const next = mlHttpWaiters.shift();
+  if (next) next();
+}
+
+async function runMlHttpLimited<T>(fn: () => Promise<T>): Promise<T> {
+  if (!ML_HTTP_SERIAL) return fn();
+  await acquireMlHttpSlot();
+  try {
+    return await fn();
+  } finally {
+    releaseMlHttpSlot();
+  }
 }
 
 export interface ItemsSearchResponse {
@@ -133,7 +164,7 @@ export async function fetchWithRetry(
         timeout,
       });
     if (ML_HTTP_SERIAL) {
-      return runMlHttpSerialized(exec);
+      return runMlHttpLimited(exec);
     }
     return exec();
   }
