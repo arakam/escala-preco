@@ -25,7 +25,7 @@ import {
   inferPromotionTypeFromAnyLabelText,
   normalizeMlPromotionTypeCode,
 } from "@/lib/mercadolivre/ml-promotion-types";
-import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
+import { resolveMlItemIdsByEffectiveProductTagIds } from "@/lib/product-tags";
 
 export const PROMOTIONS_OVERVIEW_PAGE_SIZE = 12;
 const ML_ENRICH_CONCURRENCY = 3;
@@ -775,7 +775,12 @@ export async function readPromotionsCache(
   const tagIds = extraFilters?.tagIds ?? [];
   let allowedItemIds: string[] | null = null;
   if (tagIds.length > 0) {
-    const resolved = await resolveMlItemIdsByProductTagIds(supabase, accountId, tagIds);
+    const resolved = await resolveMlItemIdsByEffectiveProductTagIds(
+      supabase,
+      accountId,
+      userId,
+      tagIds
+    );
     allowedItemIds = resolved ?? [];
     if (allowedItemIds.length === 0) {
       return { rows: [], total: 0, snapshot_at: null };

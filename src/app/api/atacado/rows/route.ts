@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
+import { resolveMlItemIdsByEffectiveProductTagIds } from "@/lib/product-tags";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSkuForAtacadoListing } from "@/lib/atacado";
 import { isAllPageSize } from "@/lib/table-pagination";
@@ -99,7 +99,12 @@ export async function GET(request: NextRequest) {
   let allowedItemIds: string[] | null = null;
   if (tagIds.length > 0) {
     try {
-      const resolved = await resolveMlItemIdsByProductTagIds(supabase, accountId, tagIds);
+      const resolved = await resolveMlItemIdsByEffectiveProductTagIds(
+        supabase,
+        accountId,
+        user.id,
+        tagIds
+      );
       allowedItemIds = resolved ?? [];
       if (allowedItemIds.length === 0) {
         return NextResponse.json({ rows: [], total: 0, totalItems: 0, page, limit: showAll ? 0 : limit });

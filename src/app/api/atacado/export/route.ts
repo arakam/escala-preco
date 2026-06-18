@@ -1,6 +1,6 @@
 import { resolveSkuForAtacadoListing } from "@/lib/atacado";
 import { createClient } from "@/lib/supabase/server";
-import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
+import { resolveMlItemIdsByEffectiveProductTagIds } from "@/lib/product-tags";
 import { NextRequest, NextResponse } from "next/server";
 
 const PLANNED_VARIATION_ITEM = -1;
@@ -48,7 +48,12 @@ export async function GET(request: NextRequest) {
 
   let allowedItemIds: string[] | null = null;
   if (tagIds.length > 0) {
-    const resolved = await resolveMlItemIdsByProductTagIds(supabase, accountId, tagIds);
+    const resolved = await resolveMlItemIdsByEffectiveProductTagIds(
+      supabase,
+      accountId,
+      user.id,
+      tagIds
+    );
     allowedItemIds = resolved ?? [];
     if (allowedItemIds.length === 0) {
       const headers = [

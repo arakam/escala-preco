@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProductTag } from "@/lib/db/types";
+import { fetchAllViaRange } from "@/lib/table-pagination";
 
 export function normalizeTagName(name: string): string {
   return name.trim().replace(/\s+/g, " ");
@@ -131,8 +132,8 @@ export async function resolveMlItemIdsByProductIds(
 }
 
 /**
- * MLB da conta cujo produto vinculado (item ou variação) tem alguma das tags.
- * Retorna `null` se tagIds vazio (sem filtro); `[]` se nenhum anúncio bate.
+ * MLB da conta cujo produto vinculado em **qualquer** nível (item ou variação) tem alguma das tags.
+ * Preferir `resolveMlItemIdsByEffectiveProductTagIds` em telas de anúncio (Preços, Promoções, Atacado).
  */
 export async function resolveMlItemIdsByProductTagIds(
   supabase: SupabaseClient,
@@ -147,18 +148,66 @@ export async function resolveMlItemIdsByProductTagIds(
   return resolveMlItemIdsByProductIds(supabase, accountId, productIds);
 }
 
-/** IDs de produtos que possuem pelo menos uma das tags informadas. */
+/**
+ * MLB cuja linha em `pricing_cache` usa um produto com alguma das tags (OR).
+ * Alinha filtro à coluna `product_id` exibida na tela de Preços (produto efetivo do anúncio).
+ */
+export async function resolveMlItemIdsByEffectiveProductTagIds(
+  supabase: SupabaseClient,
+  accountId: string,
+  userId: string,
+  tagIds: string[]
+): Promise<string[] | null> {
+  if (tagIds.length === 0) return null;
+
+  const productIds = await resolveProductIdsByTagIds(supabase, tagIds, userId);
+  if (productIds.length === 0) return [];
+
+  const itemIds = new Set<string>();
+  const { rows, error } = await fetchAllViaRange<{ item_id: string }>((from, to) =>
+    supabase
+      .from("pricing_cache")
+      .select("item_id")
+      .eq("account_id", accountId)
+      .in("product_id", productIds)
+      .order("item_id", { ascending: true })
+      .range(from, to)
+  );
+  if (error) throw error;
+
+  for (const row of rows) {
+    if (row.item_id) itemIds.add(String(row.item_id).trim().toUpperCase());
+  }
+  return Array.from(itemIds);
+}
+
+/** IDs de produtos que possuem pelo menos uma das tags informadas (OR). */
 export async function resolveProductIdsByTagIds(
   supabase: SupabaseClient,
-  tagIds: string[]
+  tagIds: string[],
+  userId?: string
 ): Promise<string[]> {
   if (tagIds.length === 0) return [];
+
+  if (userId) {
+    const { data, error } = await supabase
+      .from("product_tag_assignments")
+      .select("product_id, products!inner(user_id)")
+      .in("tag_id", tagIds)
+      .eq("products.user_id", userId);
+    if (error) throw error;
+    const ids = new Set<string>();
+    for (const row of data ?? []) {
+      const pid = (row as { product_id?: string | null }).product_id;
+      if (pid) ids.add(String(pid));
+    }
+    return Array.from(ids);
+  }
 
   const { data, error } = await supabase
     .from("product_tag_assignments")
     .select("product_id")
     .in("tag_id", tagIds);
-
   if (error) throw error;
 
   const ids = new Set<string>();

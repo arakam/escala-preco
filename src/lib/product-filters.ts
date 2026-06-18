@@ -57,9 +57,13 @@ export async function resolveProductIdsForListFilters(
   let allowed: Set<string> | null = null;
 
   if (needsTagFilter) {
-    const tagIds = await resolveProductIdsByTagIds(supabase, filters.tagIds);
-    if (tagIds.length === 0) return [];
-    allowed = new Set(tagIds);
+    const productIdsFromTags = await resolveProductIdsByTagIds(
+      supabase,
+      filters.tagIds,
+      userId
+    );
+    if (productIdsFromTags.length === 0) return [];
+    allowed = new Set(productIdsFromTags);
   }
 
   if (needsProductFilter) {

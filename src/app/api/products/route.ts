@@ -3,12 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import { ProductInput } from "@/lib/db/types";
 import {
   fetchTagsGroupedByProductId,
-  resolveProductIdsByTagIds,
   setProductTagsByNames,
 } from "@/lib/product-tags";
 import {
-  applyProductFiltersToQuery,
   parseProductListFilters,
+  resolveProductIdsForListFilters,
 } from "@/lib/product-filters";
 import { fetchAllViaRange, isAllPageSize } from "@/lib/table-pagination";
 import {
@@ -36,11 +35,17 @@ export async function GET(request: NextRequest) {
   const limit = showAll ? 0 : limitParam;
   const offset = (page - 1) * limit;
 
-  let productIdsForTags: string[] | null = null;
-  if (listFilters.tagIds.length > 0) {
+  let productIdsFiltered: string[] | null = null;
+  const needsListFilters =
+    listFilters.tagIds.length > 0 || Boolean(listFilters.supplier) || listFilters.hasPma !== "";
+  if (needsListFilters) {
     try {
-      productIdsForTags = await resolveProductIdsByTagIds(supabase, listFilters.tagIds);
-      if (productIdsForTags.length === 0) {
+      productIdsFiltered = await resolveProductIdsForListFilters(
+        supabase,
+        user.id,
+        listFilters
+      );
+      if (productIdsFiltered?.length === 0) {
         return NextResponse.json({
           products: [],
           total: 0,
@@ -66,10 +71,9 @@ export async function GET(request: NextRequest) {
         `sku.ilike.%${search}%,title.ilike.%${search}%,ean.ilike.%${search}%,supplier.ilike.%${search}%`
       );
     }
-    if (productIdsForTags) {
-      q = q.in("id", productIdsForTags);
+    if (productIdsFiltered) {
+      q = q.in("id", productIdsFiltered);
     }
-    q = applyProductFiltersToQuery(q, listFilters);
     return q;
   };
 

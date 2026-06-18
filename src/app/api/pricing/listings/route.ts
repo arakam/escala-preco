@@ -1,13 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
-  intersectMlItemIdFilters,
   parseHasPmaParam,
   resolveMlItemIdsByFulfillment,
-  resolveMlItemIdsByProductHasPma,
-  resolveMlItemIdsByProductSupplier,
+  resolveProductIdsForListFilters,
 } from "@/lib/product-filters";
-import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 import {
   fetchAllViaRange,
   fetchAllViaRangeParallel,
@@ -158,36 +155,17 @@ export async function GET(req: NextRequest) {
   // Ler cache com service role (já validamos que a conta é do usuário); evita RLS bloqueando leitura
   const serviceSupabase = createServiceClient();
 
-  /** MLB com produto tagueado, fornecedor ou Full (via ml_items), não só product_id no cache. */
+  /** Produto efetivo no cache (product_id) + Full (item_id em ml_items). */
+  let allowedProductIds: string[] | null = null;
   let allowedItemIds: string[] | null = null;
-  if (tagIds.length > 0 || supplierFilter || fullOnly || hasPmaFilter) {
+  if (tagIds.length > 0 || supplierFilter || hasPmaFilter) {
     try {
-      const byTags =
-        tagIds.length > 0
-          ? await resolveMlItemIdsByProductTagIds(serviceSupabase, account.id, tagIds)
-          : null;
-      const bySupplier = supplierFilter
-        ? await resolveMlItemIdsByProductSupplier(
-            serviceSupabase,
-            account.id,
-            user.id,
-            supplierFilter
-          )
-        : null;
-      const byFull = fullOnly ? await resolveMlItemIdsByFulfillment(serviceSupabase, account.id) : null;
-      const byPma = hasPmaFilter
-        ? await resolveMlItemIdsByProductHasPma(
-            serviceSupabase,
-            account.id,
-            user.id,
-            hasPmaFilter
-          )
-        : null;
-      allowedItemIds = intersectMlItemIdFilters(
-        intersectMlItemIdFilters(intersectMlItemIdFilters(byTags, bySupplier), byFull),
-        byPma
-      );
-      if (allowedItemIds !== null && allowedItemIds.length === 0) {
+      allowedProductIds = await resolveProductIdsForListFilters(serviceSupabase, user.id, {
+        tagIds,
+        supplier: supplierFilter,
+        hasPma: hasPmaFilter,
+      });
+      if (allowedProductIds !== null && allowedProductIds.length === 0) {
         return NextResponse.json({
           listings: [],
           total: 0,
@@ -200,6 +178,25 @@ export async function GET(req: NextRequest) {
       }
     } catch (e) {
       console.error("Erro ao filtrar listagens por produto:", e);
+      return NextResponse.json({ error: "Erro ao filtrar por produto" }, { status: 500 });
+    }
+  }
+  if (fullOnly) {
+    try {
+      allowedItemIds = await resolveMlItemIdsByFulfillment(serviceSupabase, account.id);
+      if (allowedItemIds.length === 0) {
+        return NextResponse.json({
+          listings: [],
+          total: 0,
+          page,
+          limit: fetchLimit,
+          totalPages: 0,
+          last_updated_at: null,
+          linked_row_count: 0,
+        });
+      }
+    } catch (e) {
+      console.error("Erro ao filtrar listagens Full:", e);
       return NextResponse.json({ error: "Erro ao filtrar por produto" }, { status: 500 });
     }
   }
@@ -231,6 +228,7 @@ export async function GET(req: NextRequest) {
       if (semPromoMlAtiva) {
         q = q.or("ml_active_promotions.is.null,ml_active_promotions.eq.");
       }
+      if (allowedProductIds) q = q.in("product_id", allowedProductIds);
       if (allowedItemIds) q = q.in("item_id", allowedItemIds);
       return q;
     };

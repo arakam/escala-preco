@@ -1,11 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  intersectMlItemIdFilters,
   resolveMlItemIdsByFulfillment,
-  resolveMlItemIdsByProductHasPma,
-  resolveMlItemIdsByProductSupplier,
+  resolveProductIdsForListFilters,
 } from "@/lib/product-filters";
-import { resolveMlItemIdsByProductTagIds } from "@/lib/product-tags";
 import { fetchAllViaRange } from "@/lib/table-pagination";
 import { applyNumericCompareFilter } from "@/lib/pricing/listings-query-filters";
 import type { PricingListingsQueryParams } from "@/lib/pricing/listings-query-params";
@@ -21,42 +18,26 @@ export async function fetchAllPricingCacheRowsForFilters(
   userId: string,
   filters: PricingListingsQueryParams
 ): Promise<{ rows: PricingCacheRow[]; error: unknown }> {
+  let allowedProductIds: string[] | null = null;
   let allowedItemIds: string[] | null = null;
-  if (
-    filters.tagIds.length > 0 ||
-    filters.supplierFilter ||
-    filters.fullOnly ||
-    filters.hasPma
-  ) {
+  if (filters.tagIds.length > 0 || filters.supplierFilter || filters.hasPma) {
     try {
-      const byTags =
-        filters.tagIds.length > 0
-          ? await resolveMlItemIdsByProductTagIds(serviceSupabase, accountId, filters.tagIds)
-          : null;
-      const bySupplier = filters.supplierFilter
-        ? await resolveMlItemIdsByProductSupplier(
-            serviceSupabase,
-            accountId,
-            userId,
-            filters.supplierFilter
-          )
-        : null;
-      const byFull = filters.fullOnly
-        ? await resolveMlItemIdsByFulfillment(serviceSupabase, accountId)
-        : null;
-      const byPma = filters.hasPma
-        ? await resolveMlItemIdsByProductHasPma(
-            serviceSupabase,
-            accountId,
-            userId,
-            filters.hasPma
-          )
-        : null;
-      allowedItemIds = intersectMlItemIdFilters(
-        intersectMlItemIdFilters(intersectMlItemIdFilters(byTags, bySupplier), byFull),
-        byPma
-      );
-      if (allowedItemIds !== null && allowedItemIds.length === 0) {
+      allowedProductIds = await resolveProductIdsForListFilters(serviceSupabase, userId, {
+        tagIds: filters.tagIds,
+        supplier: filters.supplierFilter,
+        hasPma: filters.hasPma,
+      });
+      if (allowedProductIds !== null && allowedProductIds.length === 0) {
+        return { rows: [], error: null };
+      }
+    } catch (e) {
+      return { rows: [], error: e };
+    }
+  }
+  if (filters.fullOnly) {
+    try {
+      allowedItemIds = await resolveMlItemIdsByFulfillment(serviceSupabase, accountId);
+      if (allowedItemIds.length === 0) {
         return { rows: [], error: null };
       }
     } catch (e) {
@@ -95,6 +76,7 @@ export async function fetchAllPricingCacheRowsForFilters(
     if (filters.semPromoMlAtiva) {
       q = q.or("ml_active_promotions.is.null,ml_active_promotions.eq.");
     }
+    if (allowedProductIds) q = q.in("product_id", allowedProductIds);
     if (allowedItemIds) q = q.in("item_id", allowedItemIds);
     return q;
   };
