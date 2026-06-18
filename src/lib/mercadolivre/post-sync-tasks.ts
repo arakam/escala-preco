@@ -22,7 +22,14 @@ export async function runPostSyncBackgroundTasks(
 
   try {
     const { refreshPricingCache } = await import("@/lib/pricing-cache");
-    await refreshPricingCache(accountId);
+    const cacheResult = await refreshPricingCache(accountId);
+    if (!cacheResult.ok) {
+      console.error(`[sync:${triggerSyncJobId}] pricing cache refresh (background)`, cacheResult.error);
+    } else if (cacheResult.reconciled) {
+      console.warn(`[sync:${triggerSyncJobId}] pricing cache reconciliou ${cacheResult.reconciled} anúncio(s)`, {
+        count: cacheResult.count,
+      });
+    }
   } catch (err) {
     console.error(`[sync:${triggerSyncJobId}] pricing cache refresh (background)`, err);
   }

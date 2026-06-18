@@ -34,7 +34,11 @@ export async function POST() {
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 500 });
     }
-    return NextResponse.json({ ok: true, count: result.count });
+    return NextResponse.json({
+      ok: true,
+      count: result.count,
+      ...(result.reconciled ? { reconciled: result.reconciled } : {}),
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erro inesperado ao atualizar cache";
     console.error("[pricing/cache/refresh] Erro:", err);

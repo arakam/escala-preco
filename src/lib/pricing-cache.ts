@@ -18,6 +18,7 @@ import { aggregateSales30dFromDb } from "@/lib/mercadolivre/orders-store";
 import { getSalesMap } from "@/lib/mercadolivre/sales";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { extractSkuFromMlListing } from "@/lib/products/ml-sku";
+import { fetchAllViaRange } from "@/lib/table-pagination";
 
 const VARIATION_ID_ITEM = -1;
 
@@ -27,7 +28,6 @@ function cacheRowId(accountId: string, itemId: string, variationId: number): str
   const hex = createHash("sha256").update(raw).digest("hex").slice(0, 32);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
-const PAGE_SIZE = 1000;
 const INSERT_BATCH = 500;
 /** Atualizações pontuais de planned_price no cache (após salvar na tela de preços). */
 const PLANNED_PRICE_CACHE_UPDATE_CONCURRENCY = 25;
@@ -260,7 +260,50 @@ export interface PricingCacheRow {
   reference_fee_percent: number | null;
 }
 
-export async function refreshPricingCache(accountId: string): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+export type RefreshPricingCacheResult =
+  | { ok: true; count: number; reconciled?: number }
+  | { ok: false; error: string };
+
+/** Repõe no cache anúncios que ficaram de fora do rebuild (ex.: paginação instável). */
+async function reconcileMissingPricingCacheItems(
+  accountId: string,
+  expectedItemIds: Set<string>
+): Promise<number> {
+  if (expectedItemIds.size === 0) return 0;
+
+  const supabase = createServiceClient();
+  const { rows: cached, error } = await fetchAllViaRange<{ item_id: string }>((from, to) =>
+    supabase
+      .from("pricing_cache")
+      .select("item_id")
+      .eq("account_id", accountId)
+      .order("item_id", { ascending: true })
+      .range(from, to)
+  );
+  if (error) {
+    console.error("[pricing-cache] reconcile list error:", error);
+    return 0;
+  }
+
+  const cachedIds = new Set(cached.map((r) => r.item_id));
+  const missing = Array.from(expectedItemIds).filter((id) => !cachedIds.has(id));
+  if (missing.length === 0) return 0;
+
+  console.warn(`[pricing-cache] reconciliando ${missing.length} anúncio(s) ausente(s) no cache`, {
+    accountId,
+    sample: missing.slice(0, 5),
+  });
+
+  let okCount = 0;
+  for (const itemId of missing) {
+    const patched = await refreshPricingCacheByItemId(accountId, itemId);
+    if (patched.ok) okCount += 1;
+    else console.error("[pricing-cache] reconcile item failed", itemId, patched.error);
+  }
+  return okCount;
+}
+
+export async function refreshPricingCache(accountId: string): Promise<RefreshPricingCacheResult> {
   const supabase = createServiceClient();
 
   const { data: account, error: accountErr } = await supabase
@@ -303,43 +346,52 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
     products:product_id (sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
   `;
 
-  // 1) Itens sem variações (paginar: Supabase retorna no máx 1000 por request)
-  const items: unknown[] = [];
-  let itemsFrom = 0;
-  while (true) {
-    const { data: chunk, error: itemsErr } = await supabase
+  // 1) Todos os anúncios (ordem fixa — evita perder linhas entre páginas do Supabase)
+  const { rows: allMlItems, total: mlItemsTotal, error: itemsErr } = await fetchAllViaRange<
+    Record<string, unknown>
+  >((from, to) =>
+    supabase
       .from("ml_items")
       .select(itemsSelect)
       .eq("account_id", accountId)
-      .eq("has_variations", false)
-      .range(itemsFrom, itemsFrom + PAGE_SIZE - 1);
-    if (itemsErr) {
-      console.error("[pricing-cache] ml_items error:", itemsErr);
-      return { ok: false, error: "Erro ao carregar anúncios" };
-    }
-    const list = (chunk || []) as unknown[];
-    items.push(...list);
-    if (list.length < PAGE_SIZE) break;
-    itemsFrom += PAGE_SIZE;
+      .order("item_id", { ascending: true })
+      .range(from, to)
+  );
+  if (itemsErr) {
+    console.error("[pricing-cache] ml_items error:", itemsErr);
+    return { ok: false, error: "Erro ao carregar anúncios" };
   }
 
-  // 2) Variações (paginar)
-  const variations: unknown[] = [];
-  let variationsFrom = 0;
-  while (true) {
-    const { data: chunk, error: variationsErr } = await supabase
-      .from("ml_variations")
-      .select(variationsSelect)
-      .eq("account_id", accountId)
-      .range(variationsFrom, variationsFrom + PAGE_SIZE - 1);
-    if (variationsErr) {
-      console.error("[pricing-cache] ml_variations error:", variationsErr);
-      return { ok: false, error: "Erro ao carregar variações" };
-    }
-    const list = (chunk || []) as unknown[];
-    variations.push(...list);
-    if (list.length < PAGE_SIZE) break;
-    variationsFrom += PAGE_SIZE;
+  const expectedItemIds = new Set(allMlItems.map((row) => String(row.item_id)));
+  if (mlItemsTotal > 0 && allMlItems.length < mlItemsTotal) {
+    console.warn("[pricing-cache] ml_items incompleto após paginação", {
+      accountId,
+      loaded: allMlItems.length,
+      expected: mlItemsTotal,
+    });
+  }
+
+  const items: unknown[] = [];
+  const itemsWithVariations: unknown[] = [];
+  for (const row of allMlItems) {
+    if (row.has_variations === true) itemsWithVariations.push(row);
+    else items.push(row);
+  }
+
+  // 2) Variações (ordem fixa)
+  const { rows: variations, error: variationsErr } = await fetchAllViaRange<Record<string, unknown>>(
+    (from, to) =>
+      supabase
+        .from("ml_variations")
+        .select(variationsSelect)
+        .eq("account_id", accountId)
+        .order("item_id", { ascending: true })
+        .order("variation_id", { ascending: true })
+        .range(from, to)
+  );
+  if (variationsErr) {
+    console.error("[pricing-cache] ml_variations error:", variationsErr);
+    return { ok: false, error: "Erro ao carregar variações" };
   }
 
   const variationRowsByItemId = new Map<string, Record<string, unknown>[]>();
@@ -355,43 +407,23 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
     else variationIdsByItemId.set(iid, [vid]);
   }
 
-  // 2b) Anúncios pai com variações (uma linha de cache por MLB)
-  const itemsWithVariations: unknown[] = [];
-  let ivFrom = 0;
-  while (true) {
-    const { data: chunk, error: ivErr } = await supabase
-      .from("ml_items")
-      .select(itemsSelect)
-      .eq("account_id", accountId)
-      .eq("has_variations", true)
-      .range(ivFrom, ivFrom + PAGE_SIZE - 1);
-    if (ivErr) {
-      console.error("[pricing-cache] ml_items (com variações) error:", ivErr);
-      return { ok: false, error: "Erro ao carregar anúncios com variações" };
-    }
-    const list = (chunk || []) as unknown[];
-    itemsWithVariations.push(...list);
-    if (list.length < PAGE_SIZE) break;
-    ivFrom += PAGE_SIZE;
-  }
-
-  // 3) Preços planejados (paginar se houver muitos)
-  const plannedRows: Array<{ item_id: string; variation_id: number | null; planned_price: number }> = [];
-  let plannedFrom = 0;
-  while (true) {
-    const { data: chunk, error: plannedErr } = await supabase
+  // 3) Preços planejados
+  const { rows: plannedRows, error: plannedErr } = await fetchAllViaRange<{
+    item_id: string;
+    variation_id: number | null;
+    planned_price: number;
+  }>((from, to) =>
+    supabase
       .from("planned_prices")
       .select("item_id, variation_id, planned_price")
       .eq("account_id", accountId)
-      .range(plannedFrom, plannedFrom + PAGE_SIZE - 1);
-    if (plannedErr) {
-      console.error("[pricing-cache] planned_prices error:", plannedErr);
-      return { ok: false, error: "Erro ao carregar preços planejados" };
-    }
-    const list = (chunk || []) as Array<{ item_id: string; variation_id: number | null; planned_price: number }>;
-    plannedRows.push(...list);
-    if (list.length < PAGE_SIZE) break;
-    plannedFrom += PAGE_SIZE;
+      .order("item_id", { ascending: true })
+      .order("variation_id", { ascending: true, nullsFirst: true })
+      .range(from, to)
+  );
+  if (plannedErr) {
+    console.error("[pricing-cache] planned_prices error:", plannedErr);
+    return { ok: false, error: "Erro ao carregar preços planejados" };
   }
 
   const plannedByKey = new Map<string, number>();
@@ -649,7 +681,30 @@ export async function refreshPricingCache(accountId: string): Promise<{ ok: true
     }
   }
 
-  return { ok: true, count: uniqueRows.length };
+  const reconciled = await reconcileMissingPricingCacheItems(accountId, expectedItemIds);
+  const { count: finalCount } = await supabase
+    .from("pricing_cache")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", accountId);
+
+  if (
+    finalCount != null &&
+    expectedItemIds.size > 0 &&
+    finalCount < expectedItemIds.size
+  ) {
+    console.warn("[pricing-cache] cache ainda menor que ml_items após reconcile", {
+      accountId,
+      ml_items: expectedItemIds.size,
+      pricing_cache: finalCount,
+      reconciled,
+    });
+  }
+
+  return {
+    ok: true,
+    count: finalCount ?? uniqueRows.length + reconciled,
+    ...(reconciled > 0 ? { reconciled } : {}),
+  };
 }
 
 /**
