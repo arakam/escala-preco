@@ -1,9 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { resolveMlItemIdsByEffectiveProductTagIds } from "@/lib/product-tags";
-import { NextRequest, NextResponse } from "next/server";
 import { resolveSkuForAtacadoListing } from "@/lib/atacado";
+import {
+  applyAllowedItemIdsFilter,
+  itemIdsNeedBatchFetch,
+  resolveListingTagItemIds,
+} from "@/lib/listing-tag-filter";
+import { chunkIds } from "@/lib/supabase/batched-in-filter";
 import { isAllPageSize } from "@/lib/table-pagination";
+import { NextRequest, NextResponse } from "next/server";
 
 const PAGE_SIZE = 50;
 /** Máximo por requisição (alinhado à tela de Preços para regras em massa em catálogos maiores). */
@@ -99,12 +104,7 @@ export async function GET(request: NextRequest) {
   let allowedItemIds: string[] | null = null;
   if (tagIds.length > 0) {
     try {
-      const resolved = await resolveMlItemIdsByEffectiveProductTagIds(
-        supabase,
-        accountId,
-        user.id,
-        tagIds
-      );
+      const resolved = await resolveListingTagItemIds(supabase, accountId, user.id, tagIds);
       allowedItemIds = resolved ?? [];
       if (allowedItemIds.length === 0) {
         return NextResponse.json({ rows: [], total: 0, totalItems: 0, page, limit: showAll ? 0 : limit });
@@ -140,10 +140,11 @@ export async function GET(request: NextRequest) {
     !!filterSku ||
     filter === "com_rascunho" ||
     filter === "sem_rascunho" ||
-    filter === "price_high";
+    filter === "price_high" ||
+    (allowedItemIds != null && itemIdsNeedBatchFetch(allowedItemIds));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- evita TS2589 com tipos profundos do Supabase
-  function applyItemFilters(query: any): any {
+  function applyItemFilters(query: any, itemIdBatch?: string[]): any | null {
     let q = query;
     if (filterMlb) {
       if (filterMlb.toUpperCase().startsWith("MLB") && filterMlb.length >= 10) {
@@ -169,13 +170,17 @@ export async function GET(request: NextRequest) {
     if (filter === "com_familia") {
       q = q.not("family_name", "is", null);
     }
-    if (allowedItemIds) {
-      q = q.in("item_id", allowedItemIds);
+    if (itemIdBatch) {
+      q = q.in("item_id", itemIdBatch);
+    } else if (allowedItemIds) {
+      const withIds = applyAllowedItemIdsFilter(q, allowedItemIds);
+      if (!withIds) return null;
+      q = withIds;
     }
     return q;
   }
 
-  async function fetchAllItems(includeRawJson: boolean) {
+  async function fetchAllItems(includeRawJson: boolean, itemIdBatch?: string[]): Promise<ItemRow[]> {
     const batchSize = 1000;
     let allItems: ItemRow[] = [];
     let offset = 0;
@@ -183,23 +188,14 @@ export async function GET(request: NextRequest) {
 
     while (hasMore) {
       const rangeEnd = offset + batchSize - 1;
-      const { data, error } = includeRawJson
-        ? await applyItemFilters(
-            supabase
-              .from("ml_items")
-              .select(ITEM_SELECT_WITH_RAW)
-              .eq("account_id", accountId)
-              .order("updated_at", { ascending: false })
-              .range(offset, rangeEnd)
-          )
-        : await applyItemFilters(
-            supabase
-              .from("ml_items")
-              .select(ITEM_SELECT)
-              .eq("account_id", accountId)
-              .order("updated_at", { ascending: false })
-              .range(offset, rangeEnd)
-          );
+      const base = supabase
+        .from("ml_items")
+        .select(includeRawJson ? ITEM_SELECT_WITH_RAW : ITEM_SELECT)
+        .eq("account_id", accountId)
+        .order("updated_at", { ascending: false });
+      const filtered = applyItemFilters(base, itemIdBatch);
+      if (filtered === null) return [];
+      const { data, error } = await filtered.range(offset, rangeEnd);
 
       if (error) throw error;
 
@@ -212,38 +208,50 @@ export async function GET(request: NextRequest) {
     return allItems;
   }
 
+  async function fetchAllItemsWithTagFilter(includeRawJson: boolean): Promise<ItemRow[]> {
+    if (!allowedItemIds || allowedItemIds.length === 0) return [];
+    if (!itemIdsNeedBatchFetch(allowedItemIds)) {
+      return fetchAllItems(includeRawJson);
+    }
+    const merged = new Map<string, ItemRow>();
+    for (const batch of chunkIds(allowedItemIds)) {
+      const items = await fetchAllItems(includeRawJson, batch);
+      for (const item of items) merged.set(item.item_id, item);
+    }
+    return Array.from(merged.values());
+  }
+
   let items: ItemRow[] = [];
   let dbPaginatedTotal: number | null = null;
 
   try {
     if (!needsFullScan) {
-      const countQuery = applyItemFilters(
-        supabase
-          .from("ml_items")
-          .select("item_id", { count: "exact", head: true })
-          .eq("account_id", accountId)
-      );
-      const pageQuery = applyItemFilters(
-        supabase
-          .from("ml_items")
-          .select(ITEM_SELECT)
-          .eq("account_id", accountId)
-          .order("updated_at", { ascending: false })
-          .range(from, from + limit - 1)
-      );
+      const countBase = supabase
+        .from("ml_items")
+        .select("item_id", { count: "exact", head: true })
+        .eq("account_id", accountId);
+      const pageBase = supabase
+        .from("ml_items")
+        .select(ITEM_SELECT)
+        .eq("account_id", accountId)
+        .order("updated_at", { ascending: false });
 
-      const [{ count, error: countError }, { data: pageItems, error: pageError }] = await Promise.all([
-        countQuery,
-        pageQuery,
-      ]);
+      const countQuery = applyItemFilters(countBase);
+      const pageQuery = applyItemFilters(pageBase);
+      if (countQuery === null || pageQuery === null) {
+        items = await fetchAllItemsWithTagFilter(false);
+      } else {
+        const [{ count, error: countError }, { data: pageItems, error: pageError }] =
+          await Promise.all([countQuery, pageQuery.range(from, from + limit - 1)]);
 
-      if (countError) throw countError;
-      if (pageError) throw pageError;
+        if (countError) throw countError;
+        if (pageError) throw pageError;
 
-      dbPaginatedTotal = count ?? 0;
-      items = (pageItems ?? []) as ItemRow[];
+        dbPaginatedTotal = count ?? 0;
+        items = (pageItems ?? []) as ItemRow[];
+      }
     } else {
-      items = await fetchAllItems(!!filterSku);
+      items = await fetchAllItemsWithTagFilter(!!filterSku);
     }
   } catch (err) {
     console.error("[atacado/rows] items error:", err);

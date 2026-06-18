@@ -25,7 +25,11 @@ import {
   inferPromotionTypeFromAnyLabelText,
   normalizeMlPromotionTypeCode,
 } from "@/lib/mercadolivre/ml-promotion-types";
-import { resolveMlItemIdsByEffectiveProductTagIds } from "@/lib/product-tags";
+import {
+  countRowsWithItemIdFilter,
+  fetchMlItemIdsPageWithTagFilter,
+  resolveListingTagItemIds,
+} from "@/lib/listing-tag-filter";
 
 export const PROMOTIONS_OVERVIEW_PAGE_SIZE = 12;
 const ML_ENRICH_CONCURRENCY = 3;
@@ -557,23 +561,40 @@ async function fetchMlItemIdsPage(
 ): Promise<string[]> {
   const from = (cachePage - 1) * PROMOTIONS_OVERVIEW_PAGE_SIZE;
   const to = from + PROMOTIONS_OVERVIEW_PAGE_SIZE - 1;
-  let q = supabase.from("ml_items").select("item_id").eq("account_id", accountId);
-  if (linkKey === "linked") q = q.not("product_id", "is", null);
-  else if (linkKey === "unlinked") q = q.is("product_id", null);
-  if (allowedItemIds) {
-    if (allowedItemIds.length === 0) return [];
-    q = q.in("item_id", allowedItemIds);
+
+  const buildBaseQuery = () => {
+    let q = supabase.from("ml_items").select("item_id").eq("account_id", accountId);
+    if (linkKey === "linked") q = q.not("product_id", "is", null);
+    else if (linkKey === "unlinked") q = q.is("product_id", null);
+    if (norm) {
+      q = q.or(`title.ilike.%${norm}%,item_id.ilike.%${norm}%`);
+    }
+    return q.order("updated_at", { ascending: false });
+  };
+
+  if (!allowedItemIds) {
+    const { data, error } = await buildBaseQuery().range(from, to);
+    if (error) {
+      console.error("[promotions-cache] fetchMlItemIdsPage", error);
+      return [];
+    }
+    const ids = (data ?? []).map((r) => String((r as { item_id: string }).item_id));
+    return Array.from(new Set(ids));
   }
-  if (norm) {
-    q = q.or(`title.ilike.%${norm}%,item_id.ilike.%${norm}%`);
-  }
-  const { data, error } = await q.order("updated_at", { ascending: false }).range(from, to);
+
+  if (allowedItemIds.length === 0) return [];
+
+  const { itemIds, error } = await fetchMlItemIdsPageWithTagFilter(
+    buildBaseQuery,
+    allowedItemIds,
+    from,
+    to
+  );
   if (error) {
     console.error("[promotions-cache] fetchMlItemIdsPage", error);
     return [];
   }
-  const ids = (data ?? []).map((r) => String((r as { item_id: string }).item_id));
-  return Array.from(new Set(ids));
+  return itemIds;
 }
 
 function isoFromDbTimestamp(raw: unknown): string | null {
@@ -734,20 +755,34 @@ export async function countMlItemsForPromotionsPage(
   allowedItemIds?: string[] | null
 ): Promise<number> {
   const norm = normalizeCacheSearch(search);
-  let q = supabase
-    .from("ml_items")
-    .select("item_id", { count: "exact", head: true })
-    .eq("account_id", accountId);
-  if (linkFilter === "linked") q = q.not("product_id", "is", null);
-  else if (linkFilter === "unlinked") q = q.is("product_id", null);
+
+  const buildBaseCountQuery = () => {
+    let q = supabase
+      .from("ml_items")
+      .select("item_id", { count: "exact", head: true })
+      .eq("account_id", accountId);
+    if (linkFilter === "linked") q = q.not("product_id", "is", null);
+    else if (linkFilter === "unlinked") q = q.is("product_id", null);
+    if (norm) {
+      q = q.or(`title.ilike.%${norm}%,item_id.ilike.%${norm}%`);
+    }
+    return q;
+  };
+
   if (allowedItemIds) {
     if (allowedItemIds.length === 0) return 0;
-    q = q.in("item_id", allowedItemIds);
+    const { count, error } = await countRowsWithItemIdFilter(
+      buildBaseCountQuery,
+      allowedItemIds
+    );
+    if (error) {
+      console.error("[promotions-cache] count ml_items", error);
+      return 0;
+    }
+    return count;
   }
-  if (norm) {
-    q = q.or(`title.ilike.%${norm}%,item_id.ilike.%${norm}%`);
-  }
-  const { count, error } = await q;
+
+  const { count, error } = await buildBaseCountQuery();
   if (error) {
     console.error("[promotions-cache] count ml_items", error);
     return 0;
@@ -775,12 +810,7 @@ export async function readPromotionsCache(
   const tagIds = extraFilters?.tagIds ?? [];
   let allowedItemIds: string[] | null = null;
   if (tagIds.length > 0) {
-    const resolved = await resolveMlItemIdsByEffectiveProductTagIds(
-      supabase,
-      accountId,
-      userId,
-      tagIds
-    );
+    const resolved = await resolveListingTagItemIds(supabase, accountId, userId, tagIds);
     allowedItemIds = resolved ?? [];
     if (allowedItemIds.length === 0) {
       return { rows: [], total: 0, snapshot_at: null };

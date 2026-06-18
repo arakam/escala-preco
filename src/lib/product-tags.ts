@@ -189,29 +189,36 @@ export async function resolveProductIdsByTagIds(
 ): Promise<string[]> {
   if (tagIds.length === 0) return [];
 
+  const ids = new Set<string>();
+
   if (userId) {
-    const { data, error } = await supabase
-      .from("product_tag_assignments")
-      .select("product_id, products!inner(user_id)")
-      .in("tag_id", tagIds)
-      .eq("products.user_id", userId);
+    const { rows, error } = await fetchAllViaRange<{ product_id?: string | null }>((from, to) =>
+      supabase
+        .from("product_tag_assignments")
+        .select("product_id, products!inner(user_id)")
+        .in("tag_id", tagIds)
+        .eq("products.user_id", userId)
+        .order("product_id", { ascending: true })
+        .range(from, to)
+    );
     if (error) throw error;
-    const ids = new Set<string>();
-    for (const row of data ?? []) {
-      const pid = (row as { product_id?: string | null }).product_id;
-      if (pid) ids.add(String(pid));
+    for (const row of rows) {
+      if (row.product_id) ids.add(String(row.product_id));
     }
     return Array.from(ids);
   }
 
-  const { data, error } = await supabase
-    .from("product_tag_assignments")
-    .select("product_id")
-    .in("tag_id", tagIds);
+  const { rows, error } = await fetchAllViaRange<{ product_id?: string | null }>((from, to) =>
+    supabase
+      .from("product_tag_assignments")
+      .select("product_id")
+      .in("tag_id", tagIds)
+      .order("product_id", { ascending: true })
+      .range(from, to)
+  );
   if (error) throw error;
 
-  const ids = new Set<string>();
-  for (const row of data ?? []) {
+  for (const row of rows) {
     if (row.product_id) ids.add(String(row.product_id));
   }
   return Array.from(ids);
@@ -427,15 +434,23 @@ export async function listUserTagsWithCounts(
   if (tagList.length === 0) return [];
 
   const tagIds = tagList.map((t) => t.id);
-  const { data: assignments, error: assignErr } = await supabase
-    .from("product_tag_assignments")
-    .select("tag_id, product_id")
-    .in("tag_id", tagIds);
+  const { rows: assignments, error: assignErr } = await fetchAllViaRange<{
+    tag_id: string;
+    product_id: string;
+  }>((from, to) =>
+    supabase
+      .from("product_tag_assignments")
+      .select("tag_id, product_id")
+      .in("tag_id", tagIds)
+      .order("tag_id", { ascending: true })
+      .order("product_id", { ascending: true })
+      .range(from, to)
+  );
 
   if (assignErr) throw assignErr;
 
   const counts = new Map<string, number>();
-  for (const row of assignments ?? []) {
+  for (const row of assignments) {
     const tid = String(row.tag_id);
     counts.set(tid, (counts.get(tid) ?? 0) + 1);
   }

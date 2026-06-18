@@ -1,6 +1,11 @@
 import { resolveSkuForAtacadoListing } from "@/lib/atacado";
+import {
+  applyAllowedItemIdsFilter,
+  itemIdsNeedBatchFetch,
+  resolveListingTagItemIds,
+} from "@/lib/listing-tag-filter";
+import { chunkIds } from "@/lib/supabase/batched-in-filter";
 import { createClient } from "@/lib/supabase/server";
-import { resolveMlItemIdsByEffectiveProductTagIds } from "@/lib/product-tags";
 import { NextRequest, NextResponse } from "next/server";
 
 const PLANNED_VARIATION_ITEM = -1;
@@ -48,12 +53,7 @@ export async function GET(request: NextRequest) {
 
   let allowedItemIds: string[] | null = null;
   if (tagIds.length > 0) {
-    const resolved = await resolveMlItemIdsByEffectiveProductTagIds(
-      supabase,
-      accountId,
-      user.id,
-      tagIds
-    );
+    const resolved = await resolveListingTagItemIds(supabase, accountId, user.id, tagIds);
     allowedItemIds = resolved ?? [];
     if (allowedItemIds.length === 0) {
       const headers = [
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
 
   // Buscar todos os itens com paginação (Supabase limita a 1000 por query)
   const PAGE_SIZE = 1000;
-  let allItems: {
+  type ExportItemRow = {
     item_id: string;
     title: string | null;
     has_variations: boolean | null;
@@ -85,21 +85,18 @@ export async function GET(request: NextRequest) {
     user_product_id: string | null;
     raw_json: unknown;
     products?: unknown;
-  }[] = [];
-  let offset = 0;
-  let hasMore = true;
+  };
 
-  while (hasMore) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- evita TS2589 com tipos profundos do Supabase
+  function buildItemsQuery(): any {
     let itemsQuery = supabase
       .from("ml_items")
       .select(
         "item_id, title, has_variations, price, seller_custom_field, user_product_id, raw_json, product_id, products:product_id (sku)"
       )
       .eq("account_id", accountId)
-      .order("updated_at", { ascending: false })
-      .range(offset, offset + PAGE_SIZE - 1);
+      .order("updated_at", { ascending: false });
 
-    // Filtros específicos
     if (filterMlb) {
       if (filterMlb.toUpperCase().startsWith("MLB") && filterMlb.length >= 10) {
         itemsQuery = itemsQuery.eq("item_id", filterMlb.toUpperCase());
@@ -121,22 +118,74 @@ export async function GET(request: NextRequest) {
     if (filter === "mlbu") {
       itemsQuery = itemsQuery.not("user_product_id", "is", null);
     }
-    if (allowedItemIds) {
-      itemsQuery = itemsQuery.in("item_id", allowedItemIds);
-    }
+    return itemsQuery;
+  }
 
-    const { data: pageItems, error: itemsError } = await itemsQuery;
-    if (itemsError) {
-      return NextResponse.json({ error: "Erro ao listar itens" }, { status: 500 });
+  async function fetchExportItemsPage(
+    offset: number,
+    itemIdBatch?: string[]
+  ): Promise<ExportItemRow[]> {
+    let itemsQuery = buildItemsQuery();
+    if (itemIdBatch) {
+      itemsQuery = itemsQuery.in("item_id", itemIdBatch);
+    } else if (allowedItemIds) {
+      const withIds = applyAllowedItemIdsFilter(itemsQuery, allowedItemIds);
+      if (!withIds) return [];
+      itemsQuery = withIds;
     }
+    const { data: pageItems, error: itemsError } = await itemsQuery.range(
+      offset,
+      offset + PAGE_SIZE - 1
+    );
+    if (itemsError) throw itemsError;
+    return (pageItems ?? []) as ExportItemRow[];
+  }
 
-    if (pageItems && pageItems.length > 0) {
-      allItems = allItems.concat(pageItems);
-      offset += PAGE_SIZE;
-      hasMore = pageItems.length === PAGE_SIZE;
-    } else {
-      hasMore = false;
+  async function fetchAllExportItems(): Promise<ExportItemRow[]> {
+    let allItems: ExportItemRow[] = [];
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const pageItems = await fetchExportItemsPage(offset);
+      if (pageItems.length > 0) {
+        allItems = allItems.concat(pageItems);
+        offset += PAGE_SIZE;
+        hasMore = pageItems.length === PAGE_SIZE;
+      } else {
+        hasMore = false;
+      }
     }
+    return allItems;
+  }
+
+  async function fetchAllExportItemsWithTagFilter(): Promise<ExportItemRow[]> {
+    if (!allowedItemIds || allowedItemIds.length === 0) return [];
+    if (!itemIdsNeedBatchFetch(allowedItemIds)) {
+      return fetchAllExportItems();
+    }
+    const merged = new Map<string, ExportItemRow>();
+    for (const batch of chunkIds(allowedItemIds)) {
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const pageItems = await fetchExportItemsPage(offset, batch);
+        for (const item of pageItems) merged.set(item.item_id, item);
+        hasMore = pageItems.length === PAGE_SIZE;
+        offset += PAGE_SIZE;
+      }
+    }
+    return Array.from(merged.values());
+  }
+
+  let allItems: ExportItemRow[] = [];
+  try {
+    allItems =
+      allowedItemIds && itemIdsNeedBatchFetch(allowedItemIds)
+        ? await fetchAllExportItemsWithTagFilter()
+        : await fetchAllExportItems();
+  } catch {
+    return NextResponse.json({ error: "Erro ao listar itens" }, { status: 500 });
   }
 
   const items = allItems;

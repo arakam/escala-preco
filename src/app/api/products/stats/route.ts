@@ -4,7 +4,8 @@ import {
   parseProductListFilters,
   resolveProductIdsForListFilters,
 } from "@/lib/product-filters";
-import { fetchAllViaRange, isAllPageSize } from "@/lib/table-pagination";
+import { fetchProductStatsListPage } from "@/lib/products/fetch-product-stats-list";
+import { isAllPageSize } from "@/lib/table-pagination";
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -23,7 +24,6 @@ export async function GET(request: NextRequest) {
   const showAll = isAllPageSize(limitParam);
   const page = showAll ? 1 : parseInt(searchParams.get("page") || "1", 10);
   const limit = showAll ? 0 : limitParam;
-  const offset = (page - 1) * limit;
   const sortBy = searchParams.get("sortBy") || "total_listings";
   const sortOrder = searchParams.get("sortOrder") === "asc" ? true : false;
 
@@ -43,64 +43,39 @@ export async function GET(request: NextRequest) {
   const sortColumn = validSortColumns.includes(sortBy) ? sortBy : "total_listings";
 
   let productIdsFiltered: string[] | null = null;
-  try {
-    productIdsFiltered = await resolveProductIdsForListFilters(
-      supabase,
-      user.id,
-      listFilters
-    );
-    if (productIdsFiltered?.length === 0) {
-      return NextResponse.json({
-        stats: [],
-        total: 0,
-        page,
-        limit: showAll ? 0 : limit,
-        totalPages: 0,
-      });
-    }
-  } catch (e) {
-    console.error("Erro ao filtrar estatísticas:", e);
-    return NextResponse.json({ error: "Erro ao filtrar produtos" }, { status: 500 });
-  }
-
-  const buildBaseQuery = () => {
-    let q = supabase
-      .from("product_listing_stats")
-      .select("*", { count: "exact" })
-      .eq("user_id", user.id);
-    if (search) {
-      q = q.or(`sku.ilike.%${search}%,title.ilike.%${search}%`);
-    }
-    if (productIdsFiltered) {
-      q = q.in("product_id", productIdsFiltered);
-    }
-    return q.order(sortColumn, { ascending: sortOrder });
-  };
-
-  if (showAll) {
-    const { rows, total, error } = await fetchAllViaRange((from, to) =>
-      buildBaseQuery().range(from, to)
-    );
-    if (error) {
-      console.error("Erro ao buscar estatísticas:", error);
-      return NextResponse.json(
-        { error: "Erro ao buscar estatísticas" },
-        { status: 500 }
+  const needsListFilters =
+    listFilters.tagIds.length > 0 || Boolean(listFilters.supplier) || listFilters.hasPma !== "";
+  if (needsListFilters) {
+    try {
+      productIdsFiltered = await resolveProductIdsForListFilters(
+        supabase,
+        user.id,
+        listFilters
       );
+      if (productIdsFiltered?.length === 0) {
+        return NextResponse.json({
+          stats: [],
+          total: 0,
+          page,
+          limit: showAll ? 0 : limit,
+          totalPages: 0,
+        });
+      }
+    } catch (e) {
+      console.error("Erro ao filtrar estatísticas:", e);
+      return NextResponse.json({ error: "Erro ao filtrar produtos" }, { status: 500 });
     }
-    return NextResponse.json({
-      stats: rows,
-      total,
-      page: 1,
-      limit: 0,
-      totalPages: 1,
-    });
   }
 
-  const { data: stats, error, count } = await buildBaseQuery().range(
-    offset,
-    offset + limit - 1
-  );
+  const { rows, total, error } = await fetchProductStatsListPage(supabase, user.id, {
+    search,
+    productIds: productIdsFiltered,
+    page,
+    limit,
+    showAll,
+    sortColumn,
+    sortAscending: sortOrder,
+  });
 
   if (error) {
     console.error("Erro ao buscar estatísticas:", error);
@@ -111,10 +86,10 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
-    stats: stats ?? [],
-    total: count ?? 0,
-    page,
-    limit,
-    totalPages: Math.ceil((count ?? 0) / limit),
+    stats: rows,
+    total,
+    page: showAll ? 1 : page,
+    limit: showAll ? 0 : limit,
+    totalPages: showAll ? 1 : Math.ceil(total / limit),
   });
 }

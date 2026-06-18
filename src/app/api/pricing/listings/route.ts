@@ -2,9 +2,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
   parseHasPmaParam,
-  resolveMlItemIdsByFulfillment,
-  resolveProductIdsForListFilters,
 } from "@/lib/product-filters";
+import {
+  applyPricingListingIdFilters,
+  fetchPricingCacheRowsByIdBatches,
+  resolvePricingListingIdFilters,
+} from "@/lib/pricing/resolve-listing-filters";
+import { sortPricingCacheRows } from "@/lib/pricing/sort-pricing-cache-rows";
 import {
   fetchAllViaRange,
   fetchAllViaRangeParallel,
@@ -18,6 +22,9 @@ import {
 import { applyNumericCompareFilter } from "@/lib/pricing/listings-query-filters";
 import { attachProductPmaToRows } from "@/lib/pricing/attach-product-pma";
 import { NextRequest, NextResponse } from "next/server";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CacheQuery = any;
 
 export interface PricingListingRow {
   id: string;
@@ -155,55 +162,45 @@ export async function GET(req: NextRequest) {
   // Ler cache com service role (já validamos que a conta é do usuário); evita RLS bloqueando leitura
   const serviceSupabase = createServiceClient();
 
-  /** Produto efetivo no cache (product_id) + Full (item_id em ml_items). */
-  let allowedProductIds: string[] | null = null;
-  let allowedItemIds: string[] | null = null;
-  if (tagIds.length > 0 || supplierFilter || hasPmaFilter) {
-    try {
-      allowedProductIds = await resolveProductIdsForListFilters(serviceSupabase, user.id, {
-        tagIds,
-        supplier: supplierFilter,
-        hasPma: hasPmaFilter,
+  /** Produto efetivo no cache (product_id) ou item_id (tag isolada) + Full. */
+  let listingIdFilters: Awaited<ReturnType<typeof resolvePricingListingIdFilters>> | null = null;
+  try {
+    listingIdFilters = await resolvePricingListingIdFilters(serviceSupabase, account.id, user.id, {
+      tagIds,
+      supplierFilter,
+      hasPma: hasPmaFilter,
+      fullOnly,
+    });
+    if (
+      listingIdFilters.allowedProductIds?.length === 0 ||
+      listingIdFilters.allowedItemIds?.length === 0
+    ) {
+      return NextResponse.json({
+        listings: [],
+        total: 0,
+        page,
+        limit: fetchLimit,
+        totalPages: 0,
+        last_updated_at: null,
+        linked_row_count: 0,
       });
-      if (allowedProductIds !== null && allowedProductIds.length === 0) {
-        return NextResponse.json({
-          listings: [],
-          total: 0,
-          page,
-          limit: fetchLimit,
-          totalPages: 0,
-          last_updated_at: null,
-          linked_row_count: 0,
-        });
-      }
-    } catch (e) {
-      console.error("Erro ao filtrar listagens por produto:", e);
-      return NextResponse.json({ error: "Erro ao filtrar por produto" }, { status: 500 });
     }
-  }
-  if (fullOnly) {
-    try {
-      allowedItemIds = await resolveMlItemIdsByFulfillment(serviceSupabase, account.id);
-      if (allowedItemIds.length === 0) {
-        return NextResponse.json({
-          listings: [],
-          total: 0,
-          page,
-          limit: fetchLimit,
-          totalPages: 0,
-          last_updated_at: null,
-          linked_row_count: 0,
-        });
-      }
-    } catch (e) {
-      console.error("Erro ao filtrar listagens Full:", e);
-      return NextResponse.json({ error: "Erro ao filtrar por produto" }, { status: 500 });
-    }
+  } catch (e) {
+    console.error("Erro ao filtrar listagens por produto:", e);
+    return NextResponse.json({ error: "Erro ao filtrar por produto" }, { status: 500 });
   }
 
   try {
-    const buildCacheQuery = (base: ReturnType<typeof serviceSupabase.from>) => {
-      let q = base.select(PRICING_CACHE_LIST_COLUMNS, { count: "exact" }).eq("account_id", account.id);
+    const applyNonIdCacheFilters = (
+      base: CacheQuery,
+      options?: { count?: "exact" | undefined; columns?: string }
+    ) => {
+      const columns = options?.columns ?? PRICING_CACHE_LIST_COLUMNS;
+      let q =
+        options?.count === "exact"
+          ? base.select(columns, { count: "exact" })
+          : base.select(columns);
+      q = q.eq("account_id", account.id);
       if (statusFilter) q = q.eq("status", statusFilter);
       if (linkedParam === "1") q = q.not("product_id", "is", null);
       else if (linkedParam === "0") q = q.is("product_id", null);
@@ -228,10 +225,24 @@ export async function GET(req: NextRequest) {
       if (semPromoMlAtiva) {
         q = q.or("ml_active_promotions.is.null,ml_active_promotions.eq.");
       }
-      if (allowedProductIds) q = q.in("product_id", allowedProductIds);
-      if (allowedItemIds) q = q.in("item_id", allowedItemIds);
       return q;
     };
+
+    const buildCacheQuery = (base: CacheQuery) => {
+      let q = applyNonIdCacheFilters(base, { count: "exact" });
+      if (listingIdFilters) {
+        const withIds = applyPricingListingIdFilters(q, listingIdFilters);
+        if (withIds) q = withIds;
+      }
+      return q;
+    };
+
+    const mustBatchIdFilters =
+      listingIdFilters != null &&
+      applyPricingListingIdFilters(
+        serviceSupabase.from("pricing_cache").select("id"),
+        listingIdFilters
+      ) === null;
 
     const buildOrderedCacheQuery = () => {
       let q = buildCacheQuery(serviceSupabase.from("pricing_cache"));
@@ -275,7 +286,24 @@ export async function GET(req: NextRequest) {
     let cacheErr: unknown = null;
     let totalCount: number | null = null;
 
-    if (needsBatchFetch) {
+    if (mustBatchIdFilters && listingIdFilters) {
+      const { rows: allRows, error: batchErr } = await fetchPricingCacheRowsByIdBatches<
+        Record<string, unknown>
+      >(
+        (idColumn, batch) => {
+          let q = applyNonIdCacheFilters(serviceSupabase.from("pricing_cache"));
+          return q.in(idColumn, batch);
+        },
+        listingIdFilters,
+        PRICING_CACHE_LIST_COLUMNS
+      );
+      cacheErr = batchErr;
+      if (!batchErr) {
+        const sorted = sortPricingCacheRows(allRows, orderBy);
+        totalCount = sorted.length;
+        cacheRows = showAll ? sorted : sorted.slice(offset, offset + limit);
+      }
+    } else if (needsBatchFetch) {
       const maxRows = showAll ? undefined : offset + limit;
       const fetchAll = showAll ? fetchAllViaRangeParallel : fetchAllViaRange;
       const batchResult = await fetchAll<Record<string, unknown>>(

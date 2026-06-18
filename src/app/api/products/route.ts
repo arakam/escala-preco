@@ -9,7 +9,8 @@ import {
   parseProductListFilters,
   resolveProductIdsForListFilters,
 } from "@/lib/product-filters";
-import { fetchAllViaRange, isAllPageSize } from "@/lib/table-pagination";
+import { fetchProductsListPage } from "@/lib/products/fetch-products-list";
+import { isAllPageSize } from "@/lib/table-pagination";
 import {
   linkMlItemsToProducts,
   refreshPricingCacheForProductIds,
@@ -33,7 +34,6 @@ export async function GET(request: NextRequest) {
   const showAll = isAllPageSize(limitParam);
   const page = showAll ? 1 : parseInt(searchParams.get("page") || "1", 10);
   const limit = showAll ? 0 : limitParam;
-  const offset = (page - 1) * limit;
 
   let productIdsFiltered: string[] | null = null;
   const needsListFilters =
@@ -60,23 +60,6 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const buildBaseQuery = () => {
-    let q = supabase
-      .from("products")
-      .select("*", { count: "exact" })
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-    if (search) {
-      q = q.or(
-        `sku.ilike.%${search}%,title.ilike.%${search}%,ean.ilike.%${search}%,supplier.ilike.%${search}%`
-      );
-    }
-    if (productIdsFiltered) {
-      q = q.in("id", productIdsFiltered);
-    }
-    return q;
-  };
-
   const attachTags = async (rows: { id: string }[]) => {
     const tagMap = await fetchTagsGroupedByProductId(
       supabase,
@@ -88,42 +71,27 @@ export async function GET(request: NextRequest) {
     }));
   };
 
-  if (showAll) {
-    const { rows, total, error } = await fetchAllViaRange((from, to) =>
-      buildBaseQuery().range(from, to)
-    );
-    if (error) {
-      console.error("Erro ao buscar produtos:", error);
-      return NextResponse.json({ error: "Erro ao buscar produtos" }, { status: 500 });
-    }
-    const withTags = await attachTags(rows);
-    return NextResponse.json({
-      products: withTags,
-      total,
-      page: 1,
-      limit: 0,
-      totalPages: 1,
-    });
-  }
-
-  const { data: products, error, count } = await buildBaseQuery().range(
-    offset,
-    offset + limit - 1
-  );
+  const { rows, total, error } = await fetchProductsListPage(supabase, user.id, {
+    search,
+    productIds: productIdsFiltered,
+    page,
+    limit,
+    showAll,
+  });
 
   if (error) {
     console.error("Erro ao buscar produtos:", error);
     return NextResponse.json({ error: "Erro ao buscar produtos" }, { status: 500 });
   }
 
-  const withTags = await attachTags(products ?? []);
+  const withTags = await attachTags(rows);
 
   return NextResponse.json({
     products: withTags,
-    total: count ?? 0,
-    page,
-    limit,
-    totalPages: Math.ceil((count ?? 0) / limit),
+    total,
+    page: showAll ? 1 : page,
+    limit: showAll ? 0 : limit,
+    totalPages: showAll ? 1 : Math.ceil(total / limit),
   });
 }
 
