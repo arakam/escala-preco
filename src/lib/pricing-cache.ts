@@ -14,9 +14,10 @@ import { createHash } from "crypto";
 import { runWithConcurrency } from "@/lib/mercadolivre/client";
 import { createServiceClient } from "@/lib/supabase/service";
 import { loadMlActivePromotionsByItemIdFromPromotionsCache } from "@/lib/mercadolivre/ml-active-promotions-from-cache";
-import { aggregateSales30dFromDb } from "@/lib/mercadolivre/orders-store";
-import { getSalesMap } from "@/lib/mercadolivre/sales";
-import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
+import {
+  aggregateSales30dForItemIds,
+  aggregateSales30dFromDb,
+} from "@/lib/mercadolivre/orders-store";
 import { extractSkuFromMlListing } from "@/lib/products/ml-sku";
 import { fetchAllViaRange } from "@/lib/table-pagination";
 
@@ -432,57 +433,8 @@ export async function refreshPricingCache(accountId: string): Promise<RefreshPri
     plannedByKey.set(`${r.item_id}:${vid}`, Number(r.planned_price));
   }
 
-  // 4) Vendas 30d (API ML)
-  const allItemIds = Array.from(
-    new Set([
-      ...(items as Array<{ item_id: string }>).map((i) => i.item_id),
-      ...(itemsWithVariations as Array<{ item_id: string }>).map((i) => i.item_id),
-      ...(variations as Array<{ item_id: string }>).map((v) => v.item_id),
-    ])
-  );
-
-  let salesMap: Record<string, number> = {};
-  let ordersMap: Record<string, number> = {};
-  let accessToken: string | null = null;
-
-  const dbSales = await aggregateSales30dFromDb(supabase, accountId);
-  if (dbSales.hasData) {
-    salesMap = dbSales.sales;
-    ordersMap = dbSales.orders;
-  } else if (allItemIds.length > 0) {
-    const { data: tokenData } = await supabase
-      .from("ml_tokens")
-      .select("access_token, refresh_token, expires_at")
-      .eq("account_id", accountId)
-      .single();
-    const token = tokenData as { access_token: string; refresh_token: string; expires_at: string } | null;
-    if (token) {
-      accessToken =
-        (await getValidAccessToken(
-          accountId,
-          token.access_token,
-          token.refresh_token,
-          token.expires_at,
-          supabase
-        )) ?? null;
-      if (accessToken) {
-        const to = new Date();
-        const from = new Date(to);
-        from.setDate(from.getDate() - 30);
-        const dateFrom = from.toISOString().replace(/\.\d{3}Z/, ".000Z");
-        const dateTo = to.toISOString().replace(/\.\d{3}Z/, ".999Z");
-        const maps = await getSalesMap(
-          accessToken,
-          account.ml_user_id as number,
-          allItemIds,
-          dateFrom,
-          dateTo
-        );
-        salesMap = maps.sales;
-        ordersMap = maps.orders;
-      }
-    }
-  }
+  // 4) Vendas 30d (ml_orders no banco — atualizadas via webhook/backfill)
+  const { sales: salesMap, orders: ordersMap } = await aggregateSales30dFromDb(supabase, accountId);
 
   let promoByItemId = new Map<string, string>();
   try {
@@ -779,40 +731,11 @@ export async function refreshPricingCacheByItemId(
     plannedByKey.set(`${r.item_id}:${vid}`, Number(r.planned_price));
   }
 
-  let salesMap: Record<string, number> = {};
-  let ordersMap: Record<string, number> = {};
-  const dbSales = await aggregateSales30dFromDb(supabase, accountId);
-  if (dbSales.hasData) {
-    salesMap = dbSales.sales;
-    ordersMap = dbSales.orders;
-  } else {
-    const { data: tokenData } = await supabase
-      .from("ml_tokens")
-      .select("access_token, refresh_token, expires_at")
-      .eq("account_id", accountId)
-      .single();
-    const token = tokenData as { access_token: string; refresh_token: string; expires_at: string } | null;
-    if (token) {
-      const accessToken =
-        (await getValidAccessToken(
-          accountId,
-          token.access_token,
-          token.refresh_token,
-          token.expires_at,
-          supabase
-        )) ?? null;
-      if (accessToken) {
-        const to = new Date();
-        const from = new Date(to);
-        from.setDate(from.getDate() - 30);
-        const dateFrom = from.toISOString().replace(/\.\d{3}Z/, ".000Z");
-        const dateTo = to.toISOString().replace(/\.\d{3}Z/, ".999Z");
-        const maps = await getSalesMap(accessToken, account.ml_user_id as number, [itemIdClean], dateFrom, dateTo);
-        salesMap = maps.sales;
-        ordersMap = maps.orders;
-      }
-    }
-  }
+  const { sales: salesMap, orders: ordersMap } = await aggregateSales30dForItemIds(
+    supabase,
+    accountId,
+    [itemIdClean]
+  );
 
   let mlPromoText = "";
   try {
