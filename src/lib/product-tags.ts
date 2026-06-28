@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProductTag } from "@/lib/db/types";
+import { chunkIds } from "@/lib/supabase/batched-in-filter";
 import { fetchAllViaRange } from "@/lib/table-pagination";
 
 export function normalizeTagName(name: string): string {
@@ -149,6 +150,36 @@ export async function resolveMlItemIdsByProductTagIds(
 }
 
 /**
+ * MLB presentes no pricing_cache com algum dos product_id informados (conta).
+ */
+export async function resolveMlItemIdsByProductIdsInPricingCache(
+  supabase: SupabaseClient,
+  accountId: string,
+  productIds: string[]
+): Promise<string[]> {
+  if (productIds.length === 0) return [];
+
+  const itemIds = new Set<string>();
+  for (const batch of chunkIds(productIds)) {
+    const { rows, error } = await fetchAllViaRange<{ item_id: string }>((from, to) =>
+      supabase
+        .from("pricing_cache")
+        .select("item_id")
+        .eq("account_id", accountId)
+        .in("product_id", batch)
+        .order("item_id", { ascending: true })
+        .range(from, to)
+    );
+    if (error) throw error;
+
+    for (const row of rows) {
+      if (row.item_id) itemIds.add(String(row.item_id).trim().toUpperCase());
+    }
+  }
+  return Array.from(itemIds);
+}
+
+/**
  * MLB cuja linha em `pricing_cache` usa um produto com alguma das tags (OR).
  * Alinha filtro à coluna `product_id` exibida na tela de Preços (produto efetivo do anúncio).
  */
@@ -163,22 +194,7 @@ export async function resolveMlItemIdsByEffectiveProductTagIds(
   const productIds = await resolveProductIdsByTagIds(supabase, tagIds, userId);
   if (productIds.length === 0) return [];
 
-  const itemIds = new Set<string>();
-  const { rows, error } = await fetchAllViaRange<{ item_id: string }>((from, to) =>
-    supabase
-      .from("pricing_cache")
-      .select("item_id")
-      .eq("account_id", accountId)
-      .in("product_id", productIds)
-      .order("item_id", { ascending: true })
-      .range(from, to)
-  );
-  if (error) throw error;
-
-  for (const row of rows) {
-    if (row.item_id) itemIds.add(String(row.item_id).trim().toUpperCase());
-  }
-  return Array.from(itemIds);
+  return resolveMlItemIdsByProductIdsInPricingCache(supabase, accountId, productIds);
 }
 
 /** IDs de produtos que possuem pelo menos uma das tags informadas (OR). */

@@ -3,7 +3,7 @@ import {
   resolveMlItemIdsByFulfillment,
   resolveProductIdsForListFilters,
 } from "@/lib/product-filters";
-import { resolveMlItemIdsByEffectiveProductTagIds } from "@/lib/product-tags";
+import { resolveMlItemIdsByProductIdsInPricingCache } from "@/lib/product-tags";
 import { applyBatchedInFilter as applyColumnInFilter, chunkIds, UUID_IN_BATCH } from "@/lib/supabase/batched-in-filter";
 import { fetchAllRowsByColumnInBatches } from "@/lib/listing-tag-filter";
 
@@ -33,17 +33,7 @@ export async function resolvePricingListingIdFilters(
   const hasTagFilter = options.tagIds.length > 0;
   const hasProductFilter = Boolean(options.supplierFilter) || options.hasPma !== "";
 
-  if (hasTagFilter && !hasProductFilter) {
-    allowedItemIds = await resolveMlItemIdsByEffectiveProductTagIds(
-      serviceSupabase,
-      accountId,
-      userId,
-      options.tagIds
-    );
-    if (allowedItemIds !== null && allowedItemIds.length === 0) {
-      return { allowedProductIds: [], allowedItemIds: [] };
-    }
-  } else if (hasTagFilter || hasProductFilter) {
+  if (hasTagFilter || hasProductFilter) {
     allowedProductIds = await resolveProductIdsForListFilters(serviceSupabase, userId, {
       tagIds: options.tagIds,
       supplier: options.supplierFilter,
@@ -59,9 +49,15 @@ export async function resolvePricingListingIdFilters(
     if (fullItemIds.length === 0) {
       return { allowedProductIds: [], allowedItemIds: [] };
     }
-    if (allowedItemIds) {
+    if (allowedProductIds) {
+      const taggedItemIds = await resolveMlItemIdsByProductIdsInPricingCache(
+        serviceSupabase,
+        accountId,
+        allowedProductIds
+      );
       const fullSet = new Set(fullItemIds.map((id) => id.trim().toUpperCase()));
-      allowedItemIds = allowedItemIds.filter((id) => fullSet.has(id.trim().toUpperCase()));
+      allowedItemIds = taggedItemIds.filter((id) => fullSet.has(id.trim().toUpperCase()));
+      allowedProductIds = null;
       if (allowedItemIds.length === 0) {
         return { allowedProductIds: [], allowedItemIds: [] };
       }
