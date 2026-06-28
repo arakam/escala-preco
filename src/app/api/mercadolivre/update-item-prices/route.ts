@@ -6,6 +6,8 @@ import { runWithConcurrency } from "@/lib/mercadolivre/client";
 import { updateItemPriceOnMl } from "@/lib/mercadolivre/update-item-price";
 import { syncSingleItem } from "@/lib/mercadolivre/sync-worker";
 import { refreshPricingCacheByItemId } from "@/lib/pricing-cache";
+import { applyPriceRounding } from "@/lib/pricing/price-rounding";
+import { loadPriceRoundingForUser } from "@/lib/pricing/load-price-rounding";
 
 type UpdateItemPriceInput = {
   item_id: string;
@@ -114,6 +116,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Falha ao obter access_token válido do Mercado Livre" }, { status: 401 });
   }
 
+  // Arredondamento do Preço Final (preferência do usuário): aplicado ao preço enviado ao ML.
+  const priceRounding = await loadPriceRoundingForUser(supabase, user.id);
+
   const applyResults = await runWithConcurrency(uniqueItems, 3, async (item): Promise<ItemApplyResult> => {
     if (!Number.isFinite(item.promotion_price) || item.promotion_price <= 0) {
       return {
@@ -123,10 +128,12 @@ export async function POST(req: NextRequest) {
       };
     }
 
+    const finalPrice = applyPriceRounding(item.promotion_price, priceRounding);
+
     const updated = await updateItemPriceOnMl(
       item.item_id,
       accessToken,
-      item.promotion_price,
+      finalPrice,
       item.variation_id
     );
 

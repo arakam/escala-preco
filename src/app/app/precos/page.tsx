@@ -3283,7 +3283,9 @@ function PrecosPageContent() {
 
   const handleOpenCampaign = useCallback(() => {
     const selectedListings = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
-    const invalidForCampaign = selectedListings.filter((l) => !meetsMlMinCampaignDiscount(l));
+    const invalidForCampaign = selectedListings.filter(
+      (l) => !meetsMlMinCampaignDiscount({ ...l, new_price: applyPriceRounding(l.new_price, priceRounding) })
+    );
     if (invalidForCampaign.length > 0) {
       const names = invalidForCampaign.map((l) => l.title || l.item_id).slice(0, 5);
       const more = invalidForCampaign.length > 5 ? ` e mais ${invalidForCampaign.length - 5}` : "";
@@ -3308,7 +3310,7 @@ function PrecosPageContent() {
       setCampaignName(`EP ${month}-${year}`);
     }
     setCampaignOpen(true);
-  }, [campaignName, campaignStart, campaignFinish, selectedIds, listings]);
+  }, [campaignName, campaignStart, campaignFinish, selectedIds, listings, priceRounding]);
 
   const handleOpenUpdatePrice = useCallback(() => {
     if (selectedIds.size === 0) {
@@ -3347,7 +3349,7 @@ function PrecosPageContent() {
     const items = selectedListings.map((l) => ({
       item_id: l.item_id,
       variation_id: l.variation_id,
-      promotion_price: l.new_price,
+      promotion_price: applyPriceRounding(l.new_price, priceRounding),
     }));
 
     const labelsByKey: Record<string, string> = {};
@@ -3413,7 +3415,7 @@ function PrecosPageContent() {
     } finally {
       setUpdatePriceLoading(false);
     }
-  }, [selectedIds, listings, loadListings]);
+  }, [selectedIds, listings, loadListings, priceRounding]);
 
   const handleDownloadUpdatePriceIssuesCsv = useCallback(() => {
     const issues = updatePriceResult?.items.filter((i) => i.status !== "ok") ?? [];
@@ -3451,7 +3453,9 @@ function PrecosPageContent() {
     }
 
     const selectedListingsForCampaign = listings.filter((l) => selectedIds.has(listingSelectionKey(l)));
-    const validListings = selectedListingsForCampaign.filter((l) => meetsMlMinCampaignDiscount(l));
+    const validListings = selectedListingsForCampaign.filter((l) =>
+      meetsMlMinCampaignDiscount({ ...l, new_price: applyPriceRounding(l.new_price, priceRounding) })
+    );
     if (validListings.length === 0) {
       setCampaignMessage({
         type: "error",
@@ -3462,6 +3466,7 @@ function PrecosPageContent() {
     const items = validListings.map((l) => ({
       item_id: l.item_id,
       variation_id: l.variation_id,
+      deal_price: applyPriceRounding(l.new_price, priceRounding),
     }));
 
     setCampaignLoading(true);
@@ -3532,7 +3537,7 @@ function PrecosPageContent() {
     } finally {
       setCampaignLoading(false);
     }
-  }, [campaignName, campaignStart, campaignFinish, selectedIds, listings]);
+  }, [campaignName, campaignStart, campaignFinish, selectedIds, listings, priceRounding]);
 
   const handleDownloadCampaignIssuesCsv = useCallback(() => {
     if (!campaignIssuesForDownload?.length) return;
@@ -4044,7 +4049,7 @@ function PrecosPageContent() {
                 </div>
               </div>
               <p className="text-xs text-fg-muted">
-                Use os anúncios selecionados nesta página. O preço de cada item virá do &quot;Preço Calculado&quot; salvo (planned_price).
+                Use os anúncios selecionados nesta página. O preço de cada item virá do &quot;Preço Final&quot; (Preço Calculado com o arredondamento de Configuração → Preços).
               </p>
             </div>
             <div className="mt-6 flex justify-end gap-2">

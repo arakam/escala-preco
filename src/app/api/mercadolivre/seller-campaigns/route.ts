@@ -4,10 +4,17 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { getValidAccessToken } from "@/lib/mercadolivre/refresh";
 import { runWithConcurrency } from "@/lib/mercadolivre/client";
 import { isValidMlSellerCampaignName, ML_SELLER_CAMPAIGN_NAME_HINT } from "@/lib/mercadolivre/campaign-name";
+import { applyPriceRounding } from "@/lib/pricing/price-rounding";
+import { loadPriceRoundingForUser } from "@/lib/pricing/load-price-rounding";
 
 type CampaignItemInput = {
   item_id: string;
   variation_id?: number | null;
+  /**
+   * Preço Final (já arredondado) calculado no cliente. Quando informado e válido,
+   * é usado como deal_price. Caso ausente, usa-se o planned_price salvo.
+   */
+  deal_price?: number | null;
 };
 
 type CreateSellerCampaignBody = {
@@ -30,15 +37,15 @@ type ItemApplyResult =
  * POST /api/mercadolivre/seller-campaigns
  *
  * Cria uma campanha do vendedor (SELLER_CAMPAIGN) no Mercado Livre
- * e adiciona itens usando o planned_price salvo em planned_prices
- * como deal_price.
+ * e adiciona itens usando o deal_price (Preço Final) enviado pelo cliente;
+ * quando ausente, usa o planned_price salvo em planned_prices.
  *
  * Body:
  * {
  *   name: string;
  *   start_date: string;   // "2026-03-05" ou "2026-03-05T00:00:00"
  *   finish_date: string;  // idem
- *   items: [{ item_id: "MLB...", variation_id?: number | null }]
+ *   items: [{ item_id: "MLB...", variation_id?: number | null, deal_price?: number }]
  * }
  */
 export async function POST(req: NextRequest) {
@@ -181,10 +188,14 @@ export async function POST(req: NextRequest) {
 
   // Carrega planned_prices para os itens informados
   const normalizedItems = items
-    .map((i) => ({
-      item_id: (i.item_id || "").trim().toUpperCase(),
-      variation_id: i.variation_id == null ? -1 : Number(i.variation_id),
-    }))
+    .map((i) => {
+      const dealPrice = i.deal_price == null ? null : Number(i.deal_price);
+      return {
+        item_id: (i.item_id || "").trim().toUpperCase(),
+        variation_id: i.variation_id == null ? -1 : Number(i.variation_id),
+        deal_price: dealPrice != null && Number.isFinite(dealPrice) && dealPrice > 0 ? dealPrice : null,
+      };
+    })
     .filter((i) => i.item_id);
 
   if (normalizedItems.length === 0) {
@@ -217,6 +228,9 @@ export async function POST(req: NextRequest) {
     }`;
     plannedMap.set(key, Number(row.planned_price));
   }
+
+  // Arredondamento do Preço Final (preferência do usuário): aplicado ao preço enviado ao ML.
+  const priceRounding = await loadPriceRoundingForUser(supabase, user.id);
 
   // Cria a campanha no Mercado Livre
   let campaignId: string | null = null;
@@ -283,15 +297,17 @@ export async function POST(req: NextRequest) {
     5,
     async (item): Promise<ItemApplyResult> => {
       const key = `${item.item_id}:${item.variation_id}`;
-      const plannedPrice = plannedMap.get(key);
+      const rawPrice = item.deal_price ?? plannedMap.get(key);
 
-      if (plannedPrice == null || Number.isNaN(plannedPrice)) {
+      if (rawPrice == null || Number.isNaN(rawPrice)) {
         return {
           item_id: item.item_id,
           variation_id: item.variation_id === -1 ? null : item.variation_id,
           status: "skipped_no_planned_price",
         };
       }
+
+      const plannedPrice = applyPriceRounding(rawPrice, priceRounding);
 
       try {
         const res = await fetch(
