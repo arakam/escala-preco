@@ -25,11 +25,19 @@ const VARIATION_ID_ITEM = -1;
 
 /** Gera UUID determinístico por (account_id, item_id, variation_id) para evitar colisão entre ml_items.id e ml_variations.id. */
 function cacheRowId(accountId: string, itemId: string, variationId: number): string {
-  const raw = `${accountId}:${itemId}:${variationId}`;
+  const itemNorm = String(itemId).trim().toUpperCase();
+  const raw = `${accountId}:${itemNorm}:${variationId}`;
   const hex = createHash("sha256").update(raw).digest("hex").slice(0, 32);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
+
+function cacheRowBusinessKey(accountId: string, itemId: string, variationId: number): string {
+  return `${accountId}:${String(itemId).trim().toUpperCase()}:${variationId}`;
+}
+
 const INSERT_BATCH = 500;
+/** Evita dois refresh completos da mesma conta ao mesmo tempo. */
+const accountRefreshInFlight = new Map<string, Promise<RefreshPricingCacheResult>>();
 /** Atualizações pontuais de planned_price no cache (após salvar na tela de preços). */
 const PLANNED_PRICE_CACHE_UPDATE_CONCURRENCY = 25;
 
@@ -265,6 +273,21 @@ export type RefreshPricingCacheResult =
   | { ok: true; count: number; reconciled?: number }
   | { ok: false; error: string };
 
+async function upsertPricingCacheRows(
+  supabase: ReturnType<typeof createServiceClient>,
+  rows: Record<string, unknown>[]
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  for (let i = 0; i < rows.length; i += INSERT_BATCH) {
+    const batch = rows.slice(i, i + INSERT_BATCH);
+    const { error } = await supabase.from("pricing_cache").upsert(batch, { onConflict: "id" });
+    if (error) {
+      console.error("[pricing-cache] upsert error:", error);
+      return { ok: false, error: "Erro ao gravar cache" };
+    }
+  }
+  return { ok: true };
+}
+
 /** Repõe no cache anúncios que ficaram de fora do rebuild (ex.: paginação instável). */
 async function reconcileMissingPricingCacheItems(
   accountId: string,
@@ -305,6 +328,17 @@ async function reconcileMissingPricingCacheItems(
 }
 
 export async function refreshPricingCache(accountId: string): Promise<RefreshPricingCacheResult> {
+  const inflight = accountRefreshInFlight.get(accountId);
+  if (inflight) return inflight;
+
+  const run = refreshPricingCacheInner(accountId).finally(() => {
+    accountRefreshInFlight.delete(accountId);
+  });
+  accountRefreshInFlight.set(accountId, run);
+  return run;
+}
+
+async function refreshPricingCacheInner(accountId: string): Promise<RefreshPricingCacheResult> {
   const supabase = createServiceClient();
 
   const { data: account, error: accountErr } = await supabase
@@ -540,11 +574,11 @@ export async function refreshPricingCache(accountId: string): Promise<RefreshPri
   }
 
   // Deduplicar por (account_id, item_id, variation_id) — dados de origem podem ter duplicatas
-  const rowsById = new Map<string, PricingCacheRow>();
+  const rowsByBusinessKey = new Map<string, PricingCacheRow>();
   for (const r of rows) {
-    rowsById.set(r.id, r);
+    rowsByBusinessKey.set(cacheRowBusinessKey(r.account_id, r.item_id, r.variation_id), r);
   }
-  const uniqueRows = Array.from(rowsById.values());
+  const uniqueRows = Array.from(rowsByBusinessKey.values());
 
   // Preservar dados calculados antes de limpar o cache (para consulta rápida após refresh)
   const oldCalculated = new Map<
@@ -624,14 +658,8 @@ export async function refreshPricingCache(accountId: string): Promise<RefreshPri
     };
   });
 
-  for (let i = 0; i < toInsert.length; i += INSERT_BATCH) {
-    const batch = toInsert.slice(i, i + INSERT_BATCH);
-    const { error: insertErr } = await supabase.from("pricing_cache").insert(batch);
-    if (insertErr) {
-      console.error("[pricing-cache] insert error:", insertErr);
-      return { ok: false, error: "Erro ao gravar cache" };
-    }
-  }
+  const upserted = await upsertPricingCacheRows(supabase, toInsert);
+  if (!upserted.ok) return upserted;
 
   const reconciled = await reconcileMissingPricingCacheItems(accountId, expectedItemIds);
   const { count: finalCount } = await supabase
@@ -791,9 +819,11 @@ export async function refreshPricingCacheByItemId(
     });
   }
 
-  const rowsById = new Map<string, PricingCacheRow>();
-  for (const r of rows) rowsById.set(r.id, r);
-  const uniqueRows = Array.from(rowsById.values());
+  const rowsByBusinessKey = new Map<string, PricingCacheRow>();
+  for (const r of rows) {
+    rowsByBusinessKey.set(cacheRowBusinessKey(r.account_id, r.item_id, r.variation_id), r);
+  }
+  const uniqueRows = Array.from(rowsByBusinessKey.values());
 
   const oldCalculated = new Map<
     string,
@@ -861,8 +891,8 @@ export async function refreshPricingCacheByItemId(
       }),
     };
     });
-    const { error: insertErr } = await supabase.from("pricing_cache").insert(toInsert);
-    if (insertErr) return { ok: false, error: "Erro ao gravar cache" };
+    const upserted = await upsertPricingCacheRows(supabase, toInsert);
+    if (!upserted.ok) return upserted;
   }
   return { ok: true, count: uniqueRows.length };
 }

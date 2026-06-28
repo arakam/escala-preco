@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   useCallback,
@@ -65,6 +65,10 @@ import { PrecosHelpContent } from "./precos-help-content";
 import type { PrecosFiltersValues } from "./precos-filters-modal";
 import type { ProductHasPmaFilter } from "@/lib/product-filters";
 import { PrecosToolbarIcons } from "./precos-toolbar-icons";
+import { PrecosBulkDiscountModal, PrecosBulkMarginModal } from "./precos-bulk-modals";
+import { MemoPrecosTableBody } from "./precos-table-body";
+import type { PrecosTableActions } from "./precos-table-actions";
+import { listingSelectionKey } from "./precos-table-utils";
 import {
   consumePricingListingsStaleFlag,
   subscribePricingListingsRefresh,
@@ -990,12 +994,6 @@ function applyCalculatedResultsToListings(
   });
 }
 
-/** Chave única para checkbox / ações em massa (UUID do cache ou MLB + variação). */
-function listingSelectionKey(l: Pick<PricingListing, "id" | "item_id" | "variation_id">): string {
-  if (l.id) return l.id;
-  return `${l.item_id}:${l.variation_id ?? "n"}`;
-}
-
 /** Margem em massa: lotes de até PRICING_CALCULATE_CLIENT_BATCH_SIZE por requisição (sem teto total). */
 async function solveMarginBulkViaApi(
   items: ListingWithPricing[],
@@ -1118,15 +1116,21 @@ type BulkBatchLoaderProgress = {
   saveTotal?: number;
 };
 
+/** Converte progresso por itens (concluídos/total) em "etapa N de M" conforme o tamanho do lote. */
+function batchStepLabel(done: number, total: number, batchSize: number): { step: number; steps: number } {
+  const size = Math.max(1, batchSize);
+  const steps = Math.max(1, Math.ceil(total / size));
+  const step = Math.min(steps, Math.floor(Math.max(0, done) / size) + 1);
+  return { step, steps };
+}
+
 function bulkBatchLoaderMessage(p: BulkBatchLoaderProgress): string {
   if (p.phase === "save" && p.saveTotal != null && p.saveDone != null) {
-    return `Gravando ${p.saveDone} de ${p.saveTotal} preço(s) no servidor…`;
+    const { step, steps } = batchStepLabel(p.saveDone, p.saveTotal, PLANNED_PRICES_SAVE_BATCH);
+    return `Gravando etapa ${step} de ${steps} no servidor…`;
   }
-  const { done, total, flightEnd } = p;
-  if (flightEnd != null && flightEnd > done && total > 0) {
-    return `Processando ${done + 1} a ${flightEnd} de ${total} anúncios`;
-  }
-  return `Processando ${done} de ${total} anúncios`;
+  const { step, steps } = batchStepLabel(p.done, p.total, MAX_PRICING_CALCULATE_BATCH);
+  return `Processando etapa ${step} de ${steps}…`;
 }
 
 function bulkBatchLoaderDeterminatePercent(p: BulkBatchLoaderProgress): number {
@@ -1313,10 +1317,8 @@ function PrecosPageContent() {
   const globalActionsRef = useRef<HTMLDivElement | null>(null);
   const bulkDiscountBusyRef = useRef(false);
   const [bulkDiscountModalOpen, setBulkDiscountModalOpen] = useState(false);
-  const [bulkDiscountPercentInput, setBulkDiscountPercentInput] = useState(String(ML_MIN_CAMPAIGN_DISCOUNT_PERCENT));
   /** Modal: definir margem líquida (%) nos anúncios selecionados */
   const [bulkMarginModalOpen, setBulkMarginModalOpen] = useState(false);
-  const [bulkMarginPercentInput, setBulkMarginPercentInput] = useState("");
   const bulkMarginBusyRef = useRef(false);
   /** Progresso no overlay durante "Definir margem líquida" em massa (ex.: "Processando 12 de 40 anúncios"). */
   const [bulkMarginLoaderProgress, setBulkMarginLoaderProgress] = useState<BulkBatchLoaderProgress | null>(
@@ -1331,6 +1333,7 @@ function PrecosPageContent() {
   const bulkRestoreOriginalBusyRef = useRef(false);
   const campaignMessageDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const precosImportFileInputRef = useRef<HTMLInputElement>(null);
+  const precosTableScrollRef = useRef<HTMLDivElement>(null);
   const [precosImportCsvModalOpen, setPrecosImportCsvModalOpen] = useState(false);
   const [precosImportLoading, setPrecosImportLoading] = useState(false);
   const [precosImportConfirming, setPrecosImportConfirming] = useState(false);
@@ -2289,7 +2292,7 @@ function PrecosPageContent() {
   );
 
   /** Define desconto de promoção (%) nos selecionados, com recálculo em lote. */
-  const handleBulkApplyDiscountPercent = useCallback(async (): Promise<boolean> => {
+  const handleBulkApplyDiscountPercent = useCallback(async (bulkDiscountPercentInput: string): Promise<boolean> => {
     if (bulkDiscountBusyRef.current) return false;
     const targetDiscountPct = parseFloat(bulkDiscountPercentInput.replace(",", "."));
     if (
@@ -2427,10 +2430,10 @@ function PrecosPageContent() {
       setBulkDiscountLoaderProgress(null);
       setCalculating(false);
     }
-  }, [bulkDiscountPercentInput, listings, selectedIds, isMercadoLider, persistPlannedPrices]);
+  }, [listings, selectedIds, isMercadoLider, persistPlannedPrices]);
 
-  const handleBulkDiscountConfirm = useCallback(async () => {
-    await handleBulkApplyDiscountPercent();
+  const handleBulkDiscountConfirm = useCallback(async (bulkDiscountPercentInput: string) => {
+    await handleBulkApplyDiscountPercent(bulkDiscountPercentInput);
   }, [handleBulkApplyDiscountPercent]);
 
   /** Preço calculado = preço do anúncio no ML (coluna Preço), com recálculo em lote. */
@@ -2558,7 +2561,7 @@ function PrecosPageContent() {
     }
   }, [listings, selectedIds, isMercadoLider, persistPlannedPrices]);
 
-  const handleBulkMarginConfirm = useCallback(async () => {
+  const handleBulkMarginConfirm = useCallback(async (bulkMarginPercentInput: string) => {
     const targetPct = parseFloat(bulkMarginPercentInput.replace(",", "."));
     if (!Number.isFinite(targetPct)) {
       setSaveMessage({ type: "error", text: "Informe um percentual de margem válido (ex.: 15 ou 15,5)." });
@@ -2593,7 +2596,6 @@ function PrecosPageContent() {
     const keySet = new Set(eligible.map((l) => listingSelectionKey(l)));
     bulkMarginBusyRef.current = true;
     setBulkMarginModalOpen(false);
-    setBulkMarginPercentInput("");
 
     setListings((prev) =>
       prev.map((item) =>
@@ -2762,7 +2764,7 @@ function PrecosPageContent() {
       setBulkMarginLoaderProgress(null);
       setCalculating(false);
     }
-  }, [bulkMarginPercentInput, listings, selectedIds, isMercadoLider, persistPlannedPrices]);
+  }, [listings, selectedIds, isMercadoLider, persistPlannedPrices]);
 
   const handleCopyToClipboard = useCallback((value: string, cellKey: string) => {
     if (!value) return;
@@ -3188,11 +3190,15 @@ function PrecosPageContent() {
 
   const selectedCount = useMemo(() => selectedIds.size, [selectedIds]);
 
-  const handleToggleSelectAll = useCallback(() => {
-    const allOnPageSelected =
+  const allPageSelected = useMemo(
+    () =>
       sortedListings.length > 0 &&
-      sortedListings.every((l) => selectedIds.has(listingSelectionKey(l)));
-    if (allOnPageSelected) {
+      sortedListings.every((l) => selectedIds.has(listingSelectionKey(l))),
+    [sortedListings, selectedIds]
+  );
+
+  const handleToggleSelectAll = useCallback(() => {
+    if (allPageSelected) {
       setSelectedIds((prev) => {
         const next = new Set(prev);
         for (const l of sortedListings) next.delete(listingSelectionKey(l));
@@ -3205,7 +3211,7 @@ function PrecosPageContent() {
       for (const l of sortedListings) next.add(listingSelectionKey(l));
       return next;
     });
-  }, [selectedIds, sortedListings]);
+  }, [allPageSelected, sortedListings]);
 
   const handleRowSelectChange = useCallback(
     (selectionKey: string, shiftKey: boolean, checked: boolean) => {
@@ -3235,6 +3241,44 @@ function PrecosPageContent() {
       lastSelectedKeyRef.current = selectionKey;
     },
     [visibleSelectionIndexByKey, visibleSelectionKeys]
+  );
+
+  const tableActions = useMemo<PrecosTableActions>(
+    () => ({
+      rowSelectShiftRef,
+      onRowSelectChange: handleRowSelectChange,
+      onCopyToClipboard: handleCopyToClipboard,
+      onRefreshItem: handleRefreshItem,
+      onPriceChange: handlePriceChange,
+      onPriceRowCommit: (selectionKey, committedPrice) => {
+        const listing = listingsRef.current.find((l) => listingSelectionKey(l) === selectionKey);
+        if (listing) void handlePriceRowCommit(listing, committedPrice);
+      },
+      onMarginCommit: (selectionKey, pct) => {
+        const listing = listingsRef.current.find((l) => listingSelectionKey(l) === selectionKey);
+        if (listing) void handleMarginCommit(listing, pct);
+      },
+      onApplyMinDiscount: (selectionKey) => {
+        const listing = listingsRef.current.find((l) => listingSelectionKey(l) === selectionKey);
+        if (listing) void handleApplyMinDiscount(listing);
+      },
+      getProfitPercent: (selectionKey) => {
+        const listing = listingsRef.current.find((l) => listingSelectionKey(l) === selectionKey);
+        return listing ? getProfitPercent(listing) : null;
+      },
+      formatBRL,
+    }),
+    [
+      handleRowSelectChange,
+      handleCopyToClipboard,
+      handleRefreshItem,
+      handlePriceChange,
+      handlePriceRowCommit,
+      handleMarginCommit,
+      handleApplyMinDiscount,
+      getProfitPercent,
+      formatBRL,
+    ]
   );
 
   const handleOpenCampaign = useCallback(() => {
@@ -3875,7 +3919,7 @@ function PrecosPageContent() {
       ? precosImportLoaderProgress.stage === "parse"
         ? ["Lendo arquivo CSV…", "Validando colunas MLB, Preço Calculado e Margem %…"]
         : [
-            `Salvando preços: ${precosImportLoaderProgress.done} de ${precosImportLoaderProgress.total} linha(s)…`,
+            `Salvando etapa ${batchStepLabel(precosImportLoaderProgress.done, precosImportLoaderProgress.total, PRICING_IMPORT_CONFIRM_CLIENT_BATCH_SIZE).step} de ${batchStepLabel(precosImportLoaderProgress.done, precosImportLoaderProgress.total, PRICING_IMPORT_CONFIRM_CLIENT_BATCH_SIZE).steps} no servidor…`,
             "Gravando preços planejados e atualizando cache…",
           ]
     : bulkMarginLoaderActive
@@ -4252,109 +4296,19 @@ function PrecosPageContent() {
         </div>
       )}
 
-      {bulkDiscountModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => !bulkDiscountBusyRef.current && setBulkDiscountModalOpen(false)}
-          />
-          <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
-            <h2 className="mb-2 text-lg font-semibold">Desconto em massa (selecionados)</h2>
-            <p className="mb-4 text-xs text-fg-muted">
-              Defina o desconto de promoção para os itens selecionados. Mínimo {ML_MIN_CAMPAIGN_DISCOUNT_PERCENT}% (regra ML) e máximo {ML_MAX_CAMPAIGN_DISCOUNT_PERCENT}% para modalidades configuráveis pelo seller (LIGHTNING, DOD, SELLER_CAMPAIGN, DEAL e PRICE_DISCOUNT). Ao aplicar, o modal fecha e a taxa é estimada pela referência do cache (sem listing_prices por item); use <strong>Recalcular taxa e frete</strong> (menu Ações) se quiser alinhar ao ML.
-            </p>
-            <form
-              className="space-y-4"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void handleBulkDiscountConfirm();
-              }}
-            >
-              <div>
-                <label className="mb-1 block text-sm text-fg">Desconto desejado (%)</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={bulkDiscountPercentInput}
-                  onChange={(e) => setBulkDiscountPercentInput(e.target.value)}
-                  className="input w-full py-2 text-sm"
-                  placeholder={`Ex.: ${ML_MIN_CAMPAIGN_DISCOUNT_PERCENT} ou 12,5`}
-                  autoFocus
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setBulkDiscountModalOpen(false)}
-                  className="btn btn-secondary px-4 py-2 text-sm"
-                  disabled={bulkDiscountBusyRef.current}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={bulkDiscountBusyRef.current}
-                  className="btn btn-primary text-sm disabled:opacity-50"
-                >
-                  Aplicar nos selecionados
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <PrecosBulkDiscountModal
+        open={bulkDiscountModalOpen}
+        busyRef={bulkDiscountBusyRef}
+        onClose={() => setBulkDiscountModalOpen(false)}
+        onConfirm={(input) => void handleBulkDiscountConfirm(input)}
+      />
 
-      {bulkMarginModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => !bulkMarginBusyRef.current && setBulkMarginModalOpen(false)}
-          />
-          <div className="relative w-full max-w-md rounded-lg bg-card p-6 shadow-xl dark:border dark:border-slate-600">
-            <h2 className="mb-2 text-lg font-semibold">Margem nos selecionados</h2>
-            <p className="mb-4 text-xs text-fg-muted">
-              Aplica a mesma margem líquida desejada (valor a receber − custo, sobre o preço calculado) em todos os anúncios marcados que tenham custo e tipo de listagem. Processamento em lote no servidor (taxa de referência + frete em tabela, até 3 passadas por faixa de frete). Confira depois com <strong>Recalcular taxa e frete</strong> (menu Ações) se quiser alinhar a taxa exata do ML.
-            </p>
-            <form
-              className="space-y-4"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void handleBulkMarginConfirm();
-              }}
-            >
-              <div>
-                <label className="mb-1 block text-sm text-fg">Margem líquida desejada (%)</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={bulkMarginPercentInput}
-                  onChange={(e) => setBulkMarginPercentInput(e.target.value)}
-                  className="input w-full py-2 text-sm"
-                  placeholder="Ex.: 18 ou 12,5"
-                  autoFocus
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setBulkMarginModalOpen(false)}
-                  className="btn btn-secondary px-4 py-2 text-sm"
-                  disabled={bulkMarginBusyRef.current}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={bulkMarginBusyRef.current}
-                  className="btn btn-primary text-sm disabled:opacity-50"
-                >
-                  Aplicar nos selecionados
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <PrecosBulkMarginModal
+        open={bulkMarginModalOpen}
+        busyRef={bulkMarginBusyRef}
+        onClose={() => setBulkMarginModalOpen(false)}
+        onConfirm={(input) => void handleBulkMarginConfirm(input)}
+      />
 
         <div className="table-page-toolbar">
           <div className="flex flex-wrap items-end gap-1">
@@ -4508,7 +4462,6 @@ function PrecosPageContent() {
                   role="menuitem"
                   onClick={() => {
                     setBulkActionsOpen(false);
-                    setBulkDiscountPercentInput(String(ML_MIN_CAMPAIGN_DISCOUNT_PERCENT));
                     setBulkDiscountModalOpen(true);
                   }}
                   disabled={calculating}
@@ -4534,7 +4487,6 @@ function PrecosPageContent() {
                   role="menuitem"
                   onClick={() => {
                     setBulkActionsOpen(false);
-                    setBulkMarginPercentInput("");
                     setBulkMarginModalOpen(true);
                   }}
                   disabled={calculating}
@@ -4953,6 +4905,7 @@ function PrecosPageContent() {
             className="[&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none"
             maxHeight="70vh"
             tableClassName="table-fixed w-max min-w-[max(100%,max-content)]"
+            scrollContainerRef={precosTableScrollRef}
           >
             <colgroup>
               {PRICING_COLUMNS.map((c, i) => (
@@ -4970,10 +4923,7 @@ function PrecosPageContent() {
                     <input
                       type="checkbox"
                       className="rounded border-gray-300"
-                      checked={
-                        sortedListings.length > 0 &&
-                        sortedListings.every((l) => selectedIds.has(listingSelectionKey(l)))
-                      }
+                      checked={allPageSelected}
                       onChange={handleToggleSelectAll}
                       onClick={(e) => e.stopPropagation()}
                     />
@@ -5071,464 +5021,20 @@ function PrecosPageContent() {
                 {renderPricingColumnHeader(20, "Link")}
               </tr>
             </thead>
-            <tbody key={tableFilterEpoch}>
-              {sortedListings.map((listing) => {
-                const profit =
-                  listing.calculated && listing.cost_price != null
-                    ? listing.calculated.net_amount - listing.cost_price
-                    : null;
-                const profitPercent =
-                  profit != null && listing.new_price > 0
-                    ? (profit / listing.new_price) * 100
-                    : null;
-
-                const mlFeeSharePct =
-                  listing.calculating
-                    ? null
-                    : listing.calculated && listing.calculated.price > 0
-                      ? (listing.calculated.fee / listing.calculated.price) * 100
-                      : listing.reference_fee_percent != null &&
-                          Number.isFinite(Number(listing.reference_fee_percent))
-                        ? Number(listing.reference_fee_percent)
-                        : null;
-                const mlFeeShareIsReference =
-                  !listing.calculating &&
-                  !listing.calculated &&
-                  mlFeeSharePct != null;
-
-                const isSelected = selectedIds.has(listingSelectionKey(listing));
-
-                return (
-                  <tr
-                    key={listingSelectionKey(listing)}
-                    className="table-body-row"
-                  >
-                    <td
-                      className={`p-2 text-center ${stickyColumns.has(0) ? "sticky-col" : ""}`}
-                      style={stickyBodyStyles[0]}
-                    >
-                      <input
-                        type="checkbox"
-                        className="rounded border-gray-300"
-                        checked={isSelected}
-                        onMouseDown={(e) => {
-                          rowSelectShiftRef.current = e.shiftKey;
-                        }}
-                        onChange={(e) => {
-                          handleRowSelectChange(
-                            listingSelectionKey(listing),
-                            rowSelectShiftRef.current,
-                            e.target.checked
-                          );
-                        }}
-                      />
-                    </td>
-                    <td
-                      className={`p-2 ${stickyColumns.has(1) ? "sticky-col" : ""}`}
-                      style={stickyBodyStyles[1]}
-                    >
-                      {listing.thumbnail ? (
-                        <img
-                          src={listing.thumbnail.replace(/^http:/, "https:")}
-                          alt=""
-                          className="h-10 w-10 rounded-lg border border-slate-100 bg-slate-50 object-contain"
-                        />
-                      ) : (
-                        <span className="text-xs text-slate-400">—</span>
-                      )}
-                    </td>
-                    <td
-                      className={`p-2 ${stickyColumns.has(2) ? "sticky-col" : ""}`}
-                      style={stickyBodyStyles[2]}
-                    >
-                      <div className="flex items-center gap-1">
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
-                          onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(listing.item_id, `mlb-${listing.id}-${listing.variation_id ?? "n"}`)}
-                          title="Clique para copiar"
-                          className="pricing-cell-chip font-mono text-xs"
-                        >
-                          {copiedCell === `mlb-${listing.id}-${listing.variation_id ?? "n"}` ? (
-                            <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
-                          ) : (
-                            listing.item_id
-                          )}
-                          {listing.variation_id && (
-                            <span className="block text-fg-muted">var: {listing.variation_id}</span>
-                          )}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleRefreshItem(listing.item_id); }}
-                          disabled={refreshingItemId === listing.item_id}
-                          title="Atualizar este item no cache"
-                          className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:text-slate-300 disabled:opacity-50"
-                        >
-                          {refreshingItemId === listing.item_id ? (
-                            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
-                          ) : (
-                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                            </svg>
-                          )}
-                        </button>
-                      </div>
-                    </td>
-                    <td
-                      className={`p-2 text-sm ${stickyColumns.has(3) ? "sticky-col" : ""}`}
-                      style={stickyBodyStyles[3]}
-                      title={listing.title ?? ""}
-                    >
-                      <span className="line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-50">
-                        {listing.title ?? "—"}
-                      </span>
-                    </td>
-                    <td
-                      className={`p-2 font-mono text-xs text-slate-700 dark:text-slate-200 ${stickyColumns.has(4) ? "sticky-col" : ""}`}
-                      style={stickyBodyStyles[4]}
-                    >
-                      {listing.sku ? (
-                        (() => {
-                          const { primary, extraCount } = skuDisplayParts(listing.sku);
-                          if (!primary) return <span className="text-fg-muted">—</span>;
-                          const linked = Boolean(listing.product_id);
-                          return (
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => handleCopyToClipboard(primary, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
-                          onKeyDown={(e) => e.key === "Enter" && handleCopyToClipboard(primary, `sku-${listing.id}-${listing.variation_id ?? "n"}`)}
-                          title={listing.sku}
-                          className="pricing-cell-chip inline-flex items-center gap-1 text-left"
-                        >
-                          {copiedCell === `sku-${listing.id}-${listing.variation_id ?? "n"}` ? (
-                            <span className="text-xs font-semibold text-emerald-600">Copiado!</span>
-                          ) : (
-                            <>
-                              <span>{primary}</span>
-                              {extraCount > 0 && (
-                                <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-200">
-                                  +{extraCount}
-                                </span>
-                              )}
-                              <span
-                                title={linked ? "Vinculado a produto" : "Sem vínculo com produto"}
-                                className="ml-0.5 inline-flex"
-                              >
-                                <LinkStatusIcon linked={linked} />
-                              </span>
-                            </>
-                          )}
-                        </span>
-                          );
-                        })()
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td
-                      className={`p-2 text-right text-sm tabular-nums ${stickyColumns.has(5) ? "sticky-col" : ""}`}
-                      style={stickyBodyStyles[5]}
-                      title={
-                        ordersData[listing.item_id] != null
-                          ? `${ordersData[listing.item_id]} pedido(s) pago(s) em 30 dias`
-                          : "Número de pedidos pagos que contêm este item."
-                      }
-                    >
-                      {ordersData[listing.item_id] != null ? (
-                        ordersData[listing.item_id]
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right text-sm font-medium ${stickyColumns.has(6) ? "sticky-col" : ""}`} style={stickyBodyStyles[6]}>
-                      R$ {formatBRL(listing.current_price)}
-                    </td>
-                    <td className={`p-2 text-right ${stickyColumns.has(7) ? "sticky-col" : ""}`} style={stickyBodyStyles[7]}>
-                      {listing.calculating ? (
-                        <span className="text-fg-muted">…</span>
-                      ) : (
-                        <MarginInput
-                          valuePercent={getProfitPercent(listing)}
-                          disabled={
-                            listing.cost_price == null ||
-                            !listing.listing_type_id ||
-                            !listing.category_id
-                          }
-                          dirty={listing.dirty}
-                          onCommit={(pct) => void handleMarginCommit(listing, pct)}
-                        />
-                      )}
-                    </td>
-                    <td className={`p-2 ${stickyColumns.has(8) ? "sticky-col" : ""}`} style={stickyBodyStyles[8]}>
-                      <div className="flex flex-col items-end gap-0.5">
-                        <PriceInput
-                          value={listing.new_price}
-                          onChange={(newValue) =>
-                            handlePriceChange(
-                              listing.id,
-                              listing.variation_id,
-                              String(newValue)
-                            )
-                          }
-                          onCommit={(committed) => void handlePriceRowCommit(listing, committed)}
-                          dirty={listing.dirty}
-                        />
-                        {listing.current_price > 0 && listing.new_price > 0 && !meetsMlMinCampaignDiscount(listing) && (
-                          <button
-                            type="button"
-                            onClick={() => void handleApplyMinDiscount(listing)}
-                            disabled={listing.calculating}
-                            className="text-xs text-amber-600 underline hover:text-amber-700 disabled:opacity-50 whitespace-nowrap"
-                            title="Clique para ajustar ao desconto mínimo de 5% (preço calculado = 95% do preço ML)"
-                          >
-                            Ajustar para 5%
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                    <td className={`p-2 text-right text-sm font-medium ${stickyColumns.has(9) ? "sticky-col" : ""}`} style={stickyBodyStyles[9]}>
-                      {listing.new_price > 0 ? (
-                        (() => {
-                          const finalPrice = applyPriceRounding(listing.new_price, priceRounding);
-                          const rounded =
-                            priceRounding.enabled &&
-                            Math.abs(finalPrice - listing.new_price) >= 0.005;
-                          return (
-                            <span
-                              className={rounded ? "text-indigo-700 dark:text-indigo-300" : "text-fg"}
-                              title={
-                                rounded
-                                  ? `Arredondado de R$ ${formatBRL(listing.new_price)} (Configuração → Preços)`
-                                  : priceRounding.enabled
-                                    ? "Igual ao Preço Calculado"
-                                    : "Arredondamento desativado em Configuração → Preços"
-                              }
-                            >
-                              R$ {formatBRL(finalPrice)}
-                            </span>
-                          );
-                        })()
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right text-sm font-semibold ${stickyColumns.has(10) ? "sticky-col" : ""}`} style={stickyBodyStyles[10]}>
-                      {listing.calculating ? (
-                        <span className="text-fg-muted">…</span>
-                      ) : listing.calculated ? (
-                        <span className="text-green-700">
-                          R$ {formatBRL(listing.calculated.vai_receber)}
-                        </span>
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(11) ? "sticky-col" : ""}`} style={stickyBodyStyles[11]}>
-                      {listing.calculating ? (
-                        <span className="text-fg-muted">…</span>
-                      ) : profit != null ? (
-                        <div className="flex flex-col items-end">
-                          <span
-                            className={
-                              profit >= 0 ? "text-green-600" : "text-red-600"
-                            }
-                          >
-                            R$ {formatBRL(profit)}
-                          </span>
-                          {profitPercent != null && (
-                            <span
-                              className={`text-xs ${
-                                profitPercent >= 0
-                                  ? "text-green-500"
-                                  : "text-red-500"
-                              }`}
-                            >
-                              {profitPercent >= 0 ? "+" : ""}
-                              {profitPercent.toFixed(1)}%
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(12) ? "sticky-col" : ""}`} style={stickyBodyStyles[12]}>
-                      {listing.calculating ? (
-                        <div className="flex flex-col items-end gap-0.5">
-                          <span className="text-fg-muted">…</span>
-                          <span className="text-xs text-fg-muted">…</span>
-                        </div>
-                      ) : listing.calculated ? (
-                        <div className="flex flex-col items-end gap-0.5">
-                          <span className="text-amber-700">
-                            R$ {formatBRL(listing.calculated.fee)}
-                          </span>
-                          {mlFeeSharePct != null && (
-                            <span
-                              className={`text-xs tabular-nums ${
-                                mlFeeShareIsReference
-                                  ? "text-slate-400 dark:text-slate-500"
-                                  : "text-amber-600 dark:text-amber-500"
-                              }`}
-                              title={
-                                mlFeeShareIsReference
-                                  ? "Referência por categoria/tipo (última sync)"
-                                  : "Taxa ML ÷ Preço Calculado (último cálculo)"
-                              }
-                            >
-                              {mlFeeSharePct.toFixed(1).replace(".", ",")}%
-                            </span>
-                          )}
-                        </div>
-                      ) : !listing.listing_type_id ? (
-                        <span className="text-red-400" title="Tipo de anúncio não disponível">
-                          N/D
-                        </span>
-                      ) : (
-                        <div className="flex flex-col items-end gap-0.5">
-                          <span className="text-fg-muted">—</span>
-                          {mlFeeSharePct != null && mlFeeShareIsReference ? (
-                            <span
-                              className="text-xs tabular-nums text-slate-400 dark:text-slate-500"
-                              title="Referência de taxa por categoria/tipo (última sincronização). Calcule ou edite o Preço Calculado para ver o valor em R$."
-                            >
-                              {mlFeeSharePct.toFixed(1).replace(".", ",")}%
-                            </span>
-                          ) : null}
-                        </div>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(13) ? "sticky-col" : ""}`} style={stickyBodyStyles[13]}>
-                      {listing.calculating ? (
-                        <span className="text-fg-muted">…</span>
-                      ) : listing.calculated ? (
-                        <span
-                          className={
-                            listing.calculated.shipping_cost > 0
-                              ? "text-red-600"
-                              : "text-fg-muted"
-                          }
-                        >
-                          {listing.calculated.shipping_cost > 0
-                            ? `R$ ${formatBRL(listing.calculated.shipping_cost)}`
-                            : "—"}
-                        </span>
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(14) ? "sticky-col" : ""}`} style={stickyBodyStyles[14]}>
-                      {listing.cost_price != null ? (
-                        <span className="text-fg">
-                          R$ {formatBRL(listing.cost_price)}
-                        </span>
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(15) ? "sticky-col" : ""}`} style={stickyBodyStyles[15]}>
-                      {listing.calculating ? (
-                        <span className="text-fg-muted">…</span>
-                      ) : listing.calculated ? (
-                        <span
-                          className={
-                            listing.calculated.tax_amount > 0
-                              ? "text-orange-600"
-                              : "text-fg-muted"
-                          }
-                          title={listing.tax_percent ? `${listing.tax_percent}%` : undefined}
-                        >
-                          {listing.calculated.tax_amount > 0
-                            ? `R$ ${formatBRL(listing.calculated.tax_amount)}`
-                            : "—"}
-                        </span>
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(16) ? "sticky-col" : ""}`} style={stickyBodyStyles[16]}>
-                      {listing.calculating ? (
-                        <span className="text-fg-muted">…</span>
-                      ) : listing.calculated ? (
-                        <span
-                          className={
-                            listing.calculated.extra_fee_amount > 0
-                              ? "text-purple-600"
-                              : "text-fg-muted"
-                          }
-                          title={listing.extra_fee_percent ? `${listing.extra_fee_percent}%` : undefined}
-                        >
-                          {listing.calculated.extra_fee_amount > 0
-                            ? `R$ ${formatBRL(listing.calculated.extra_fee_amount)}`
-                            : "—"}
-                        </span>
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right text-sm ${stickyColumns.has(17) ? "sticky-col" : ""}`} style={stickyBodyStyles[17]}>
-                      {listing.calculating ? (
-                        <span className="text-fg-muted">…</span>
-                      ) : listing.calculated ? (
-                        <span
-                          className={
-                            listing.calculated.fixed_expenses_amount > 0
-                              ? "text-indigo-600"
-                              : "text-fg-muted"
-                          }
-                          title={listing.fixed_expenses != null ? `R$ ${formatBRL(listing.fixed_expenses)}` : undefined}
-                        >
-                          {listing.calculated.fixed_expenses_amount > 0
-                            ? `R$ ${formatBRL(listing.calculated.fixed_expenses_amount)}`
-                            : "—"}
-                        </span>
-                      ) : (
-                        <span className="text-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className={`p-2 text-right ${stickyColumns.has(18) ? "sticky-col" : ""}`} style={stickyBodyStyles[18]}>
-                      <MlActivePromotionsCell text={listing.ml_active_promotions} />
-                    </td>
-                    <td className={`p-2 text-right ${stickyColumns.has(19) ? "sticky-col" : ""}`} style={stickyBodyStyles[19]}>
-                      {(() => {
-                        const ref = priceRefsByRow[priceRefRowKey(listing.item_id, listing.variation_id)];
-                        const st = ref?.status ?? "none";
-                        const { label, className } = competitivenessBadge(st);
-                        const tip = [
-                          ref?.explanation,
-                          ref?.updated_at ? `Atualizado: ${new Date(ref.updated_at).toLocaleString("pt-BR")}` : null,
-                        ]
-                          .filter(Boolean)
-                          .join("\n");
-                        return (
-                          <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${className}`} title={tip || undefined}>
-                            {label}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td className={`p-2 ${stickyColumns.has(20) ? "sticky-col" : ""}`} style={stickyBodyStyles[20]}>
-                      {listing.permalink ? (
-                        <a
-                          href={listing.permalink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Ver no Mercado Livre"
-                          className="inline-flex items-center justify-center rounded-full bg-primary/10 p-1.5 text-primary hover:bg-primary/15"
-                        >
-                          <MLIcon className="h-5 w-5" />
-                        </a>
-                      ) : (
-                        <span className="text-xs text-slate-400">—</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
+            <MemoPrecosTableBody
+              tableFilterEpoch={tableFilterEpoch}
+              listings={sortedListings}
+              selectedIds={selectedIds}
+              stickyColumns={stickyColumns}
+              stickyBodyStyles={stickyBodyStyles}
+              ordersData={ordersData}
+              priceRefsByRow={priceRefsByRow}
+              copiedCell={copiedCell}
+              refreshingItemId={refreshingItemId}
+              priceRounding={priceRounding}
+              tableActions={tableActions}
+              scrollContainerRef={precosTableScrollRef}
+            />
           </AppTable>
           </div>
         </>

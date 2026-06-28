@@ -26,6 +26,8 @@ export interface AppTableProps {
   tableClassName?: string;
   /** Estilos inline no `<table>` (ex.: largura fixa = soma das colunas para sticky alinhado ao `<colgroup>`). */
   tableStyle?: CSSProperties;
+  /** Ref do container com scroll vertical (para virtualização de linhas). */
+  scrollContainerRef?: React.Ref<HTMLDivElement>;
 }
 
 export function AppTable({
@@ -35,6 +37,7 @@ export function AppTable({
   className = "",
   tableClassName,
   tableStyle,
+  scrollContainerRef,
 }: AppTableProps) {
   const tableClasses = tableClassName?.trim()
     ? `app-table text-left text-sm ${tableClassName}`
@@ -46,6 +49,7 @@ export function AppTable({
         <div className="mb-3 text-sm text-secondary dark:text-slate-400">{summary}</div>
       )}
       <div
+        ref={scrollContainerRef}
         className="w-full overflow-x-auto overflow-y-auto rounded-app border border-stroke bg-card shadow-card dark:border-slate-700"
         style={maxHeight ? { maxHeight } : undefined}
       >
