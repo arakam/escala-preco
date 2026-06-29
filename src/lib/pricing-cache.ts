@@ -373,11 +373,12 @@ async function refreshPricingCacheInner(accountId: string): Promise<RefreshPrici
 
   const itemsSelect = `
     id, account_id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id,
+    has_variations, seller_custom_field,
     weight_kg, height_cm, width_cm, length_cm,
     products:product_id (sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
   `;
   const variationsSelect = `
-    id, account_id, item_id, variation_id, price, raw_json, product_id,
+    id, account_id, item_id, variation_id, price, raw_json, product_id, seller_custom_field,
     products:product_id (sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
   `;
 
@@ -724,7 +725,9 @@ export async function refreshPricingCacheByItemId(
   };
 
   const itemsSelectWithVarFlag = `
-    id, account_id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id, has_variations,
+    id, account_id, item_id, title, thumbnail, permalink, status, listing_type_id, category_id, price, raw_json, product_id,
+    has_variations, seller_custom_field,
+    weight_kg, height_cm, width_cm, length_cm,
     products:product_id (sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
   `;
 
@@ -736,7 +739,7 @@ export async function refreshPricingCacheByItemId(
     .maybeSingle();
 
   const variationsSelectByItem = `
-    id, account_id, item_id, variation_id, price, raw_json, product_id,
+    id, account_id, item_id, variation_id, price, raw_json, product_id, seller_custom_field,
     products:product_id (sku, cost_price, weight, height, width, length, tax_percent, extra_fee_percent, fixed_expenses)
   `;
   const { data: variationsFull } = await supabase
