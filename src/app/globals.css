@@ -272,6 +272,29 @@ body {
   /* Sem overflow-hidden: toolbars com dropdown (Ações, etc.) não podem ser cortados nem ficar sob o menu lateral. */
   @apply rounded border border-slate-200/90 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:border-slate-700;
 }
+/* Avisos flutuantes (toasts) no canto superior direito da tela de preços */
+.precos-toast-stack {
+  @apply pointer-events-none fixed right-4 top-4 z-[70] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2;
+}
+.precos-toast {
+  @apply pointer-events-auto rounded-lg border p-3 text-sm shadow-lg;
+  animation: precosToastIn 0.22s ease-out;
+}
+@keyframes precosToastIn {
+  from {
+    opacity: 0;
+    transform: translateX(1.25rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .precos-toast {
+    animation: none;
+  }
+}
 .table-page-toolbar {
   @apply border-b border-slate-200 bg-card px-3 pt-3 dark:border-slate-700;
 }

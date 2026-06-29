@@ -3998,6 +3998,68 @@ function PrecosPageContent() {
 
   return (
     <div className="adminty-precos-page space-y-5">
+      <div className="precos-toast-stack" role="region" aria-label="Avisos" aria-live="polite">
+        {saveMessage && (
+          <div
+            className={`precos-toast ${
+              saveMessage.type === "ok"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/70 dark:text-emerald-200"
+                : "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/70 dark:text-red-200"
+            }`}
+          >
+            {saveMessage.text}
+          </div>
+        )}
+
+        {refreshError && !cacheEmpty && (
+          <div className="precos-toast border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/70 dark:text-red-200">
+            {refreshError}
+            <button type="button" onClick={() => setRefreshError(null)} className="ml-2 underline">
+              Fechar
+            </button>
+          </div>
+        )}
+
+        {campaignMessage && (
+          <div
+            className={`precos-toast ${
+              campaignMessage.type === "ok"
+                ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/70 dark:text-blue-200"
+                : "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/70 dark:text-red-200"
+            }`}
+          >
+            <p>{campaignMessage.text}</p>
+            {campaignIssuesForDownload && campaignIssuesForDownload.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDownloadCampaignIssuesCsv}
+                className="mt-3 rounded border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-800 shadow-sm hover:bg-blue-50 dark:border-blue-700 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-slate-800"
+              >
+                Baixar CSV — {campaignIssuesForDownload.length} não incluído(s) (erro ou sem preço salvo)
+              </button>
+            )}
+          </div>
+        )}
+
+        {updatePriceMessage && (
+          <div
+            className={`precos-toast ${
+              updatePriceMessage.type === "ok"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/70 dark:text-emerald-200"
+                : "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/70 dark:text-red-200"
+            }`}
+          >
+            <p>{updatePriceMessage.text}</p>
+          </div>
+        )}
+
+        {dirtyCount > 0 && !bulkProgressLoaderActive && (
+          <div className="precos-toast border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/70 dark:text-amber-200">
+            {dirtyCount} item(s) com alteração ainda não confirmada no campo (saia do campo com Tab ou clique fora para
+            recalcular e gravar automaticamente).
+          </div>
+        )}
+      </div>
       <div className="table-page-shell">
       <SmartLoaderOverlay
         open={loaderOpen}
@@ -4559,57 +4621,6 @@ function PrecosPageContent() {
           />
         </div>
 
-      {saveMessage && (
-        <div
-          className={`mb-4 rounded p-3 text-sm ${
-            saveMessage.type === "ok"
-              ? "bg-emerald-50 text-emerald-700"
-              : "bg-red-50 text-red-700"
-          }`}
-        >
-          {saveMessage.text}
-        </div>
-      )}
-
-      {refreshError && !cacheEmpty && (
-        <div className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700">
-          {refreshError}
-          <button type="button" onClick={() => setRefreshError(null)} className="ml-2 underline">Fechar</button>
-        </div>
-      )}
-      {campaignMessage && (
-        <div
-          className={`mb-4 rounded p-3 text-sm ${
-            campaignMessage.type === "ok"
-              ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
-              : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200"
-          }`}
-        >
-          <p>{campaignMessage.text}</p>
-          {campaignIssuesForDownload && campaignIssuesForDownload.length > 0 && (
-            <button
-              type="button"
-              onClick={handleDownloadCampaignIssuesCsv}
-              className="mt-3 rounded border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-800 shadow-sm hover:bg-blue-50 dark:border-blue-700 dark:bg-slate-900 dark:text-blue-200 dark:hover:bg-slate-800"
-            >
-              Baixar CSV — {campaignIssuesForDownload.length} não incluído(s) (erro ou sem preço salvo)
-            </button>
-          )}
-        </div>
-      )}
-
-      {updatePriceMessage && (
-        <div
-          className={`mb-4 rounded p-3 text-sm ${
-            updatePriceMessage.type === "ok"
-              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
-              : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200"
-          }`}
-        >
-          <p>{updatePriceMessage.text}</p>
-        </div>
-      )}
-
       {precosImportCsvModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -4774,13 +4785,6 @@ function PrecosPageContent() {
               Cancelar
             </button>
           </div>
-        </div>
-      )}
-
-      {dirtyCount > 0 && !bulkProgressLoaderActive && (
-        <div className="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-700">
-          {dirtyCount} item(s) com alteração ainda não confirmada no campo (saia do campo com Tab ou clique fora para
-          recalcular e gravar automaticamente).
         </div>
       )}
 
